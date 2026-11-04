@@ -52,7 +52,7 @@ Usage is recorded on every `attempt.finished`, including failures, with missing 
 
 ## 4. Messages and notices
 
-A context item is a message `{ id, role: 'user' | 'assistant', blocks }`. Blocks are a discriminated union: `text`, `image`, `file` (artifact reference plus prepared content), `reasoning`, `continuation`, `tool_call`, `tool_result`, `native_tool_call`, and `notice`.
+A context item is a message `{ id, role: 'user' | 'assistant', blocks }`. Blocks are a discriminated union: `text`, `image`, `file` (artifact reference plus prepared content), `reasoning` (with the measured `durationMs` from its first delta to the first answer delta), `continuation`, `tool_call`, `tool_result`, `native_tool_call`, and `notice`.
 
 A notice is how anything other than the user tells the agent something:
 

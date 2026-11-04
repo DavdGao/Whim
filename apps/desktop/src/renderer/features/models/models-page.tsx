@@ -202,12 +202,12 @@ function CredentialDialog({
 }
 
 /**
- * The Models page: credentials, the default chat model, and the card catalog.
+ * Model settings: credentials, the default chat model, and available models.
  * @param props Application state.
  * @param props.state Application state.
- * @returns The page.
+ * @returns The section.
  */
-export function ModelsPage({ state }: { state: AppState }) {
+export function ModelSettings({ state }: { state: AppState }) {
     const { t, locale } = useT();
     const [dialog, setDialog] = useState<{ editing?: CredentialInfo } | undefined>();
     const choices = modelChoices(state, state.chatSlot?.credentialId);
@@ -215,11 +215,8 @@ export function ModelsPage({ state }: { state: AppState }) {
     const formatter = new Intl.NumberFormat(locale, { notation: 'compact' });
 
     return (
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-8">
-            <header>
-                <h1 className="text-2xl font-semibold tracking-tight">{t('models.title')}</h1>
-                <p className="text-muted-foreground mt-1 text-sm">{t('models.description')}</p>
-            </header>
+        <div className="flex flex-col gap-6">
+            <p className="text-muted-foreground text-sm">{t('models.description')}</p>
 
             <Card>
                 <CardHeader>
@@ -287,6 +284,7 @@ export function ModelsPage({ state }: { state: AppState }) {
                         choices={choices.map(choice => ({
                             value: choice.card.id,
                             label: choice.card.name,
+                            group: choice.provider,
                             icon: (
                                 <EntityIcon
                                     src={modelIcon(state, choice.card)}

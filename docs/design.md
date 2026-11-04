@@ -382,16 +382,14 @@ type Failure = {
 
 ### 11.1 Shell
 
-The window has no native title bar (`titleBarStyle: 'hiddenInset'`). A draggable top strip in the sidebar color holds the macOS traffic lights and, when Backend is not connected, the connection status. Below it, a navigation rail (shadcn `Sidebar`, `inset` variant, collapsible to icons) sits on the same background: the Whim logo and name at the top, Chat, Models, and Plugins in the middle, Settings at the bottom. The active page is an inset panel. Four pages:
+The window has no native title bar (`titleBarStyle: 'hiddenInset'`). A draggable top strip in the sidebar color holds the macOS traffic lights, the rail toggle, and, when Backend is not connected, the connection status. Below it, a navigation rail (shadcn `Sidebar`, `inset` variant) sits on the same background. It is collapsed to icons by default so it never competes with a page's own list column: the Whim logo at the top, feature pages in the middle, Settings at the bottom. The active page is an inset panel.
 
-| Page     | Content                                                                                                         |
-| -------- | --------------------------------------------------------------------------------------------------------------- |
-| Chat     | Session list column, conversation, composer with model and thinking selectors, attachments                      |
-| Models   | Credentials (create, test, edit), model slots, catalog with card details, validation errors, and card editing   |
-| Plugins  | Installed plugins: version, installed time, source, availability, errors, enable/disable, re-trust after change |
-| Settings | Language, appearance, permission mode and rules, data location and backup                                       |
+| Page     | Content                                                                                                                                                                                               |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat     | Session list column, conversation, composer with model (grouped by provider) and thinking selectors, attachments                                                                                      |
+| Settings | Tabs: General (language, appearance, permissions, data location and backup); Models (credentials, default models, available models and errors); Plugins (installed plugins, enable/disable, re-trust) |
 
-The rail has room for later pages; a page is added when its feature exists, not as an empty placeholder. The language selector is persistent and every string is in typed en/zh-CN catalogs.
+Configuration lives in Settings; the rail is for feature pages. Planned feature pages include ACP (connecting external coding agents) and Music; each is added when its feature exists. The language selector is persistent and every string is in typed en/zh-CN catalogs.
 
 ### 11.2 Data flow
 
@@ -412,6 +410,7 @@ Whim is a consumer application. The visual direction is friendly and soft rather
 - **Dialogs.** Header and footer stay fixed; only the body scrolls, and the dialog never exceeds the viewport.
 - **Choices.** Single-choice pickers (model, thinking level, language, credential type, enum fields) are `DropdownMenu` radio menus behind a button trigger (`ChoiceMenu`). The shadcn `Select` component is not used; lint forbids importing it outside vendored code.
 - **Vocabulary.** The UI speaks in user terms. Internal design concepts such as cards, layers, adapters, or slots do not appear in visible text: a card is a "model", a slot is a "default model".
+- **Messages.** Assistant actions (copy) appear while the message is hovered or focused. Reasoning shows its duration ("Thought for 12 s") from the reasoning block's recorded `durationMs`.
 - **Icons.** Models and plugins show their plugin-provided icon (§5.1), falling back to a generic glyph.
 
 ## 12. Observability

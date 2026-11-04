@@ -1,17 +1,16 @@
-import { BoxesIcon, MessageSquareIcon, PuzzleIcon, SettingsIcon } from 'lucide-react';
+import { MessageSquareIcon, SettingsIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import logo from './assets/whim.svg';
 import { ChatPage } from './features/chat/chat-page';
-import { ModelsPage } from './features/models/models-page';
-import { PluginsPage } from './features/plugins/plugins-page';
 import { SettingsPage } from './features/settings/settings-page';
 import { AppStateProvider } from './lib/app-state';
 import { useAppState } from './lib/app-state-context';
 import { useT } from './lib/i18n';
 import { LocaleProvider } from './lib/locale-provider';
 
+import type { SettingsTab } from './features/settings/settings-page';
 import type { MessageKey } from './lib/messages';
 import type { StartupNotice } from '../shared/ipc';
 
@@ -33,12 +32,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
-type Page = 'chat' | 'models' | 'plugins' | 'settings';
+type Page = 'chat' | 'settings';
 
 const pages: { id: Page; label: MessageKey; icon: typeof MessageSquareIcon }[] = [
     { id: 'chat', label: 'nav.chat', icon: MessageSquareIcon },
-    { id: 'models', label: 'nav.models', icon: BoxesIcon },
-    { id: 'plugins', label: 'nav.plugins', icon: PuzzleIcon },
     { id: 'settings', label: 'nav.settings', icon: SettingsIcon },
 ];
 
@@ -100,6 +97,7 @@ function Shell() {
     const { state, status } = useAppState();
     const { t } = useT();
     const [page, setPage] = useState<Page>('chat');
+    const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
     const banner =
         status === 'restarting'
             ? t('backend.restarting')
@@ -109,7 +107,10 @@ function Shell() {
     const main = pages.filter(item => item.id !== 'settings');
     const settings = pages.find(item => item.id === 'settings');
     return (
-        <SidebarProvider className="bg-sidebar text-sidebar-foreground h-svh min-h-0 flex-col">
+        <SidebarProvider
+            defaultOpen={false}
+            className="bg-sidebar text-sidebar-foreground h-svh min-h-0 flex-col"
+        >
             {/* Draggable title strip; the left inset leaves room for the macOS traffic lights. */}
             <header className="flex h-11 shrink-0 items-center gap-2 pr-4 pl-21 select-none [-webkit-app-region:drag]">
                 <SidebarTrigger
@@ -199,11 +200,21 @@ function Shell() {
                         <div className="min-h-0 flex-1 overflow-auto">
                             <StartupNotices notices={state.notices} />
                             {page === 'chat' && (
-                                <ChatPage state={state} onOpenModels={() => setPage('models')} />
+                                <ChatPage
+                                    state={state}
+                                    onOpenModels={() => {
+                                        setSettingsTab('models');
+                                        setPage('settings');
+                                    }}
+                                />
                             )}
-                            {page === 'models' && <ModelsPage state={state} />}
-                            {page === 'plugins' && <PluginsPage state={state} />}
-                            {page === 'settings' && <SettingsPage state={state} />}
+                            {page === 'settings' && (
+                                <SettingsPage
+                                    state={state}
+                                    tab={settingsTab}
+                                    onTabChange={setSettingsTab}
+                                />
+                            )}
                         </div>
                     )}
                 </SidebarInset>

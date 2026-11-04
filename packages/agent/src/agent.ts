@@ -275,6 +275,7 @@ export class Agent {
             const text: string[] = [];
             const reasoning: string[] = [];
             const continuations: Block[] = [];
+            const thinking: { start?: number; end?: number } = {};
             let usage: Usage = {};
             let published = false;
             const attempt = new AbortController();
@@ -287,6 +288,8 @@ export class Agent {
                 )) {
                     if (event.type === 'text-delta' || event.type === 'reasoning-delta') {
                         (event.type === 'text-delta' ? text : reasoning).push(event.text);
+                        if (event.type === 'reasoning-delta') thinking.start ??= performance.now();
+                        else if (thinking.start !== undefined) thinking.end ??= performance.now();
                         published = true;
                         yield {
                             type: 'stream',
@@ -312,7 +315,7 @@ export class Agent {
                         status: 'completed',
                         output: {
                             messageId: randomUUID(),
-                            blocks: outputBlocks(reasoning, continuations, text),
+                            blocks: outputBlocks(reasoning, continuations, text, thinking),
                         },
                     },
                 });
@@ -327,7 +330,7 @@ export class Agent {
                             status: 'interrupted',
                             output: {
                                 messageId: randomUUID(),
-                                blocks: outputBlocks(reasoning, [], text),
+                                blocks: outputBlocks(reasoning, [], text, thinking),
                             },
                         },
                     });
@@ -459,11 +462,28 @@ function defaultLevel(thinking: unknown) {
  * @param reasoning Reasoning deltas.
  * @param continuations Opaque continuation items.
  * @param text Text deltas.
+ * @param thinking Monotonic times of the first reasoning delta and the first answer delta.
+ * @param thinking.start First reasoning delta.
+ * @param thinking.end First answer delta after reasoning; the attempt's end when absent.
  * @returns Output blocks without empty parts.
  */
-function outputBlocks(reasoning: string[], continuations: Block[], text: string[]): Block[] {
+function outputBlocks(
+    reasoning: string[],
+    continuations: Block[],
+    text: string[],
+    thinking: { start?: number; end?: number }
+): Block[] {
     const blocks: Block[] = [];
-    if (reasoning.length) blocks.push({ type: 'reasoning', text: reasoning.join('') });
+    if (reasoning.length)
+        blocks.push({
+            type: 'reasoning',
+            text: reasoning.join(''),
+            ...(thinking.start !== undefined
+                ? {
+                      durationMs: Math.round((thinking.end ?? performance.now()) - thinking.start),
+                  }
+                : {}),
+        });
     blocks.push(...continuations);
     if (text.length) blocks.push({ type: 'text', text: text.join('') });
     return blocks;

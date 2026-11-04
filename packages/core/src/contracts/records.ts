@@ -7,6 +7,8 @@ export const textBlockSchema = z.strictObject({ type: z.literal('text'), text: z
 export const reasoningBlockSchema = z.strictObject({
     type: z.literal('reasoning'),
     text: z.string(),
+    /** Wall time from the first reasoning delta to the first answer delta or the attempt's end. */
+    durationMs: z.number().int().nonnegative().optional(),
 });
 /** Opaque provider state replayed only through the adapter that produced it. */
 export const continuationBlockSchema = z.strictObject({
