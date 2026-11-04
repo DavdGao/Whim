@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -260,4 +261,105 @@ test('a finished generation can never regain authority through a later start', a
     await assert.rejects(command({ type: 'start', runId: 'run', generation: 'another' }), {
         code: 'conflict',
     });
+});
+
+test('transcript pages use stable cursors and preserve history after later commits', async t => {
+    const { store, command, path } = await fixture(t);
+    for (let index = 0; index < 35; index++) {
+        await command({
+            type: 'enqueue',
+            delivery: {
+                id: `d${index}`,
+                source: 'user',
+                placement: 'next-reasoning',
+                entry: {
+                    id: `m${index}`,
+                    role: 'user',
+                    origin: 'user',
+                    blocks: [{ type: 'text', text: `Message ${index}` }],
+                },
+            },
+        });
+    }
+    await command({ type: 'start', runId: 'paged', generation: 'paged' });
+    await command({
+        type: 'prepare',
+        runId: 'paged',
+        generation: 'paged',
+        planId: 'page-plan',
+        expectedContextVersion: '1',
+        deliveryIds: Array.from({ length: 35 }, (_, index) => `d${index}`),
+        estimatedTokens: 100,
+    });
+    const latest = await store.transcript('session');
+    assert.deepEqual(
+        {
+            ids: latest.messages.map(message => message.id),
+            cursor: latest.beforeId,
+            pending: latest.pending,
+        },
+        {
+            ids: Array.from({ length: 30 }, (_, index) => `m${index + 5}`),
+            cursor: 'm5',
+            pending: [],
+        }
+    );
+    const first = await store.transcript('session', latest.beforeId);
+    assert.deepEqual(
+        { messages: first.messages, cursor: first.beforeId },
+        {
+            messages: Array.from({ length: 5 }, (_, index) => ({
+                id: `m${index}`,
+                role: 'user',
+                origin: 'user',
+                blocks: [{ type: 'text', text: `Message ${index}` }],
+            })),
+            cursor: undefined,
+        }
+    );
+    const second = await SqliteStore.open(path);
+    try {
+        await second.execute({
+            type: 'interrupt',
+            sessionId: 'session',
+            operationId: 'second-client-stop',
+            runId: 'paged',
+            generation: 'paged',
+            reason: 'user',
+        });
+        const updated = await store.transcript('session');
+        assert.equal(updated.messages.length, 30);
+        assert.equal(updated.messages.at(-1).origin, 'host');
+        assert.deepEqual((await store.transcript('session', 'm5')).messages, first.messages);
+        await assert.rejects(
+            command({ type: 'end', runId: 'paged', generation: 'paged', outcome: 'completed' }),
+            { code: 'stale-run' }
+        );
+    } finally {
+        await second.close();
+    }
+});
+
+test('language and immutable artifacts persist in the one database', async t => {
+    const { store, path } = await fixture(t);
+    const artifact = {
+        id: 'artifact',
+        name: 'hello.txt',
+        mediaType: 'text/plain',
+        data: Buffer.from('Hello').toString('base64'),
+    };
+    await store.putArtifact(artifact);
+    await store.putArtifact(artifact);
+    await store.application('zh-CN');
+    await assert.rejects(
+        store.putArtifact({ ...artifact, data: Buffer.from('Changed').toString('base64') }),
+        { code: 'conflict' }
+    );
+    const second = await SqliteStore.open(path);
+    try {
+        assert.deepEqual(await second.getArtifact('artifact'), artifact);
+        assert.equal((await second.application()).locale, 'zh-CN');
+    } finally {
+        await second.close();
+    }
 });

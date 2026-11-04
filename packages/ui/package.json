@@ -1,0 +1,35 @@
+{
+    "version": "0.1.0",
+    "type": "module",
+    "name": "@whimkit/ui",
+    "dependencies": {
+        "class-variance-authority": "^0.7.1",
+        "cn": "^0.5.2",
+        "radix-ui": "^1.8.1",
+        "react": "^19.2.0",
+        "lucide-react": "^0.468.0"
+    },
+    "devDependencies": {
+        "@types/react": "^19.2.0"
+    },
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "test": "node --test test/*.test.mjs"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./components/ui/*": {
+            "types": "./dist/components/ui/*.d.ts",
+            "import": "./dist/components/ui/*.js"
+        },
+        "./styles.css": "./src/styles.css"
+    },
+    "files": [
+        "dist",
+        "src/styles.css"
+    ]
+}

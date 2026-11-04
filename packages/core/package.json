@@ -10,6 +10,10 @@
         "./runtime": {
             "types": "./dist/store.d.ts",
             "import": "./dist/store.js"
+        },
+        "./files": {
+            "types": "./dist/files.d.ts",
+            "import": "./dist/files.js"
         }
     },
     "files": [
@@ -23,6 +27,8 @@
     "dependencies": {
         "@whimkit/models": "workspace:*",
         "better-sqlite3": "^12.4.1",
+        "image-size": "^2.0.4",
+        "pdfjs-dist": "^6.5.438",
         "zod": "^4.1.12"
     },
     "devDependencies": {

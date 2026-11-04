@@ -4,6 +4,7 @@ import { Worker } from 'node:worker_threads';
 import { StoreError } from './commands.js';
 import { requestSchema, responseSchema } from './protocol.js';
 
+import type { TranscriptPage } from './presentation.js';
 import type { WorkerRequest } from './protocol.js';
 import type { AgentRecord, AgentStore, Command } from './records.js';
 
@@ -12,7 +13,15 @@ export class SqliteStore implements AgentStore {
     private readonly worker: Worker;
     private readonly pending = new Map<
         string,
-        { resolve: (records: AgentRecord[]) => void; reject: (error: Error) => void }
+        {
+            resolve: (result: {
+                records: AgentRecord[];
+                locale?: 'en' | 'zh-CN';
+                transcript?: TranscriptPage;
+                artifact?: { id: string; name: string; mediaType: string; data: string };
+            }) => void;
+            reject: (error: Error) => void;
+        }
     >();
     private closing = false;
     private failure: Error | null = null;
@@ -22,9 +31,12 @@ export class SqliteStore implements AgentStore {
     /**
      * Start the worker; use open() to await initialization and migration errors.
      * @param path The SQLite database path.
+     * @param nativeBinding
      */
-    private constructor(path: string) {
-        this.worker = new Worker(new URL('./worker.js', import.meta.url), { workerData: { path } });
+    private constructor(path: string, nativeBinding?: string) {
+        this.worker = new Worker(new URL('./worker.js', import.meta.url), {
+            workerData: { path, ...(nativeBinding ? { nativeBinding } : {}) },
+        });
         this.exited = new Promise(resolve => this.worker.once('exit', () => resolve()));
         this.ready = new Promise((resolve, reject) => {
             this.worker.on('message', (input: unknown) => {
@@ -45,7 +57,7 @@ export class SqliteStore implements AgentStore {
                 this.pending.delete(response.id);
                 if (response.type === 'error')
                     pending?.reject(new StoreError(response.code, response.message));
-                else pending?.resolve(response.records);
+                else pending?.resolve(response);
             });
             this.worker.on('error', error => {
                 this.fail(error);
@@ -62,10 +74,11 @@ export class SqliteStore implements AgentStore {
     /**
      * Open one database and wait until its worker is ready.
      * @param path The SQLite database path.
+     * @param nativeBinding
      * @returns The initialized store.
      */
-    static async open(path: string): Promise<SqliteStore> {
-        const store = new SqliteStore(path);
+    static async open(path: string, nativeBinding?: string): Promise<SqliteStore> {
+        const store = new SqliteStore(path, nativeBinding);
         await store.ready;
         return store;
     }
@@ -76,16 +89,80 @@ export class SqliteStore implements AgentStore {
      * @returns The original receipt records on an idempotent retry.
      */
     async execute(command: Command): Promise<AgentRecord[]> {
-        return this.send({ type: 'execute', id: randomUUID(), command });
+        return (await this.send({ type: 'execute', id: randomUUID(), command })).records;
     }
 
     /**
      * Read the immutable journal in session sequence order.
      * @param sessionId The target session identity.
+     * @param afterSeq
      * @returns The complete ordered journal.
      */
-    async read(sessionId: string): Promise<AgentRecord[]> {
-        return this.send({ type: 'read', id: randomUUID(), sessionId });
+    async read(sessionId: string, afterSeq?: string): Promise<AgentRecord[]> {
+        return (
+            await this.send({
+                type: 'read',
+                id: randomUUID(),
+                sessionId,
+                ...(afterSeq ? { afterSeq } : {}),
+            })
+        ).records;
+    }
+
+    /**
+     * Query session creation records and persist the application language preference.
+     * @returns Session discovery records and persisted preferences.
+     * @param locale
+     */
+    async application(locale?: 'en' | 'zh-CN'): Promise<{
+        records: AgentRecord[];
+        locale?: 'en' | 'zh-CN';
+        transcript?: TranscriptPage;
+        artifact?: { id: string; name: string; mediaType: string; data: string };
+    }> {
+        return this.send({ type: 'application', id: randomUUID(), ...(locale ? { locale } : {}) });
+    }
+
+    /** Query a bounded presentation page independently of the model context.
+     * @param sessionId The session to observe.
+     * @param beforeId Exclusive stable message cursor.
+     * @returns The requested page and current execution status.
+     */
+    async transcript(sessionId: string, beforeId?: string): Promise<TranscriptPage> {
+        const result = await this.send({
+            id: randomUUID(),
+            type: 'transcript',
+            sessionId,
+            ...(beforeId ? { beforeId } : {}),
+        });
+        if (!result.transcript) throw new Error('Missing transcript page.');
+        return result.transcript;
+    }
+
+    /** Store immutable artifact bytes in the business database.
+     * @param artifact Content-addressed bytes and metadata.
+     * @param artifact.id
+     * @param artifact.name
+     * @param artifact.mediaType
+     * @param artifact.data
+     */
+    async putArtifact(artifact: {
+        id: string;
+        name: string;
+        mediaType: string;
+        data: string;
+    }): Promise<void> {
+        await this.send({ id: randomUUID(), type: 'artifact.put', artifact });
+    }
+
+    /** Resolve immutable artifact bytes for a model request.
+     * @param artifactId The artifact identity.
+     * @returns Original bytes and metadata.
+     */
+    async getArtifact(artifactId: string) {
+        const result = await this.send({ id: randomUUID(), type: 'artifact.get', artifactId });
+        if (!result.artifact) throw new Error('Artifact not found.');
+        return result.artifact;
     }
 
     /** Stop admitting requests, drain the worker's queue, and close SQLite. */
@@ -115,7 +192,12 @@ export class SqliteStore implements AgentStore {
      * @param request The validated request for this operation.
      * @returns The matching worker response records.
      */
-    private send(request: WorkerRequest): Promise<AgentRecord[]> {
+    private send(request: WorkerRequest): Promise<{
+        records: AgentRecord[];
+        locale?: 'en' | 'zh-CN';
+        transcript?: TranscriptPage;
+        artifact?: { id: string; name: string; mediaType: string; data: string };
+    }> {
         if (this.failure) return Promise.reject(this.failure);
         if (this.closing) return Promise.reject(new Error('Database is closing.'));
         if (this.pending.size >= 256 && request.type !== 'close')

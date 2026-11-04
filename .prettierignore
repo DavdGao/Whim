@@ -9,3 +9,5 @@
 .idea/
 .husky/_/
 pnpm-lock.yaml
+
+**/.native/

@@ -16,7 +16,8 @@
         "format:check": "prettier --check .",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
-        "prepare": "husky"
+        "prepare": "husky",
+        "start": "pnpm build && pnpm --filter @whimkit/desktop start"
     },
     "devDependencies": {
         "@commitlint/cli": "^20.2.0",

@@ -1,0 +1,40 @@
+{
+    "version": "0.1.0",
+    "type": "module",
+    "name": "@whimkit/desktop",
+    "private": true,
+    "main": "dist/main.js",
+    "dependencies": {
+        "@whimkit/core": "workspace:*",
+        "@whimkit/agent": "workspace:*",
+        "@whimkit/models": "workspace:*",
+        "@whimkit/plugin-dashscope": "workspace:*",
+        "@whimkit/ui": "workspace:*",
+        "@napi-rs/keyring": "^1.2.0",
+        "react": "^19.2.0",
+        "react-dom": "^19.2.0",
+        "lucide-react": "^0.468.0",
+        "zod": "^4.1.12"
+    },
+    "devDependencies": {
+        "electron": "^42.0.0",
+        "@electron/rebuild": "^4.0.1",
+        "@playwright/test": "^1.56.1",
+        "esbuild": "^0.25.0",
+        "vite": "^7.2.0",
+        "@tailwindcss/vite": "^4.1.0",
+        "tailwindcss": "^4.1.0",
+        "@types/react": "^19.2.0",
+        "@types/react-dom": "^19.2.0",
+        "@types/node": "^24.10.0"
+    },
+    "scripts": {
+        "build": "node build.mjs",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "test": "node --test test/*.test.mjs",
+        "start": "node launch.mjs",
+        "setup": "install-electron",
+        "test:electron": "node test/electron-smoke.mjs",
+        "test:electron:shell": "node test/electron-shell.mjs"
+    }
+}

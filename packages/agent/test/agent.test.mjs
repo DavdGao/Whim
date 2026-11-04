@@ -321,9 +321,12 @@ test('unknown or exceeded model limits refuse dispatch without consuming the inb
             assert.fail('An oversized request must not be dispatched');
         },
     });
-    await assert.rejects(async () => {
-        for await (const record of agent.run('session')) assert.ok(record.id);
-    }, /Context budget exceeded/);
+    await assert.rejects(
+        async () => {
+            for await (const record of agent.run('session')) assert.ok(record.id);
+        },
+        { message: 'context-limit' }
+    );
     const view = foldRecords(await store.read('session'));
     assert.deepEqual(
         {

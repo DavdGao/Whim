@@ -1,10 +1,10 @@
-# Headless Agent Runtime
+# Runtime and Desktop Preview
 
-This is the first executable increment, not the complete desktop application. It supports injected text models, durable conversation state, interruption, task revisions, and explicit compaction. The full target remains in [agent.md](agent.md) and [design.md](design.md).
+This source-tree desktop preview includes a DashScope Chat adapter and a macOS Electron application over the append-only agent runtime. It supports durable conversation state, interruption, task revisions, and explicit compaction. The full target remains in [agent.md](agent.md) and [design.md](design.md).
 
 ## Package boundaries
 
-The initial three packages have real ESM builds, declarations, type checks, and tests. They share version `0.1.0`.
+The foundational packages and the new model plugin, shared UI, and desktop host have real builds, type checks, and tests. They share version `0.1.0`.
 
 | Package                 | Implemented responsibility                                                                                                                            |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -13,7 +13,7 @@ The initial three packages have real ESM builds, declarations, type checks, and 
 | `@whimkit/core/runtime` | `SqliteStore`, with all synchronous SQLite operations in its owned worker thread                                                                      |
 | `@whimkit/agent`        | Async-generator execution, finite inbox selection, model admission, streamed commits, interruption, compaction, and OpenTelemetry API instrumentation |
 
-No Electron dependency or provider SDK is needed for this increment. `better-sqlite3` provides SQLite transactions in the worker, Zod validates persistence and worker boundaries, and the OpenTelemetry API provides optional instrumentation. SDK/exporter packages are test dependencies only.
+The foundational libraries do not depend on Electron. The desktop host uses Electron, and the DashScope adapter uses native fetch without a provider SDK. `better-sqlite3` provides SQLite transactions in the worker, Zod validates persistence and worker boundaries, and the OpenTelemetry API provides optional instrumentation. SDK/exporter packages are test dependencies only.
 
 ## Execute and verify
 
@@ -89,9 +89,9 @@ An explicit Stop holds automatic continuation. Enqueuing a user message, or comm
 
 ## Persistence and context
 
-SQLite schema version 1 contains an append-only journal and command receipts. A receipt stores the canonical command's SHA-256 digest and original record IDs, not a duplicate content body. Retrying the same operation ID and input returns its original records; different input conflicts. Each record has a UUID, session ID, schema version, timestamp, operation ID, and decimal-string session sequence. SQLite orders sequences as 64-bit integers.
+SQLite schema version 1 contains an append-only journal and command receipts; migrations 2 and 3 add preferences and immutable artifact bytes. A receipt stores the canonical command's SHA-256 digest and original record IDs, not a duplicate content body. Retrying the same operation ID and input returns its original records; different input conflicts. Each record has a UUID, session ID, schema version, timestamp, operation ID, and decimal-string session sequence. SQLite orders sequences as 64-bit integers.
 
-Commands are evaluated against the current replayed view inside one immediate transaction. The first implementation rebuilds projections from the journal rather than maintaining a second mutable representation. The worker queue is bounded; opening the store does not claim that any previous runner is dead. The application supervisor may submit `recover` only after establishing that prior execution has stopped. Recovery seals the committed partial output with a crash reason and revokes the old generation. It does not replay a model request automatically.
+Commands are evaluated against the current replayed view inside one immediate transaction. The worker maintains a bounded cache of rebuildable projections and reconciles the committed journal tail inside each command transaction. The worker queue is bounded; opening the store does not claim that any previous runner is dead. The application supervisor may submit `recover` only after establishing that prior execution has stopped. Recovery seals the committed partial output with a crash reason and revokes the old generation. It does not replay a model request automatically.
 
 The following boundaries are implemented and tested.
 
@@ -102,9 +102,9 @@ The following boundaries are implemented and tested.
 - Task commands append a revision and a durable notification together. Task state is replayed separately from conversation summaries.
 - Compaction records a frozen summary request and uses a separately accounted attempt. The candidate system, summary, and retained suffix must pass admission before the epoch changes. Failure preserves the old epoch and messages, and a successfully generated but rejected summary still retains its usage. Interrupted text and its reminders remain protected until a subsequent Chat attempt completes.
 
-A model card must provide known context and output token limits for admission. A request reserves the output allowance, applies the text route's byte limit, and applies the request byte limit; unknown byte limits use local bounds of 1 MiB for text and 2 MiB for the normalized request. Individual stream chunks are limited to 16,384 JavaScript string units and an attempt to 1,048,576 units. A provider adapter must additionally enforce the size of its actual encoded wire request and normalize larger transport chunks. There is no automatic truncation, automatic compaction, model switching, or attachment processing in this increment.
+A model card must provide known context and output token limits for admission. A request reserves the output allowance, applies the text route's byte limit, and applies the request byte limit; unknown byte limits use local bounds of 1 MiB for text and 2 MiB for the normalized request. Individual persisted chunks and complete attempts are limited to 1,048,576 JavaScript string units; the DashScope adapter splits text deltas into chunks of at most 8,192 units. A provider adapter must additionally enforce the size of its actual encoded wire request and normalize larger transport chunks. There is no automatic truncation or automatic compaction. Changing the selected model or thinking level creates a new conversation.
 
-Compaction uses the same injected model and card. A new system snapshot can be installed at that boundary; switching model adapters and source snapshot assembly remain later integrations. The current context format only accepts text entries. A PDF route in a card alone does not enable PDF submission.
+Compaction uses the same injected model and card. A new system snapshot can be installed at that boundary; switching model adapters and source snapshot assembly remain later integrations. Context accepts text, reasoning, protocol continuation, and image references. PDFs enter through the bounded local extraction processor, not a native PDF route.
 
 ## Observability and remaining work
 
@@ -112,4 +112,32 @@ The runtime emits `agent.run`, `agent.compaction`, `model.attempt`, and `agent.c
 
 Reported token fields belong to each attempt; absent fields remain unknown. There is no monetary accounting. An interrupted or crashed request may never provide final usage, and the runtime does not invent it. There is not yet a late-usage reporting adapter or an aggregate usage query.
 
-The remaining agent work includes tool-call blocks and protocol groups, local tools, approval/reviewer implementations, job scheduling and background handoff, source revision tracking, skills and file memory, middleware, automatic compaction, durable retry policy, and a backend scheduler. Decision models, live DashScope transports, PDF ingestion, artifacts, activity indexing, fork commands, plugin loading, and Electron UI also remain planned. No live-model or Electron integration result is claimed by the headless tests.
+The remaining agent work includes tool-call blocks and protocol groups, local tools, approval/reviewer implementations, job scheduling and background handoff, source revision tracking, skills and file memory, middleware, automatic compaction, durable retry policy, and a backend scheduler. Decision models, activity indexing, fork commands, dynamically installed plugin loading, and plugin-declared authentication forms remain planned. The current Settings dialog is specific to the bundled DashScope connection. Headless tests alone do not establish live-provider or Electron behavior.
+
+## Minimal desktop increment
+
+This increment adds a bundled DashScope Responses adapter and a macOS Electron shell with Main, sandboxed Renderer, Backend utility process, and the existing DB worker. Backend owns generator consumption; closing or switching a conversation view does not stop its run. SQLite also stores session discovery and non-secret preferences. Keychain operations run off the application event loop; API keys never return through renderer queries or enter journal records.
+
+The adapter uses Beijing's compatible-mode Responses endpoint and defaults to Qwen3.8 Max with its card's default thinking level. It supports text, eligible inline images, reasoning deltas, and reasoning continuation. Provider-hosted tools are not enabled in this increment. Requests contain local history with `store: false`, never a remote conversation ID. Bound input conservatively below the provider's documented automatic-truncation threshold. Normalize HTTP/protocol failures for localized UI feedback; this increment performs no automatic retry. Display partial responses and reported usage, and allow explicit new turns after failures.
+
+The minimal shell offers persistent English/Chinese selection, conversation creation/history, provider-key settings, streaming messages, and Stop. Validate with deterministic HTTP fixtures, a live configured-key smoke call, and the actual Electron runtime including native SQLite, reload, and shutdown. A source-tree launch is distinct from a signed/notarized distributable.
+
+Performance is part of the desktop acceptance gate. Stream updates use sequence-cursor reads and bounded notification coalescing rather than repeatedly transporting the entire journal. Core may cache rebuildable views in its DB worker, but must reconcile committed tail records inside the transaction before deciding a command; cache state is never execution authority. Renderer projections advance from new records and preserve existing message identities. Record actual startup and streaming timings in desktop validation; provider latency is measured separately from local publication latency.
+
+Shared frontend primitives are installed directly from the official shadcn registry into `@whimkit/ui`, with AI Elements used for conversation presentation. Do not maintain hand-written lookalike primitives or introduce an alternative chat backend through UI dependencies.
+
+## Desktop preview scope (2026-11-04)
+
+New conversations select one of six bundled DashScope models; Qwen3.8 Max is the default. The selection is frozen in the session epoch. The six Beijing Responses routes returned successful responses in a live probe on 2026-11-04, including GLM Prime and Kimi despite conflicting Kimi documentation. GLM and Kimi keep their required reasoning enabled. Reasoning deltas and protocol continuation items are durable, distinct from visible answer text, and replayed by the provider adapter. Never silently disable required thinking or change protocols.
+
+Attachments use one Core-owned admission path for picker and drop input. The frontend derives accept hints from the selected card and supported processors; Backend revalidates signatures, sizes, and model eligibility. Original bytes are immutable artifacts in the single SQLite database. Context blocks reference image artifacts; provider requests resolve them through the Core file service. Text and PDF extraction enter context as bounded text with source metadata; large or scanned PDFs are rejected visibly rather than silently truncated. PDF parsing runs in a short-lived worker, with a deadline, a 10 MB file ceiling, and at most 10 pages. This local text processor is not advertised as native model PDF capability.
+
+The transcript is a separate rebuildable presentation projection, including pre-compaction history. Queries return at most 30 messages using stable sequence cursors, never the entire execution journal. Initial load reads the newest page; scrolling to the top fetches earlier pages and preserves the scroll anchor. Streaming refreshes return the current tail and status; older loaded pages remain intact. The agent continues to use its complete authoritative context independently of UI pagination.
+
+ModelCard JSON files describe native model facts. Adapter-supported MIME routes/features and conservative local execution budgets remain separate. Thinking uses a fixed application level and the JSON card's `thinkingLevelMap`; adapters map to protocol parameters and reject unavailable levels before network I/O. Defaults preserve the documented native behavior, including required thinking for GLM and Kimi.
+
+## Desktop verification commands
+
+After building, `pnpm --filter @whimkit/desktop test:electron:shell` exercises the real Electron window, conversation navigation, dialog keyboard focus, and persisted English/Chinese selection without calling a model. `pnpm --filter @whimkit/desktop test:electron` requires `DASHSCOPE_API_KEY` and tests live Qwen chat, Stop, and restart recovery. The live smoke explicitly selects Off to test visible-answer interruption without waiting for a long reasoning phase; application defaults remain unchanged. Neither command validates code signing, notarization, every model/media combination, or all planned agent tools.
+
+On 2026-11-04, the macOS Electron live smoke passed with Qwen3.8 Max: a saved answer, a second interrupted answer, navigation during generation, language reload, and identical saved partial output after a process restart. The final run measured 614 ms from launch to ready UI and 49 ms from Stop to settled UI. These are single local observations, not performance guarantees. The separate shell test passed conversation navigation, a single transcript root, dialog Escape/focus restoration, and persisted language selection. The workspace checks passed 32 tests across six packages.

@@ -1,10 +1,19 @@
-import { chatModelCardSchema, entrySchema, idSchema, tokenUsageSchema } from '@whimkit/models';
+import {
+    chatModelCardSchema,
+    entrySchema,
+    idSchema,
+    tokenUsageSchema,
+    thinkingLevelSchema,
+} from '@whimkit/models';
 import { z } from 'zod';
+
+import { failureSchema } from './errors.js';
 
 export const epochSchema = z.strictObject({
     id: idSchema,
     system: z.string().max(262144),
     card: chatModelCardSchema,
+    thinkingLevel: thinkingLevelSchema.optional(),
 });
 
 export const taskSchema = z.strictObject({
@@ -42,7 +51,8 @@ export const factSchema = z.discriminatedUnion('type', [
         type: z.literal('output.chunk'),
         attemptId: idSchema,
         index: z.number().int().nonnegative(),
-        text: z.string().min(1).max(16384),
+        text: z.string().min(1).max(1048576),
+        channel: z.enum(['text', 'reasoning', 'continuation']).optional(),
     }),
     z.strictObject({
         type: z.literal('attempt.finished'),
@@ -50,11 +60,13 @@ export const factSchema = z.discriminatedUnion('type', [
         outcome: z.enum(['completed', 'interrupted', 'failed']),
         reason: z.enum(['user', 'aborted', 'crash', 'model-error', 'consumer-closed']).nullable(),
         usage: tokenUsageSchema,
+        failure: failureSchema.optional(),
     }),
     z.strictObject({
         type: z.literal('run.ended'),
         runId: idSchema,
         outcome: z.enum(['completed', 'interrupted', 'failed']),
+        failure: failureSchema.optional(),
     }),
     z.strictObject({
         type: z.literal('run.interrupted'),
@@ -117,7 +129,8 @@ export const commandSchema = z.discriminatedUnion('type', [
         type: z.literal('chunk'),
         attemptId: idSchema,
         index: z.number().int().nonnegative(),
-        text: z.string().min(1).max(16384),
+        text: z.string().min(1).max(1048576),
+        channel: z.enum(['text', 'reasoning', 'continuation']).optional(),
     }),
     z.strictObject({
         ...control,
@@ -126,12 +139,14 @@ export const commandSchema = z.discriminatedUnion('type', [
         attemptId: idSchema,
         outcome: z.enum(['completed', 'failed']),
         usage: tokenUsageSchema,
+        failure: failureSchema.optional(),
     }),
     z.strictObject({
         ...control,
         ...ownership,
         type: z.literal('end'),
         outcome: z.enum(['completed', 'failed']),
+        failure: failureSchema.optional(),
     }),
     z.strictObject({
         ...control,

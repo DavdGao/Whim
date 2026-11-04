@@ -1,0 +1,51 @@
+{
+    "kind": "chat",
+    "id": "dashscope:glm-5.3-prime",
+    "revision": 3,
+    "provider": "dashscope",
+    "adapterId": "dashscope-responses",
+    "modelId": "glm-5.3-prime",
+    "label": "GLM 5.3 Prime",
+    "inputMedia": {
+        "text/plain": {
+            "routes": [
+                {
+                    "delivery": "text",
+                    "maxBytes": null
+                }
+            ]
+        }
+    },
+    "outputMedia": {
+        "text/plain": "supported"
+    },
+    "contextTokens": 1048576,
+    "maxInputTokens": 1048576,
+    "maxInputTokensThinking": 1048576,
+    "maxOutputTokens": 131072,
+    "maxThinkingTokens": 131072,
+    "capabilities": {
+        "streaming": true,
+        "thinking": true,
+        "tools": true,
+        "structuredOutput": true,
+        "webSearch": false,
+        "webFetch": false
+    },
+    "requestLimits": {
+        "maxAttachments": null,
+        "maxAttachmentBytes": null,
+        "maxRequestBytes": null
+    },
+    "thinkingLevelMap": {
+        "off": null,
+        "minimal": "low",
+        "low": "low",
+        "medium": "high",
+        "high": "high",
+        "xhigh": "max",
+        "max": "max"
+    },
+    "defaultThinkingLevel": "max",
+    "thinkingRequired": true
+}

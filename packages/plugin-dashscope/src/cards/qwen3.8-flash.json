@@ -1,0 +1,143 @@
+{
+    "kind": "chat",
+    "id": "dashscope:qwen3.8-flash",
+    "revision": 3,
+    "provider": "dashscope",
+    "adapterId": "dashscope-responses",
+    "modelId": "qwen3.8-flash",
+    "label": "Qwen3.8 Flash",
+    "inputMedia": {
+        "text/plain": {
+            "routes": [
+                {
+                    "delivery": "text",
+                    "maxBytes": null
+                }
+            ]
+        },
+        "image/png": {
+            "routes": [
+                {
+                    "delivery": "inline-bytes",
+                    "maxBytes": 20000000,
+                    "maxEncodedBytes": 20000000
+                },
+                {
+                    "delivery": "url",
+                    "maxBytes": 20000000
+                }
+            ]
+        },
+        "image/jpeg": {
+            "routes": [
+                {
+                    "delivery": "inline-bytes",
+                    "maxBytes": 20000000,
+                    "maxEncodedBytes": 20000000
+                },
+                {
+                    "delivery": "url",
+                    "maxBytes": 20000000
+                }
+            ]
+        },
+        "image/webp": {
+            "routes": [
+                {
+                    "delivery": "inline-bytes",
+                    "maxBytes": 20000000,
+                    "maxEncodedBytes": 20000000
+                },
+                {
+                    "delivery": "url",
+                    "maxBytes": 20000000
+                }
+            ]
+        },
+        "image/bmp": {
+            "routes": [
+                {
+                    "delivery": "inline-bytes",
+                    "maxBytes": 20000000,
+                    "maxEncodedBytes": 20000000
+                },
+                {
+                    "delivery": "url",
+                    "maxBytes": 20000000
+                }
+            ]
+        },
+        "image/tiff": {
+            "routes": [
+                {
+                    "delivery": "inline-bytes",
+                    "maxBytes": 20000000,
+                    "maxEncodedBytes": 20000000
+                },
+                {
+                    "delivery": "url",
+                    "maxBytes": 20000000
+                }
+            ]
+        },
+        "image/heic": {
+            "routes": [
+                {
+                    "delivery": "inline-bytes",
+                    "maxBytes": 20000000,
+                    "maxEncodedBytes": 20000000
+                },
+                {
+                    "delivery": "url",
+                    "maxBytes": 20000000
+                }
+            ]
+        },
+        "video/mp4": {
+            "routes": [
+                {
+                    "delivery": "url",
+                    "protocol": "chat-completions",
+                    "maxBytes": null
+                },
+                {
+                    "delivery": "inline-bytes",
+                    "protocol": "chat-completions",
+                    "maxBytes": null
+                }
+            ]
+        }
+    },
+    "outputMedia": {
+        "text/plain": "supported"
+    },
+    "contextTokens": 1000000,
+    "maxInputTokens": 991808,
+    "maxInputTokensThinking": 983616,
+    "maxOutputTokens": 131072,
+    "maxThinkingTokens": 262144,
+    "capabilities": {
+        "streaming": true,
+        "thinking": true,
+        "tools": true,
+        "structuredOutput": true,
+        "webSearch": true,
+        "webFetch": false
+    },
+    "requestLimits": {
+        "maxAttachments": null,
+        "maxAttachmentBytes": null,
+        "maxRequestBytes": null
+    },
+    "thinkingLevelMap": {
+        "off": "none",
+        "minimal": "low",
+        "low": "low",
+        "medium": "medium",
+        "high": "xhigh",
+        "xhigh": "xhigh",
+        "max": "xhigh"
+    },
+    "defaultThinkingLevel": "xhigh",
+    "thinkingRequired": false
+}

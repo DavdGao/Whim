@@ -10,19 +10,16 @@ test('cards preserve concrete MIME routes, unknown limits, and reject monetary f
     assert.equal(
         chatModelCardSchema.safeParse({
             ...card,
-            inputMedia: { 'image/*': { support: 'unknown' } },
+            inputMedia: { 'image/*': { routes: [{ delivery: 'url', maxBytes: null }] } },
         }).success,
         false
     );
-    assert.throws(() =>
-        validateTextCard({ ...card, inputMedia: { 'text/plain': { support: 'unknown' } } })
-    );
+    assert.throws(() => validateTextCard({ ...card, inputMedia: {} }));
     const pdf = {
         ...card,
         inputMedia: {
             ...card.inputMedia,
             'application/pdf': {
-                support: 'supported',
                 routes: [{ delivery: 'file-id', maxBytes: 1048576, maxPages: 20 }],
             },
         },
@@ -41,4 +38,24 @@ test('completion requires an explicit terminal event and leaves unreported usage
         false
     );
     assert.equal(chatEventSchema.safeParse({ type: 'text', text: '' }).success, false);
+});
+
+test('input MIME keys are an allowlist and tool capabilities are booleans', () => {
+    assert.equal(
+        chatModelCardSchema.safeParse({
+            ...card,
+            inputMedia: { 'application/pdf': { support: 'unsupported' } },
+        }).success,
+        false
+    );
+    assert.equal(
+        chatModelCardSchema.safeParse({
+            ...card,
+            capabilities: { ...card.capabilities, webSearch: 'unknown' },
+        }).success,
+        false
+    );
+    assert.deepEqual(validateTextCard(card).inputMedia, {
+        'text/plain': { routes: [{ delivery: 'text', maxBytes: 100000 }] },
+    });
 });

@@ -1,0 +1,129 @@
+{
+    "kind": "chat",
+    "id": "dashscope:kimi-k3",
+    "revision": 3,
+    "provider": "dashscope",
+    "adapterId": "dashscope-responses",
+    "modelId": "kimi-k3",
+    "label": "Kimi K3",
+    "inputMedia": {
+        "text/plain": {
+            "routes": [
+                {
+                    "delivery": "text",
+                    "maxBytes": null
+                }
+            ]
+        },
+        "image/png": {
+            "routes": [
+                {
+                    "delivery": "inline-bytes",
+                    "maxBytes": null,
+                    "maxEncodedBytes": 10000000
+                },
+                {
+                    "delivery": "url",
+                    "maxBytes": 10000000
+                }
+            ]
+        },
+        "image/jpeg": {
+            "routes": [
+                {
+                    "delivery": "inline-bytes",
+                    "maxBytes": null,
+                    "maxEncodedBytes": 10000000
+                },
+                {
+                    "delivery": "url",
+                    "maxBytes": 10000000
+                }
+            ]
+        },
+        "image/webp": {
+            "routes": [
+                {
+                    "delivery": "inline-bytes",
+                    "maxBytes": null,
+                    "maxEncodedBytes": 10000000
+                },
+                {
+                    "delivery": "url",
+                    "maxBytes": 10000000
+                }
+            ]
+        },
+        "image/bmp": {
+            "routes": [
+                {
+                    "delivery": "inline-bytes",
+                    "maxBytes": null,
+                    "maxEncodedBytes": 10000000
+                },
+                {
+                    "delivery": "url",
+                    "maxBytes": 10000000
+                }
+            ]
+        },
+        "image/tiff": {
+            "routes": [
+                {
+                    "delivery": "inline-bytes",
+                    "maxBytes": null,
+                    "maxEncodedBytes": 10000000
+                },
+                {
+                    "delivery": "url",
+                    "maxBytes": 10000000
+                }
+            ]
+        },
+        "image/heic": {
+            "routes": [
+                {
+                    "delivery": "inline-bytes",
+                    "maxBytes": null,
+                    "maxEncodedBytes": 10000000
+                },
+                {
+                    "delivery": "url",
+                    "maxBytes": 10000000
+                }
+            ]
+        }
+    },
+    "outputMedia": {
+        "text/plain": "supported"
+    },
+    "contextTokens": 1048576,
+    "maxInputTokens": 1048576,
+    "maxInputTokensThinking": 1048576,
+    "maxOutputTokens": 1048576,
+    "maxThinkingTokens": 1048576,
+    "capabilities": {
+        "streaming": true,
+        "thinking": true,
+        "tools": true,
+        "structuredOutput": true,
+        "webSearch": false,
+        "webFetch": false
+    },
+    "requestLimits": {
+        "maxAttachments": null,
+        "maxAttachmentBytes": null,
+        "maxRequestBytes": null
+    },
+    "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": true,
+        "xhigh": null,
+        "max": null
+    },
+    "defaultThinkingLevel": "high",
+    "thinkingRequired": true
+}

@@ -5,22 +5,25 @@ import Database from 'better-sqlite3';
 import { z } from 'zod';
 
 import { decide, StoreError } from './commands.js';
+import { artifactSchema } from './presentation.js';
 import { requestSchema } from './protocol.js';
 import { recordSchema } from './records.js';
-import { foldRecords } from './view.js';
+import { advanceRecords, foldRecords } from './view.js';
 
 import type { AgentRecord, Command } from './records.js';
 
 const port = parentPort;
 if (!port) throw new Error('The database must run in a dedicated worker.');
-const { path } = z.strictObject({ path: z.string().min(1) }).parse(workerData);
-const db = new Database(path);
+const { path, nativeBinding } = z
+    .strictObject({ path: z.string().min(1), nativeBinding: z.string().optional() })
+    .parse(workerData);
+const db = new Database(path, { nativeBinding });
 db.pragma('busy_timeout = 5000');
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = FULL');
 db.pragma('foreign_keys = ON');
 const version = db.pragma('user_version', { simple: true });
-if (version !== 0 && version !== 1) {
+if (version !== 0 && version !== 1 && version !== 2 && version !== 3) {
     db.close();
     throw new Error('Unsupported database schema version.');
 }
@@ -44,6 +47,22 @@ if (version === 0) {
     }).immediate();
 }
 
+if (db.pragma('user_version', { simple: true }) === 1) {
+    db.transaction(() => {
+        db.exec(
+            'CREATE TABLE preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL); PRAGMA user_version = 2;'
+        );
+    }).immediate();
+}
+
+if (db.pragma('user_version', { simple: true }) === 2) {
+    db.transaction(() =>
+        db.exec(
+            'CREATE TABLE artifacts (id TEXT PRIMARY KEY, name TEXT NOT NULL, media_type TEXT NOT NULL, bytes BLOB NOT NULL); PRAGMA user_version = 3;'
+        )
+    ).immediate();
+}
+
 /**
  * Canonicalize command objects for semantic idempotency, preserving array order.
  * @param value Untrusted input to validate or encode.
@@ -65,13 +84,45 @@ function canonical(value: unknown): string {
 /**
  * Decode authoritative JSON without trusting database rows as application types.
  * @param sessionId The target session identity.
+ * @param afterSeq
  * @returns Validated journal records.
  */
-function read(sessionId: string): AgentRecord[] {
+function read(sessionId: string, afterSeq = '0'): AgentRecord[] {
     return db
-        .prepare('SELECT body FROM journal WHERE session_id = ? ORDER BY seq')
-        .all(sessionId)
+        .prepare('SELECT body FROM journal WHERE session_id = ? AND seq > ? ORDER BY seq')
+        .all(sessionId, BigInt(afterSeq))
         .map(row => recordSchema.parse(JSON.parse(z.object({ body: z.string() }).parse(row).body)));
+}
+
+const views = new Map<string, ReturnType<typeof foldRecords>>();
+
+/** Reconcile cached projections from committed journal facts only.
+ * @param sessionId The target session.
+ * @returns A rebuildable projection, or null for an absent session.
+ */
+function refreshView(sessionId: string) {
+    const cached = views.get(sessionId);
+    const history = read(sessionId, cached?.head);
+    let view;
+    try {
+        view = cached
+            ? advanceRecords(cached, history)
+            : history.length
+              ? foldRecords(history)
+              : null;
+    } catch (error) {
+        views.delete(sessionId);
+        throw error;
+    }
+    if (view) {
+        views.delete(sessionId);
+        views.set(sessionId, view);
+        if (views.size > 4) {
+            const oldest = views.keys().next().value;
+            if (oldest) views.delete(oldest);
+        }
+    }
+    return view;
 }
 
 const execute = db.transaction((command: Command): AgentRecord[] => {
@@ -91,8 +142,7 @@ const execute = db.transaction((command: Command): AgentRecord[] => {
             return recordSchema.parse(JSON.parse(row.body));
         });
     }
-    const history = read(command.sessionId);
-    const view = history.length ? foldRecords(history) : null;
+    const view = refreshView(command.sessionId);
     const facts = decide(view, command);
     let seq = BigInt(view?.head ?? '0');
     const records = facts.map(fact =>
@@ -124,10 +174,119 @@ port.on('message', (input: unknown) => {
     const request = requestSchema.parse(input);
     try {
         let records: AgentRecord[] = [];
+        let locale: 'en' | 'zh-CN' | undefined;
+        let transcript;
+        let artifact;
+        if (request.type === 'application') {
+            if (request.locale)
+                db.prepare(
+                    "INSERT INTO preferences VALUES ('locale', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+                ).run(request.locale);
+            const row = db.prepare("SELECT value FROM preferences WHERE key='locale'").get();
+            locale = row ? z.object({ value: z.enum(['en', 'zh-CN']) }).parse(row).value : 'en';
+            records = db
+                .prepare('SELECT body FROM journal WHERE seq=1 ORDER BY rowid DESC')
+                .all()
+                .map(row =>
+                    recordSchema.parse(JSON.parse(z.object({ body: z.string() }).parse(row).body))
+                );
+        }
+        if (request.type === 'artifact.put') {
+            const value = request.artifact;
+            const bytes = Buffer.from(value.data, 'base64');
+            if (bytes.length > 10000000 || bytes.toString('base64') !== value.data)
+                throw new StoreError('invalid', 'Invalid artifact encoding.');
+            const existing = db
+                .prepare('SELECT name, media_type, bytes FROM artifacts WHERE id=?')
+                .get(value.id);
+            if (existing) {
+                const row = z
+                    .object({
+                        name: z.string(),
+                        media_type: z.string(),
+                        bytes: z.instanceof(Buffer),
+                    })
+                    .parse(existing);
+                if (
+                    row.name !== value.name ||
+                    row.media_type !== value.mediaType ||
+                    !row.bytes.equals(bytes)
+                )
+                    throw new StoreError('conflict', 'Artifact identity conflict.');
+            } else
+                db.prepare('INSERT INTO artifacts VALUES (?, ?, ?, ?)').run(
+                    value.id,
+                    value.name,
+                    value.mediaType,
+                    bytes
+                );
+        }
+        if (request.type === 'artifact.get') {
+            const row = z
+                .object({
+                    id: z.string(),
+                    name: z.string(),
+                    media_type: z.string(),
+                    bytes: z.instanceof(Buffer),
+                })
+                .parse(db.prepare('SELECT * FROM artifacts WHERE id=?').get(request.artifactId));
+            artifact = artifactSchema.parse({
+                id: row.id,
+                name: row.name,
+                mediaType: row.media_type,
+                data: row.bytes.toString('base64'),
+            });
+        }
+        if (request.type === 'transcript') {
+            const view = refreshView(request.sessionId);
+            if (!view) throw new StoreError('not-found', 'Session not found.');
+            const end = request.beforeId
+                ? view.history.findIndex(entry => entry.id === request.beforeId)
+                : view.history.length;
+            if (end < 0) throw new StoreError('invalid', 'Invalid history cursor.');
+            const start = Math.max(0, end - 30);
+            const attempt = [...view.attempts.values()].at(-1);
+            transcript = {
+                sessionId: request.sessionId,
+                head: view.head,
+                card: view.epoch.card,
+                ...(view.epoch.thinkingLevel ? { thinkingLevel: view.epoch.thinkingLevel } : {}),
+                messages: view.history.slice(start, end),
+                ...(start > 0 ? { beforeId: view.history[start].id } : {}),
+                pending: [...view.inbox.values()]
+                    .filter(item => !item.consumedBy)
+                    .map(item => item.delivery.entry),
+                ...(attempt?.outcome === 'running' && attempt.outputCount
+                    ? {
+                          draft: {
+                              id: attempt.messageId,
+                              role: 'assistant',
+                              origin: 'assistant',
+                              blocks: [
+                                  ...(attempt.reasoning.length
+                                      ? [{ type: 'reasoning', text: attempt.reasoning.join('') }]
+                                      : []),
+                                  { type: 'text', text: attempt.chunks.join('') },
+                              ],
+                          },
+                      }
+                    : {}),
+                ...(attempt ? { outcome: attempt.outcome } : {}),
+                usage: attempt?.usage ?? {},
+                ...(view.failure ? { failure: view.failure } : {}),
+            };
+        }
         if (request.type === 'execute') records = execute.immediate(request.command);
-        if (request.type === 'read') records = read(request.sessionId);
+        if (request.type === 'read') records = read(request.sessionId, request.afterSeq);
         if (request.type === 'close') db.close();
-        port.postMessage({ type: 'result', id: request.id, records });
+        port.postMessage({
+            type: 'result',
+            id: request.id,
+            records,
+            ...(locale ? { locale } : {}),
+            ...(transcript ? { transcript } : {}),
+            ...(artifact ? { artifact } : {}),
+        });
         if (request.type === 'close') port.close();
     } catch (error) {
         port.postMessage({

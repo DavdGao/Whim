@@ -1,0 +1,64 @@
+{
+    "kind": "chat",
+    "id": "dashscope:deepseek-v4.1-flash",
+    "revision": 3,
+    "provider": "dashscope",
+    "adapterId": "dashscope-responses",
+    "modelId": "deepseek-v4.1-flash",
+    "label": "DeepSeek V4.1 Flash",
+    "inputMedia": {
+        "text/plain": {
+            "routes": [
+                {
+                    "delivery": "text",
+                    "maxBytes": null
+                }
+            ]
+        },
+        "image/png": {
+            "routes": [
+                {
+                    "delivery": "inline-bytes",
+                    "maxBytes": null,
+                    "maxEncodedBytes": null
+                },
+                {
+                    "delivery": "url",
+                    "maxBytes": null
+                }
+            ]
+        }
+    },
+    "outputMedia": {
+        "text/plain": "supported"
+    },
+    "contextTokens": 1000000,
+    "maxInputTokens": 1000000,
+    "maxInputTokensThinking": null,
+    "maxOutputTokens": 393216,
+    "maxThinkingTokens": null,
+    "capabilities": {
+        "streaming": true,
+        "thinking": true,
+        "tools": true,
+        "structuredOutput": true,
+        "webSearch": true,
+        "webFetch": false
+    },
+    "requestLimits": {
+        "maxAttachments": null,
+        "maxAttachmentBytes": null,
+        "maxRequestBytes": null
+    },
+    "thinkingLevelMap": {
+        "off": "none",
+        "minimal": "low",
+        "low": "low",
+        "medium": "high",
+        "high": "high",
+        "xhigh": "high",
+        "max": "max"
+    },
+    "defaultThinkingLevel": "high",
+    "thinkingRequired": false
+}

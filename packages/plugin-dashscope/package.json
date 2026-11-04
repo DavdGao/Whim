@@ -1,0 +1,27 @@
+{
+    "version": "0.1.0",
+    "type": "module",
+    "name": "@whimkit/plugin-dashscope",
+    "dependencies": {
+        "@whimkit/models": "workspace:*",
+        "@whimkit/core": "workspace:*",
+        "zod": "^4.1.12"
+    },
+    "devDependencies": {
+        "@types/node": "^24.10.0"
+    },
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "test": "node --test test/*.test.mjs"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist"
+    ]
+}

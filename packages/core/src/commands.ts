@@ -132,9 +132,8 @@ export function decide(view: SessionView | null, command: Command): Fact[] {
             if (
                 !running ||
                 running.id !== command.attemptId ||
-                command.index !== running.chunks.length ||
-                running.chunks.reduce((size, text) => size + text.length, 0) + command.text.length >
-                    1048576
+                command.index !== running.outputCount ||
+                running.outputSize + command.text.length > 1048576
             ) {
                 throw new StoreError('conflict', 'Invalid, late, or oversized stream chunk.');
             }
@@ -144,6 +143,7 @@ export function decide(view: SessionView | null, command: Command): Fact[] {
                     attemptId: command.attemptId,
                     index: command.index,
                     text: command.text,
+                    ...(command.channel ? { channel: command.channel } : {}),
                 },
             ];
         case 'finishAttempt':
@@ -155,6 +155,7 @@ export function decide(view: SessionView | null, command: Command): Fact[] {
                     attemptId: command.attemptId,
                     outcome: command.outcome,
                     usage: command.usage,
+                    ...(command.failure ? { failure: command.failure } : {}),
                     reason: command.outcome === 'failed' ? 'model-error' : null,
                 },
             ];
@@ -170,7 +171,14 @@ export function decide(view: SessionView | null, command: Command): Fact[] {
             ) {
                 throw new StoreError('conflict', 'Session still has work.');
             }
-            return [{ type: 'run.ended', runId: command.runId, outcome: command.outcome }];
+            return [
+                {
+                    type: 'run.ended',
+                    runId: command.runId,
+                    outcome: command.outcome,
+                    ...(command.failure ? { failure: command.failure } : {}),
+                },
+            ];
         case 'interrupt':
         case 'recover': {
             if (!view.run) return [];

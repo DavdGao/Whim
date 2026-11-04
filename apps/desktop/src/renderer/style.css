@@ -1,0 +1,17 @@
+@import '@whimkit/ui/styles.css';
+@source '../../../../packages/ui/src';
+
+:root {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--color-foreground);
+    background: var(--color-background);
+    font-synthesis: none;
+}
+body {
+    margin: 0;
+}
+.error-message {
+    color: var(--color-destructive);
+    font-size: 0.8125rem;
+    padding: 0.75rem;
+}

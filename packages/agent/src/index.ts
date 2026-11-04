@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
-import { buildCompactionRequest, eligibleDeliveries, foldRecords, StoreError } from '@whimkit/core';
+import {
+    ApplicationError,
+    buildCompactionRequest,
+    eligibleDeliveries,
+    foldRecords,
+    StoreError,
+} from '@whimkit/core';
 import { chatEventSchema, validateTextCard } from '@whimkit/models';
 
 import type { Context } from '@opentelemetry/api';
@@ -165,6 +171,9 @@ export class Agent {
                         system: view.epoch.system,
                         messages: [...view.messages, ...deliveries.map(delivery => delivery.entry)],
                         purpose: 'chat',
+                        ...(view.epoch.thinkingLevel
+                            ? { thinkingLevel: view.epoch.thinkingLevel }
+                            : {}),
                     };
                     const estimatedTokens = await this.admit(request, execution.controller.signal);
                     yield* await this.commit(
@@ -263,12 +272,24 @@ export class Agent {
                                 operationId: randomUUID(),
                                 attemptId: attempt.id,
                                 outcome: 'failed',
-                                usage: {},
+                                usage: error instanceof ApplicationError ? (error.usage ?? {}) : {},
+                                ...(error instanceof ApplicationError
+                                    ? { failure: error.failure }
+                                    : {}),
                             },
                             runContext
                         );
                     await this.commit(
-                        { type: 'end', ...ownership, operationId: randomUUID(), outcome: 'failed' },
+                        {
+                            type: 'end',
+                            ...ownership,
+                            operationId: randomUUID(),
+                            outcome: 'failed',
+                            failure:
+                                error instanceof ApplicationError
+                                    ? error.failure
+                                    : { category: 'internal', retry: 'never', outcome: 'unknown' },
+                        },
                         runContext
                     );
                 }
@@ -301,16 +322,24 @@ export class Agent {
         const tokens = await abortable(this.model.estimateTokens(request, signal), signal);
         if (!Number.isSafeInteger(tokens) || tokens < 0) throw new Error('Invalid token estimate.');
         const card = request.card;
-        if (card.contextTokens === null || card.maxOutputTokens === null)
+        const contextLimit = this.model.limits
+            ? Math.min(
+                  card.contextTokens ?? Infinity,
+                  this.model.limits.maxInputTokens + this.model.limits.maxOutputTokens
+              )
+            : card.contextTokens;
+        const outputLimit = this.model.limits?.maxOutputTokens ?? card.maxOutputTokens;
+        if (contextLimit === null || outputLimit === null)
             throw new Error('Context and output limits must be known.');
-        if (tokens + card.maxOutputTokens > card.contextTokens)
-            throw new Error('Context budget exceeded; explicit compaction is required.');
+        if (tokens + outputLimit > contextLimit)
+            throw new ApplicationError({
+                category: 'context-limit',
+                retry: 'after-change',
+                outcome: 'rejected',
+            });
         const encoded = new TextEncoder();
         const textInput = card.inputMedia['text/plain'];
-        const route =
-            textInput?.support === 'supported'
-                ? textInput.routes.find(item => item.delivery === 'text')
-                : undefined;
+        const route = textInput?.routes.find(item => item.delivery === 'text');
         if (!route) throw new Error('Text input route is unavailable.');
         const textBytes =
             encoded.encode(request.system).length +
@@ -318,7 +347,8 @@ export class Agent {
                 (total, entry) =>
                     total +
                     entry.blocks.reduce(
-                        (size, block) => size + encoded.encode(block.text).length,
+                        (size, block) =>
+                            size + ('text' in block ? encoded.encode(block.text).length : 0),
                         0
                     ),
                 0
@@ -381,9 +411,18 @@ export class Agent {
                     attemptId,
                     operationId: randomUUID(),
                 };
-                if (event.type === 'text') {
+                if (event.type !== 'completed') {
                     yield* await this.commit(
-                        { type: 'chunk', ...ownership, index: index++, text: event.text },
+                        {
+                            type: 'chunk',
+                            ...ownership,
+                            index: index++,
+                            text:
+                                event.type === 'continuation'
+                                    ? JSON.stringify(event.item)
+                                    : event.text,
+                            ...(event.type !== 'text' ? { channel: event.type } : {}),
+                        },
                         attemptContext
                     );
                 } else {

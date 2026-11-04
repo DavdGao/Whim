@@ -186,11 +186,11 @@ A model ID alone does not establish identical capability across regions, APIs, o
 
 ### 6.2 Model cards
 
-Every model, including Decision, has a card. Cards contain identity, capabilities, limits, and evidence. They contain no prices, currencies, rates, cost estimates, or billing rules. The first release has Chat and Decision variants only.
+Every model, including Decision, has a card. Cards contain identity, capabilities, and limits. They contain no prices, currencies, rates, cost estimates, or billing rules. The first release has Chat and Decision variants only.
 
 Cards describe content formats with concrete media types, such as `text/plain`, `image/png`, `image/jpeg`, and `application/pdf`. Broad categories such as `image` cannot establish attachment compatibility. Media types follow the [IANA registry](https://www.iana.org/assignments/media-types/); normalize the type/subtype to lowercase, keep parameters separate, and do not use wildcard declarations such as `image/*` as evidence of format support.
 
-The card describes native content accepted or produced through the selected model API and implemented adapter. Application-side extraction, OCR, or transcoding does not expand the model's native capabilities. The draft retains unknown capabilities and distinguishes content type from delivery method.
+The card records documented native model capabilities and protocol-specific delivery routes. Adapter implementation availability and application budgets are separate and cannot overwrite these facts. Application-side extraction, OCR, or transcoding does not expand the model's native capabilities. Input formats form a positive allowlist. Tool capabilities are booleans; an unlisted tool on the selected model page is not supported. Content type remains distinct from delivery method.
 
 ```ts
 type Support = 'supported' | 'unsupported' | 'unknown';
@@ -203,12 +203,9 @@ interface InputMediaRoute {
     maxPages?: number | null;
 }
 
-type InputMediaSupport =
-    | {
-          support: 'supported';
-          routes: readonly [InputMediaRoute, ...InputMediaRoute[]];
-      }
-    | { support: 'unsupported' | 'unknown' };
+interface InputMediaSupport {
+    routes: readonly [InputMediaRoute, ...InputMediaRoute[]];
+}
 
 interface ModelCardBase {
     id: string;
@@ -221,7 +218,6 @@ interface ModelCardBase {
     inputMedia: Readonly<Partial<Record<MediaType, InputMediaSupport>>>;
     outputMedia: Readonly<Partial<Record<MediaType, Support>>>;
     contextTokens: number | null;
-    evidence: { source: string; checkedAt: string };
 }
 
 interface ChatModelCard extends ModelCardBase {
@@ -233,12 +229,12 @@ interface ChatModelCard extends ModelCardBase {
         maxRequestBytes: number | null;
     };
     capabilities: {
-        streaming: Support;
-        tools: Support;
-        structuredOutput: Support;
-        thinking: Support;
-        webSearch: Support;
-        webFetch: Support;
+        streaming: boolean;
+        tools: boolean;
+        structuredOutput: boolean;
+        thinking: boolean;
+        webSearch: boolean;
+        webFetch: boolean;
     };
 }
 
@@ -253,15 +249,17 @@ interface DecisionModelCard extends ModelCardBase {
 type ModelCard = ChatModelCard | DecisionModelCard;
 ```
 
-`MediaType` is a readable type sketch, not sufficient validation: public schemas validate concrete type/subtype values and reject wildcards and embedded parameters. An absent entry means unknown, not unsupported, and neither state enables submission. A supported entry requires at least one implemented route. Per-route `maxBytes` bounds the original file; `maxPages` applies to paginated documents and is omitted only when inapplicable. A null limit means unknown, not unlimited. `requestLimits` separately bounds file count, aggregate original bytes, and the encoded request body. The application still enforces its own bounds. Adapter preparation checks task-dependent limits, dimensions, codecs, and other known restrictions without inventing a generic constraint language. MIME type alone does not establish that every file with that type is valid.
+`MediaType` is a readable type sketch, not sufficient validation: public schemas validate concrete type/subtype values and reject wildcards and embedded parameters. Input media is an allowlist: an absent MIME type is unsupported. Do not add unsupported/unknown entries or redundant support flags. Each entry requires at least one documented route; the application enables only routes its adapter implements. Per-route `maxBytes` bounds the original file; `maxPages` applies to paginated documents and is omitted only when inapplicable. A null limit means unknown, not unlimited. `requestLimits` separately bounds file count, aggregate original bytes, and the encoded request body. The application still enforces its own bounds. Adapter preparation checks task-dependent limits, dimensions, codecs, and other known restrictions without inventing a generic constraint language. MIME type alone does not establish that every file with that type is valid.
 
 Delivery describes how content reaches the API: `text` and `structured-value` are logical input values; `inline-bytes` includes protocol encodings such as base64; `file-id` requires an implemented upload route; `url` requires a resource the provider can actually access. A local path is not a provider-accessible URL. Encoding or uploading original bytes is transport preparation, not content conversion. Support for a text value does not imply support for uploading a text file.
 
 Decision returns structured decisions represented as `application/json`; `kind` and `questionTypes` define their schema. Its accepted state representations are declared separately in `inputMedia`. Do not invent a generative output-token limit. Chat initially implements `text/plain`, plus the PDF attachment paths below. Native `application/pdf` is enabled only on an implemented, verified route; processed PDF support never changes that native flag. These media types describe logical content, not the HTTP JSON envelope or SSE stream used to carry it. A JSON response envelope alone does not establish structured-output capability.
 
-`webSearch` and `webFetch` describe native API capabilities. Installing an application search tool does not mark every model as supporting native search. Cards reflect what the adapter actually exposes, not merely what an upstream service could support.
+`webSearch` and `webFetch` describe native API capabilities. Installing an application search tool does not mark every model as supporting native search. The application intersects these native declarations with the adapter’s implemented features before enabling an operation.
 
-Later additions may include thinking effort/budget, mandatory thinking, structured-output/thinking exclusions, and required or forbidden streaming. The first release does not build a generic constraint DSL. Adapters must still reject known invalid combinations and expose only verified parameter combinations. Unsupported configuration produces an explicit error instead of silently changing request semantics.
+Model cards are independent JSON files under `packages/plugin-dashscope/src/cards/`, validated at load time. Every model declares its own values; do not infer capabilities or limits from a model-name prefix. Application admission budgets and source-verification notes stay outside these files. See [model-verification.md](model-verification.md) for development references.
+
+Thinking uses a fixed application enum: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Each JSON card supplies a `thinkingLevelMap` from these levels to provider-native strings, numeric budgets, booleans, or null (unavailable). Missing mappings are also unavailable; the UI offers only mapped levels. `defaultThinkingLevel` is explicit. Adapters serialize the mapped value into their API's actual field; they never send the application label blindly, invent numeric budgets, or silently downgrade an unsupported selection. DashScope Responses maps strings to `reasoning.effort` and booleans to `enable_thinking`; it rejects numeric mappings because this route has no implemented numeric-budget parameter. Future budget-based adapters can use numeric values without changing the UI enum. `thinkingRequired` forbids `off`. Model and thinking selection belong to the frozen session/request state so restart and retries keep the same semantics.
 
 #### Attachment admission and preparation
 
@@ -302,11 +300,11 @@ Preparation revalidates source bytes, processor output, delivery support, and fi
 
 PDF attachment support is required, but its native route is model/protocol-specific. The documentation checked on 2026-11-04 contains the following distinctions and a conflict; these are documented limits, not live integration results.
 
-| Route                                                               | Documented limits                                                                                                                                                    | Whim decision                                                                                                                                                           |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| General Chat PDF understanding through Chat Completions / DashScope | 150 MB per file, 256 pages, URL or Base64; selected Qwen3.8 models and regions                                                                                       | A separate explicitly selected Chat adapter/card may provide native PDF analysis; it is not an automatic fallback for the main Responses conversation                   |
-| General Chat through Responses                                      | Responses reference lists `input_file` for Qwen3.8 Max/Flash with a 100 MB URL input; the PDF guide explicitly says Responses does not deliver PDFs despite HTTP 200 | Keep native PDF capability `unknown` and disabled until model/region-specific ingestion is proven; do not copy either limit into an enabled card on documentation alone |
-| `qwen3.5-ocr` through Responses                                     | 100 MB; 50 pages with `document_parsing`, otherwise 10 pages                                                                                                         | A distinct document-processing operation, not proof that a general Chat model accepts PDFs; optional after its adapter is implemented                                   |
+| Route                                                               | Documented limits                                                                                                                                                    | Whim decision                                                                                                                                                  |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| General Chat PDF understanding through Chat Completions / DashScope | 150 MB per file, 256 pages, URL or Base64; selected Qwen3.8 models and regions                                                                                       | A separate explicitly selected Chat adapter/card may provide native PDF analysis; it is not an automatic fallback for the main Responses conversation          |
+| General Chat through Responses                                      | Responses reference lists `input_file` for Qwen3.8 Max/Flash with a 100 MB URL input; the PDF guide explicitly says Responses does not deliver PDFs despite HTTP 200 | Omit native PDF from the input allowlist until model/region-specific ingestion is proven; do not copy either limit into an enabled card on documentation alone |
+| `qwen3.5-ocr` through Responses                                     | 100 MB; 50 pages with `document_parsing`, otherwise 10 pages                                                                                                         | A distinct document-processing operation, not proof that a general Chat model accepts PDFs; optional after its adapter is implemented                          |
 
 Sources: [PDF understanding](https://help.aliyun.com/zh/model-studio/pdf-understanding), [Responses parameters](https://help.aliyun.com/en/model-studio/qwen-api-via-openai-responses), [OCR PDF parsing](https://help.aliyun.com/zh/model-studio/qwen-vl-ocr). Provider documentation uses MB; store conservative decimal byte ceilings unless the vendor clarifies another unit. Do not transfer page/file limits between routes or treat a single-file limit as a total-request limit.
 
@@ -399,6 +397,21 @@ The adapters use the following routes. These contracts require live verification
 Connections store region, workspace, and base URL explicitly. The initial Decision card targets the documented `decision-model-preview` route in Beijing or Singapore, subject to account availability. [DashScope Decision API](https://docs.bailian.console.aliyun.com/en/model-studio/decision-model-api).
 
 Chat starts with a small verified card set rather than assuming complete Responses support across the provider's catalog. SDK types do not establish service support for every field. The adapter does not silently fall back to Chat Completions. Disable implicit SDK retries so the runtime owns attempt accounting. [DashScope Responses API](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-responses).
+
+The initial catalog targets the following six DashScope-hosted model IDs. New conversations default to `qwen3.8-max`. Do not populate the picker with older model generations or substitute third-party-hosted IDs such as `ZHIPU/GLM-5.3` or `kimi/kimi-k3`.
+
+| Model ID               | Role                             |
+| ---------------------- | -------------------------------- |
+| `qwen3.8-max`          | Default Chat model               |
+| `qwen3.8-flash`        | Faster Qwen alternative          |
+| `deepseek-v4.1-flash`  | Latest DeepSeek Flash generation |
+| `deepseek-v4-pro-0813` | DeepSeek Pro alternative         |
+| `glm-5.3-prime`        | DashScope-hosted GLM Prime       |
+| `kimi-k3`              | DashScope-hosted Kimi            |
+
+This is the selected integration scope, not a claim that all six adapters have passed validation. Enable a model only after its protocol, mandatory reasoning behavior, continuation fields, MIME routes, and limits are implemented and verified. Existing sessions retain their frozen model card; changing the default must not rewrite their context.
+
+Verified documentation on 2026-11-04 lists `glm-5.3-prime` in Beijing and Singapore, with the original model's capabilities and limits ([Prime mode](https://help.aliyun.com/en/model-studio/prime-mode)). Kimi's dedicated reference requires thinking for `kimi-k3` and says Responses is not yet supported, while the general Responses reference lists it. Resolve this conflict through an explicit route test before enabling it; never send the text adapter's unconditional thinking-disable option to Kimi. If Chat Completions is required, provide a separately identified adapter with durable reasoning continuation rather than silently switching protocols ([Kimi reference](https://help.aliyun.com/en/model-studio/kimi-api)).
 
 Main chat constructs input from local records on every request and uses `store: false`. Recovery does not require `previous_response_id` or remote Conversations. Preserve the item IDs, call IDs, reasoning information, and other supported fields needed for continuation; storing only `output_text` is insufficient. Each adapter follows its endpoint's rules for replaying items. [Responses protocol guidance](https://developers.openai.com/api/docs/guides/migrate-to-responses).
 
@@ -575,6 +588,8 @@ Reconsider the choice when measurements show sustained writer contention affecti
 Keep semantic ports such as `commit`, `loadSession`, `claimWork`, and `ackDelivery`. A future migration preserves record, entry, and effect semantics while redesigning transaction locking and consumption order. PostgreSQL sequence allocation does not establish commit order, so SQLite cursor assumptions must be revalidated. A migration replaces the authoritative database rather than introducing SQLite/PostgreSQL dual-master synchronization.
 
 ## 10. Frontend and main chat
+
+The desktop shell composes official shadcn/ui components directly, using their neutral theme and interaction styles. Layout utilities control spacing and sizing; global CSS must not restyle component internals. A compact sidebar, quiet toolbar, readable transcript, and bottom composer form the hierarchy. Avoid decorative branding, warm tinted surfaces, and oversized empty-state typography.
 
 React pages use shared shadcn components, Tailwind tokens, and lucide-react icons from the UI layer. English is the source language for the project. The frontend must offer English (en) and Simplified Chinese (zh-CN), with a persisted language selector available from the initial application shell. Use typed translation keys for all application and plugin UI strings, including errors, accessibility labels, and empty/loading states. Do not translate user content or model output implicitly. Missing keys fall back to English; validate both catalogs for matching keys. Hooks supply query state; commands submit mutations. Components do not access storage or plugin backends directly. Core owns state shared across pages; unmounting a component only releases subscriptions.
 
