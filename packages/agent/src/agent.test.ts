@@ -158,6 +158,29 @@ describe('Agent', () => {
         assert.equal(requests.length, 1);
     });
 
+    it('records how long the model reasoned before answering', async () => {
+        const { models } = scripted(async function* () {
+            yield { type: 'reasoning-delta', text: 'Hmm' };
+            await new Promise(resolve => setTimeout(resolve, 30));
+            yield { type: 'text-delta', text: 'Yes' };
+            yield { type: 'completed', usage: {} };
+        });
+        const agent = new Agent(store, models, { sleep: noSleep });
+        const sessionId = await sessionWith('think');
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        const answer = (await store.view(sessionId)).history.at(-1)?.item;
+        assert.ok(answer?.type === 'message');
+        const [reasoning, text] = answer.blocks;
+        assert.deepEqual(text, { type: 'text', text: 'Yes' });
+        assert.ok(reasoning?.type === 'reasoning');
+        assert.equal(reasoning.text, 'Hmm');
+        assert.ok(
+            reasoning.durationMs !== undefined &&
+                reasoning.durationMs >= 25 &&
+                reasoning.durationMs < 1000
+        );
+    });
+
     it('retries after partial output and discards the failed attempt text', async () => {
         const { models, requests } = scripted(async function* (_request, _signal, attempt) {
             yield { type: 'text-delta', text: attempt === 1 ? 'Hal' : 'Hello' };

@@ -53,20 +53,17 @@ function PluginSwitch({
 }
 
 /**
- * The Plugins page: installation, version, availability, and desired activation.
+ * Plugin settings: installation, version, availability, and desired activation.
  * @param props Application state.
  * @param props.state Application state.
- * @returns The page.
+ * @returns The section.
  */
-export function PluginsPage({ state }: { state: AppState }) {
+export function PluginSettings({ state }: { state: AppState }) {
     const { t, locale } = useT();
     const dates = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
     return (
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-8">
-            <header>
-                <h1 className="text-2xl font-semibold tracking-tight">{t('plugins.title')}</h1>
-                <p className="text-muted-foreground mt-1 text-sm">{t('plugins.description')}</p>
-            </header>
+        <div className="flex flex-col gap-6">
+            <p className="text-muted-foreground text-sm">{t('plugins.description')}</p>
             {state.plugins.map(plugin => {
                 const key = availabilityKeys[plugin.availability as keyof typeof availabilityKeys];
                 const switchId = `plugin-${plugin.id}`;

@@ -99,6 +99,7 @@ export function Composer({
                         choices={choices.map(choice => ({
                             value: choice.card.id,
                             label: choice.card.name,
+                            group: choice.provider,
                             icon: (
                                 <EntityIcon
                                     src={modelIcon(state, choice.card)}

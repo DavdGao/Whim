@@ -26,6 +26,7 @@ import {
     MessageResponse,
 } from '@/components/ai-elements/message';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
+import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Badge } from '@/components/ui/badge';
 
 /**
@@ -39,6 +40,18 @@ function textOf(blocks: readonly Block[], type: 'text' | 'reasoning'): string {
         .filter(block => block.type === type)
         .map(block => ('text' in block ? block.text : ''))
         .join('');
+}
+
+/**
+ * The recorded reasoning duration of a message.
+ * @param blocks Message blocks.
+ * @returns The duration prop, or nothing when unrecorded.
+ */
+function reasoningTime(blocks: readonly Block[]): { reasoningMs?: number } {
+    const block = blocks.find(item => item.type === 'reasoning');
+    return block?.type === 'reasoning' && block.durationMs !== undefined
+        ? { reasoningMs: block.durationMs }
+        : {};
 }
 
 /**
@@ -56,7 +69,7 @@ function CopyAction({ text }: { text: string }) {
         return () => clearTimeout(timer);
     }, [copied]);
     return (
-        <MessageActions>
+        <MessageActions className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
             <MessageAction
                 tooltip={copied ? t('common.copied') : t('common.copy')}
                 onClick={() =>
@@ -78,6 +91,7 @@ function CopyAction({ text }: { text: string }) {
  * @param props.role Who wrote it.
  * @param props.text Visible text.
  * @param props.reasoning Reasoning text.
+ * @param props.reasoningMs How long the model reasoned, when recorded.
  * @param props.streaming Whether it is still streaming.
  * @param props.badge Optional status badge.
  * @param props.onRemove Optional remove action.
@@ -87,6 +101,7 @@ function Bubble({
     role,
     text,
     reasoning,
+    reasoningMs,
     streaming,
     badge,
     onRemove,
@@ -94,6 +109,7 @@ function Bubble({
     role: 'user' | 'assistant';
     text: string;
     reasoning?: string;
+    reasoningMs?: number;
     streaming?: boolean;
     badge?: string;
     onRemove?: () => Promise<unknown>;
@@ -103,8 +119,24 @@ function Bubble({
         <Message from={role}>
             <MessageContent>
                 {reasoning ? (
-                    <Reasoning isStreaming={Boolean(streaming && !text)} defaultOpen={false}>
-                        <ReasoningTrigger>{t('chat.reasoning')}</ReasoningTrigger>
+                    <Reasoning
+                        isStreaming={Boolean(streaming && !text)}
+                        defaultOpen={false}
+                        {...(reasoningMs !== undefined
+                            ? { duration: Math.max(1, Math.ceil(reasoningMs / 1000)) }
+                            : {})}
+                    >
+                        <ReasoningTrigger
+                            getThinkingMessage={(active, seconds) =>
+                                active || seconds === 0 ? (
+                                    <Shimmer duration={1}>{t('chat.thinkingNow')}</Shimmer>
+                                ) : seconds === undefined ? (
+                                    <span>{t('chat.thought')}</span>
+                                ) : (
+                                    <span>{t('chat.thoughtFor', { seconds })}</span>
+                                )
+                            }
+                        />
                         <ReasoningContent>{reasoning}</ReasoningContent>
                     </Reasoning>
                 ) : null}
@@ -218,6 +250,7 @@ export function Transcript({
                             role={entry.item.role}
                             text={textOf(entry.item.blocks, 'text')}
                             reasoning={textOf(entry.item.blocks, 'reasoning')}
+                            {...reasoningTime(entry.item.blocks)}
                             {...(entry.status === 'interrupted'
                                 ? { badge: t('chat.interrupted') }
                                 : {})}

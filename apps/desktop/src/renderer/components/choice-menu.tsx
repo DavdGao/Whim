@@ -8,8 +8,11 @@ import { Button } from '@/components/ui/button';
 import {
     DropdownMenu,
     DropdownMenuContent,
+    DropdownMenuGroup,
+    DropdownMenuLabel,
     DropdownMenuRadioGroup,
     DropdownMenuRadioItem,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Spinner } from '@/components/ui/spinner';
@@ -19,6 +22,8 @@ export interface Choice<Value extends string> {
     readonly value: Value;
     readonly label: string;
     readonly icon?: ReactNode;
+    /** Heading of the group the choice is listed under; consecutive equal groups share one. */
+    readonly group?: string;
 }
 
 export interface ChoiceMenuProps<Value extends string> {
@@ -37,6 +42,23 @@ export interface ChoiceMenuProps<Value extends string> {
     readonly size?: ComponentProps<typeof Button>['size'];
     readonly className?: string;
     readonly align?: 'start' | 'end';
+}
+
+/**
+ * Split choices into runs that share a group heading.
+ * @param choices Choices in display order.
+ * @returns The runs.
+ */
+function groupChoices<Value extends string>(
+    choices: readonly Choice<Value>[]
+): { group: string | undefined; items: Choice<Value>[] }[] {
+    const runs: { group: string | undefined; items: Choice<Value>[] }[] = [];
+    for (const choice of choices) {
+        const last = runs.at(-1);
+        if (last && last.group === choice.group) last.items.push(choice);
+        else runs.push({ group: choice.group, items: [choice] });
+    }
+    return runs;
 }
 
 /**
@@ -76,11 +98,17 @@ export function ChoiceMenu<Value extends string>(props: ChoiceMenuProps<Value>) 
                         if (choice && choice.value !== value) void run(choice.value);
                     }}
                 >
-                    {choices.map(choice => (
-                        <DropdownMenuRadioItem key={choice.value} value={choice.value}>
-                            {choice.icon}
-                            {choice.label}
-                        </DropdownMenuRadioItem>
+                    {groupChoices(choices).map(({ group, items }, index) => (
+                        <DropdownMenuGroup key={`${index}:${group ?? ''}`}>
+                            {index > 0 && <DropdownMenuSeparator />}
+                            {group !== undefined && <DropdownMenuLabel>{group}</DropdownMenuLabel>}
+                            {items.map(choice => (
+                                <DropdownMenuRadioItem key={choice.value} value={choice.value}>
+                                    {choice.icon}
+                                    {choice.label}
+                                </DropdownMenuRadioItem>
+                            ))}
+                        </DropdownMenuGroup>
                     ))}
                 </DropdownMenuRadioGroup>
             </DropdownMenuContent>
