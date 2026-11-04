@@ -19,6 +19,7 @@ export default [
             '.idea/**',
             '.pnpm-store/**',
             '.husky/_/**',
+            '.claude/**',
             // Vendored code installed by the official shadcn CLI; updated through the CLI, not by hand.
             'apps/desktop/src/renderer/components/ui/**',
             'apps/desktop/src/renderer/components/ai-elements/**',

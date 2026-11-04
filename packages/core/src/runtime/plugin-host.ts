@@ -25,6 +25,7 @@ const manifestSchema = z.object({
         cards: z.string().min(1).optional(),
         locales: z.string().min(1).optional(),
         icon: z.string().min(1).optional(),
+        category: z.enum(['models', 'tools', 'other']).default('other'),
         icons: z.record(z.string().min(1), z.string().min(1)).default({}),
         requires: z.array(z.string().min(1)).default([]),
     }),
@@ -55,6 +56,8 @@ export interface PluginStatus {
     readonly icon?: string;
     /** Named images that cards reference through their `icon` field, as `data:` URLs. */
     readonly icons: Readonly<Record<string, string>>;
+    /** Manifest category for grouping in the UI. */
+    readonly category: 'models' | 'tools' | 'other';
 }
 
 const iconTypes: Readonly<Record<string, string>> = { svg: 'image/svg+xml', png: 'image/png' };
@@ -252,6 +255,7 @@ export class PluginHost {
                     error: `Invalid plugin manifest: ${describeError(error)}`,
                     locales: {},
                     icons: {},
+                    category: 'other',
                 });
                 continue;
             }
@@ -284,6 +288,7 @@ export class PluginHost {
                     manifest.whim.locales ? join(dir, manifest.whim.locales) : undefined
                 ),
                 ...(await readIcons(dir, manifest.whim)),
+                category: manifest.whim.category,
             };
             this.#statuses.set(row.id, status);
             loaded.push({ manifest, dir, status });

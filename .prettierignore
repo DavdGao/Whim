@@ -9,3 +9,4 @@
 .idea/
 .husky/_/
 pnpm-lock.yaml
+.claude/

@@ -286,4 +286,21 @@ describe('Store', () => {
         assert.equal((await reopened.view(sessionId)).sessionId, sessionId);
         await reopened.close();
     });
+
+    it('deletes a session completely but refuses while it runs', async () => {
+        const store = await Store.open(join(dir, 'delete.sqlite'));
+        const sessionId = await createSession(store);
+        await send(store, sessionId, 'hello');
+        const runId = randomUUID();
+        await store.execute(cmd(sessionId, { type: 'start-run', runId, trigger: 'user' }));
+        await assert.rejects(store.deleteSession(sessionId), { code: 'conflict' });
+        await store.execute(
+            cmd(sessionId, { type: 'end-run', runId, result: { outcome: 'completed' } })
+        );
+        await store.deleteSession(sessionId);
+        assert.deepEqual(await store.sessions(), []);
+        await assert.rejects(store.view(sessionId), { code: 'not-found' });
+        assert.deepEqual(await store.read(sessionId), []);
+        await store.close();
+    });
 });

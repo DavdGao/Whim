@@ -1,16 +1,14 @@
-import { selectableLevels } from '@whimkit/core/contracts';
-import { BoxIcon, BrainIcon } from 'lucide-react';
 import { useState } from 'react';
 
-import { ChoiceMenu } from '../../components/choice-menu';
-import { EntityIcon } from '../../components/entity-icon';
 import { useT } from '../../lib/i18n';
-import { modelIcon } from '../../lib/icons';
 
+import { ContextUsage } from './context-usage';
 import { modelChoices } from './model-choices';
+import { ModelPicker } from './model-picker';
 import { WorkspacePicker } from './workspace-picker';
 
 import type { AppState, ChatSlot } from '../../../shared/ipc';
+import type { Usage } from '@whimkit/core/contracts';
 
 import {
     PromptInput,
@@ -31,6 +29,10 @@ export interface ComposerProps {
     readonly onSend: (text: string) => Promise<void>;
     readonly onStop: () => void;
     readonly workspace: string | undefined;
+    /** The latest reported usage, for the context indicator. */
+    readonly usage: Usage | undefined;
+    /** The agent's display name, used in the placeholder. */
+    readonly agentName: string;
     /** Absent once the chat exists: the folder is fixed for its life. */
     readonly onWorkspaceChange?: (workspace: string | undefined) => void;
 }
@@ -47,6 +49,8 @@ export interface ComposerProps {
  * @param props.onStop
  * @param props.workspace
  * @param props.onWorkspaceChange
+ * @param props.usage
+ * @param props.agentName
  * @returns The composer.
  */
 export function Composer({
@@ -59,20 +63,14 @@ export function Composer({
     onStop,
     workspace,
     onWorkspaceChange,
+    usage,
+    agentName,
 }: ComposerProps) {
     const { t } = useT();
     const [text, setText] = useState('');
     const [sending, setSending] = useState(false);
     const choices = modelChoices(state, slot?.credentialId);
     const current = choices.find(choice => choice.card.id === slot?.cardId);
-    const levels = current ? selectableLevels(current.card.thinking) : [];
-    const fixed = current?.card.thinking && 'fixed' in current.card.thinking;
-    const level =
-        slot?.thinking && levels.includes(slot.thinking)
-            ? slot.thinking
-            : current?.card.thinking && 'default' in current.card.thinking
-              ? current.card.thinking.default
-              : undefined;
 
     const submit = async () => {
         if (running) {
@@ -96,8 +94,8 @@ export function Composer({
                 <PromptInputTextarea
                     value={text}
                     onChange={event => setText(event.currentTarget.value)}
-                    placeholder={t('chat.placeholder')}
-                    aria-label={t('chat.placeholder')}
+                    placeholder={t('chat.placeholder', { name: agentName })}
+                    aria-label={t('chat.placeholder', { name: agentName })}
                 />
             </PromptInputBody>
             <PromptInputFooter>
@@ -106,59 +104,25 @@ export function Composer({
                         workspace={workspace}
                         {...(onWorkspaceChange ? { onChange: onWorkspaceChange } : {})}
                     />
-                    <ChoiceMenu
-                        value={current?.card.id}
-                        choices={choices.map(choice => ({
-                            value: choice.card.id,
-                            label: choice.card.name,
-                            group: choice.provider,
-                            icon: (
-                                <EntityIcon
-                                    src={modelIcon(state, choice.card)}
-                                    fallback={BoxIcon}
-                                />
-                            ),
-                        }))}
-                        icon={<BoxIcon />}
-                        placeholder={t('chat.model')}
-                        aria-label={t('chat.model')}
-                        disabled={modelLocked}
-                        {...(modelLocked ? { title: t('chat.modelLocked') } : {})}
-                        variant="ghost"
-                        size="sm"
-                        onChange={cardId => {
-                            const choice = choices.find(item => item.card.id === cardId);
-                            return choice
-                                ? onSlotChange({ cardId, credentialId: choice.credentialId })
-                                : undefined;
-                        }}
+                    <ModelPicker
+                        state={state}
+                        choices={choices}
+                        slot={slot}
+                        locked={modelLocked}
+                        onChange={onSlotChange}
                     />
-                    {fixed ? (
-                        <span className="text-muted-foreground flex items-center gap-1.5 px-2 text-xs">
-                            <BrainIcon className="size-3.5" />
-                            {t('chat.thinking.fixed')}
-                        </span>
-                    ) : levels.length > 0 && slot ? (
-                        <ChoiceMenu
-                            value={level}
-                            choices={levels.map(item => ({
-                                value: item,
-                                label: `${t('chat.thinking')}: ${t(`level.${item}`)}`,
-                            }))}
-                            icon={<BrainIcon />}
-                            placeholder={t('chat.thinking')}
-                            aria-label={t('chat.thinking')}
-                            variant="ghost"
-                            size="sm"
-                            onChange={thinking => onSlotChange({ ...slot, thinking })}
-                        />
-                    ) : null}
                 </PromptInputTools>
-                <PromptInputSubmit
-                    status={running ? 'streaming' : sending ? 'submitted' : undefined}
-                    disabled={!running && (!text.trim() || !current || sending)}
-                    aria-label={running ? t('chat.stop') : t('chat.send')}
-                />
+                <div className="flex items-center gap-1">
+                    {current && (
+                        <ContextUsage usage={usage} contextWindow={current.card.contextWindow} />
+                    )}
+                    <PromptInputSubmit
+                        className="rounded-full"
+                        status={running ? 'streaming' : sending ? 'submitted' : undefined}
+                        disabled={!running && (!text.trim() || !current || sending)}
+                        aria-label={running ? t('chat.stop') : t('chat.send')}
+                    />
+                </div>
             </PromptInputFooter>
         </PromptInput>
     );

@@ -73,6 +73,7 @@ A plugin is an npm package with a `whim` field in `package.json`:
         "host": "./dist/host.js",
         "cards": "./cards",
         "locales": "./locales",
+        "category": "models",
         "icon": "./icons/bailian.svg",
         "icons": { "qwen": "./icons/qwen.svg" },
         "requires": []
@@ -84,6 +85,7 @@ A plugin is an npm package with a `whim` field in `package.json`:
 - The plugin id is the package name; the version is `package.json.version`. Whim-owned packages share one version, and `peerDependencies` pins Core exactly.
 - `host` is the Backend entry. `client` (Renderer entry) is reserved for UI slots (§5.7).
 - `cards` is a directory of seed model cards (§7.3).
+- `category` (`models`, `tools`, or `other`, the default) groups the plugin in Settings.
 - `requires` lists plugin ids whose registrations this plugin uses, e.g. another plugin's credential type.
 - Display strings come from the plugin's `locales/en.json` and `locales/zh-CN.json`.
 - `icon` is the plugin's logo; `icons` names further images that its cards reference by key (§7.1). Paths stay inside the package, files are SVG or PNG of at most 64 KiB, and Backend sends them to Renderer as `data:` URLs rendered with `<img>`, so SVG scripts never run. A missing or invalid icon is reported and ignored. Remote icon URLs are not fetched; they arrive with remote catalogs.
@@ -384,10 +386,10 @@ type Failure = {
 
 The window has no native title bar (`titleBarStyle: 'hiddenInset'`). A draggable top strip in the sidebar color holds the macOS traffic lights, the rail toggle, and, when Backend is not connected, the connection status. Below it, a navigation rail (shadcn `Sidebar`, `inset` variant) sits on the same background. It is collapsed to icons by default so it never competes with a page's own list column: the Whim logo at the top, feature pages in the middle, Settings at the bottom. The active page is an inset panel.
 
-| Page     | Content                                                                                                                                                                                               |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat     | Session list column, conversation, composer with model (grouped by provider) and thinking selectors, attachments                                                                                      |
-| Settings | Tabs: General (language, appearance, permissions, data location and backup); Models (credentials, default models, available models and errors); Plugins (installed plugins, enable/disable, re-trust) |
+| Page     | Content                                                                                                                                                                                                                                                         |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat     | Session list (Pinned / Today / Earlier, rename, pin, delete), conversation, composer with one model-and-thinking button, context usage, folder picker, attachments                                                                                              |
+| Settings | A section list: General (language, permissions, data); Agent (name, icon, system prompt); Models (credentials, default models, available models with a detail page per model, grouped by model kind as kinds are added); Plugins (grouped by manifest category) |
 
 Configuration lives in Settings; the rail is for feature pages. Planned feature pages include ACP (connecting external coding agents) and Music; each is added when its feature exists. The language selector is persistent and every string is in typed en/zh-CN catalogs.
 

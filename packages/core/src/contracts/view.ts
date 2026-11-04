@@ -82,6 +82,8 @@ export interface SessionView {
     readonly jobs: readonly BackgroundJob[];
     readonly permissionRules: readonly PermissionRule[];
     readonly usage: Usage;
+    /** Usage of the latest attempt that reported input tokens: the context currently in use. */
+    readonly lastUsage?: Usage;
     readonly createdAt: string;
     readonly updatedAt: string;
 }
@@ -249,7 +251,8 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
             const { attempt: _attempt, ...rest } = run;
             const usage = addUsage(view.usage, body.usage);
             const result = body.result;
-            if (result.status === 'failed') return { ...base, usage, run: rest };
+            const latest = body.usage.inputTokens !== undefined ? { lastUsage: body.usage } : {};
+            if (result.status === 'failed') return { ...base, ...latest, usage, run: rest };
             const calls: OpenCall[] = [];
             for (const block of result.output.blocks)
                 if (block.type === 'tool_call') {
@@ -281,7 +284,14 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
                           },
                       ]
                     : view.history;
-            return { ...base, usage, history, calls: [...view.calls, ...calls], run: rest };
+            return {
+                ...base,
+                ...latest,
+                usage,
+                history,
+                calls: [...view.calls, ...calls],
+                run: rest,
+            };
         }
         case 'retry.scheduled': {
             const active = requireRun(view, body.runId, record.seq);

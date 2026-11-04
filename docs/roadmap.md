@@ -40,6 +40,14 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [x] Copy action on answers (AI Elements `MessageActions`)
 - [x] Verified on Linux under Xvfb: credential dialog, model and thinking menus, math rendering, language switch, collapsed sidebar
 
+## Frontend feedback round 2
+
+- [x] Chat list: Pinned / Today / Earlier groups, time on the right, hover menu with rename, pin, delete
+- [x] Settings with a section list: General, Agent (name, icon, system prompt), Models (list and Bailian-style detail), Plugins grouped by manifest `category`
+- [x] One model button with grouped models and a draggable thinking-level track; context usage ring with breakdown
+- [ ] Model naming of chats by a model call
+- [ ] Model kinds beyond chat (Decision, TTS) as groups in Settings → Models when they exist
+
 ## PR 4 — Attachments
 
 - [ ] Core attachment store (immutable content, size limits), admission from card `input` and enabled processors
