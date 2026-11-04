@@ -8,6 +8,7 @@
         "node": ">=24"
     },
     "scripts": {
+        "app": "pnpm install --frozen-lockfile && pnpm build && pnpm --filter @whimkit/desktop start",
         "check": "pnpm format:check && pnpm lint && pnpm build && pnpm typecheck && pnpm test",
         "build": "pnpm -r build",
         "typecheck": "pnpm -r typecheck",

@@ -6,7 +6,9 @@
         "outDir": "dist",
         "rootDir": "src",
         "module": "NodeNext",
-        "moduleResolution": "NodeNext"
+        "moduleResolution": "NodeNext",
+        "lib": ["ES2023"],
+        "types": ["node"]
     },
     "include": ["src/**/*.ts"]
 }

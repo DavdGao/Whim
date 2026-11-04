@@ -40,7 +40,7 @@ Core exposes subpaths:
 
 Dependency rules: agent depends on `core/contracts`; Core does not import agent; desktop wires agent to Core's ports. Plugins depend on Core's public subpaths and libraries such as `openai-protocol`, never on another package's internals.
 
-There is no shared UI package. shadcn components are installed with the official CLI into `apps/desktop`. A UI package is introduced only when plugin client entries need to share components with the host (§5.6).
+There is no shared UI package. shadcn components are installed with the official CLI into `apps/desktop`. A UI package is introduced only when plugin client entries need to share components with the host (§5.7).
 
 ## 4. Processes
 
@@ -48,7 +48,7 @@ There is no shared UI package. shadcn components are installed with the official
 | ---------- | ------------------------------------------------------------------------------------------------ |
 | Main       | Windows, menus, native dialogs, single-instance lock, Backend supervision, application lifecycle |
 | Renderer   | Sandboxed React UI. No Node, no SQL, no arbitrary IPC; only the typed preload API                |
-| Backend    | Electron `utilityProcess`: Core services, plugin host entries, agent runners, Keychain access    |
+| Backend    | Electron `utilityProcess`: Core services, plugin host entries, agent runners                     |
 | DB worker  | A worker thread inside Backend that owns the synchronous SQLite connection                       |
 | PDF helper | On-demand child process with memory and time limits for document parsing                         |
 
@@ -72,6 +72,7 @@ A plugin is an npm package with a `whim` field in `package.json`:
     "whim": {
         "host": "./dist/host.js",
         "cards": "./cards",
+        "locales": "./locales",
         "requires": []
     },
     "peerDependencies": { "@whimkit/core": "0.1.0" }
@@ -79,7 +80,7 @@ A plugin is an npm package with a `whim` field in `package.json`:
 ```
 
 - The plugin id is the package name; the version is `package.json.version`. Whim-owned packages share one version, and `peerDependencies` pins Core exactly.
-- `host` is the Backend entry. `client` (Renderer entry) is reserved for UI slots (§5.6).
+- `host` is the Backend entry. `client` (Renderer entry) is reserved for UI slots (§5.7).
 - `cards` is a directory of seed model cards (§7.3).
 - `requires` lists plugin ids whose registrations this plugin uses, e.g. another plugin's credential type.
 - Display strings come from the plugin's `locales/en.json` and `locales/zh-CN.json`.
@@ -109,9 +110,23 @@ Core stores one row per installed plugin: `id`, `version`, `source` (`bundled` o
 - `contentHash` is a SHA-256 over the package's files, computed at installation.
 - On start Core recomputes it. A mismatch sets availability `modified` and the plugin is not activated until the user re-trusts it in the Plugins page, which records the new hash.
 - Bundled plugins live inside the signed application bundle; the check matters mainly for local installs.
-- Disabling or uninstalling a plugin never deletes business history, credentials, or sessions that used it. Sessions whose adapter is unavailable show that state and cannot run until it returns.
 
-### 5.4 Registrations
+### 5.4 Disabling and removing a plugin
+
+Disable keeps the package and its data; uninstall also removes the package (local plugins only; bundled plugins can only be disabled). Both follow the same sequence:
+
+1. **Impact preview.** The Plugins page lists what depends on the plugin: dependent plugins, model slots bound to its cards, credentials of its types, sessions whose epoch uses its adapter, active runs, background jobs from its tools. The user confirms.
+2. **Stop admission.** New calls to the plugin's adapters, tools, and processors fail with `model-unavailable` or a tool-unavailable result.
+3. **Settle in-flight work.** Active runs using its adapter are interrupted with reason `plugin-removed` and receive an `interrupted` notice naming the cause; its background jobs are cancelled. Waiting is bounded.
+4. **Deactivate dependents first, then the plugin**, disposing registrations in reverse order. Dependent plugins become `missing-dependency`.
+5. **Propagate.** Removed tools and context sources deliver `source-changed` notices to sessions; removed tools are revoked immediately.
+6. **Remove the package** (uninstall only). The install row stays, marked uninstalled, so history can name the plugin.
+
+What is kept: sessions and their history (readable; they show "model unavailable" and can continue after a model switch), credentials (marked orphaned; the confirm dialog offers to delete them and their encrypted secrets), user-layer card files (inactive until the plugin returns). Slots bound to its cards become unset and the Models page asks for a replacement; Whim never silently substitutes another model. Reinstalling restores everything that was kept.
+
+Startup applies the same rules when a plugin is missing or fails to activate.
+
+### 5.5 Registrations
 
 | Registration    | Purpose                                                                                                             |
 | --------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -124,16 +139,17 @@ Core stores one row per installed plugin: `id`, `version`, `source` (`bundled` o
 
 Plugins call Core services (store commands, model slots, files, jobs). They never open the database or write SQL, and they cannot make model calls that bypass attempt and usage accounting.
 
-### 5.5 JSON Schema conventions
+### 5.6 JSON Schema conventions
 
 Credential types, plugin settings, and card `options` are JSON Schema 2020-12 objects. Core validates values with a standard validator and renders forms from the schema.
 
-- Secrets: `"writeOnly": true` plus `"format": "password"`. Core stores these properties in Keychain and never returns them to Renderer.
+- Secrets: `"writeOnly": true` plus `"format": "password"`. Core stores these properties encrypted (§6.2) and never returns them to Renderer.
+- Plugin schemas carry no `$id`; the registration id (`<pluginId>#<name>`) names them, and `#` is not valid in a schema `$id`.
 - Choices: `enum` with `default`. URLs: `"format": "uri"`. Required fields: `required`.
 - `title` and `description` are the English text. Translations are looked up in the plugin's locale catalog under `schema.<schemaId>.<JSON pointer>.title|description`.
 - Extension keywords use the `x-whim-` prefix and are limited to those listed here. Currently there is one: `x-whim-order`, an integer for form field ordering.
 
-### 5.6 Client entries
+### 5.7 Client entries
 
 A plugin may later ship a `client` entry that registers React components into named Renderer slots. It runs with the host's React and component modules and communicates only through typed application interfaces. The first release generates all plugin configuration forms from JSON Schema and ships no client entries; the slot registry is built with its first consumer.
 
@@ -147,7 +163,6 @@ A plugin registers a credential type with an id (`<pluginId>#<name>`) and a sche
 
 ```json
 {
-    "$id": "@whimkit/plugin-dashscope#api-key",
     "type": "object",
     "title": "DashScope API key",
     "required": ["apiKey"],
@@ -169,7 +184,7 @@ A credential type may provide `verify(credential, signal)` for the Models page "
 
 ### 6.2 Credential instances
 
-The user creates instances in the Models page: `id`, `typeId`, `label`, non-secret values (SQLite), secret values (Keychain item per property, keyed by credential id and property name). Renderer sees only whether a secret is set. Updating a secret is write-only.
+The user creates instances in the Models page: `id`, `typeId`, `label`, non-secret values (SQLite), and secret values encrypted with Electron `safeStorage`, whose key macOS keeps in the Keychain. Encryption runs in Main, the only process where `safeStorage` exists; Backend asks Main over its parent port and stores ciphertext in the `secrets` table. Without an OS key store, saving a secret fails instead of falling back to plain text; automated tests opt into Electron's plaintext fallback with `WHIM_TEST_PLAINTEXT_SECRETS=1`. Renderer sees only whether a secret is set. Updating a secret is write-only.
 
 Changing a credential is not prompt-affecting: it applies to the next attempt of every session that uses it.
 
@@ -177,7 +192,7 @@ Changing a credential is not prompt-affecting: it applies to the next attempt of
 
 A slot is a role in the application that needs a model: `chat` (default for new sessions), `compaction`, `reviewer`, later `tts`, `asr`, `embedding`. A slot value is `{ credentialId, cardId, thinking? }`. The Models page lists, per slot, the credentials whose type an adapter of the slot's kind accepts, then the cards of that adapter.
 
-A session copies the `chat` slot when it is created. The user can switch the session's model at any time; it applies from the next reasoning step ([agent.md §8.1](agent.md#81-model-switch)).
+A session copies the `chat` slot when it is created. The user can switch the session's model whenever no run is active; it applies from the next reasoning step ([agent.md §8.1](agent.md#81-model-switch)).
 
 ## 7. Model cards
 
@@ -190,7 +205,7 @@ A card describes one model for one adapter. Core understands the top-level field
     "id": "dashscope/qwen3.8-max",
     "revision": 1,
     "kind": "chat",
-    "adapter": "@whimkit/plugin-dashscope#chat",
+    "adapter": "@whimkit/plugin-dashscope#responses",
     "model": "qwen3.8-max",
     "name": "Qwen3.8 Max",
     "contextWindow": 1000000,
@@ -240,7 +255,7 @@ The effective catalog is the merge of two layers:
 
 Upstream can therefore change without overwriting user edits, and Core never needs to decide whether a copied file was modified. The Models page edits cards by writing user-layer files; users may also edit them directly. A file watcher triggers re-reads, and content hashes decide whether anything changed.
 
-Core records catalog provenance (upstream source and plugin version, user file path, load time) in SQLite for display; card files carry no provenance.
+Core reports each entry's provenance (layer, plugin, source files) and validation issues on the Models page. Provenance is recomputed on every load and not stored; card files carry no provenance.
 
 ### 7.4 Adapters
 
@@ -299,24 +314,23 @@ A media type is admissible for a session when the card's `input` declares it (na
 
 One SQLite database at `<userData>/whim.sqlite`, opened only by the DB worker (WAL, `synchronous=FULL`, foreign keys on).
 
-| Table         | Content                                                                                      |
-| ------------- | -------------------------------------------------------------------------------------------- |
-| `journal`     | Agent records: `session_id`, `seq`, `id`, `type`, `version`, `body` (JSON)                   |
-| `sessions`    | Projection: title, created/updated time, head seq, epoch id, state. Rebuildable from journal |
-| `receipts`    | Command idempotency: operation id, canonical input hash, produced record ids                 |
-| `plugins`     | Installation records (§5.3)                                                                  |
-| `credentials` | Credential instances without secrets (§6.2)                                                  |
-| `settings`    | Owner-scoped JSON values validated by the owner's schema                                     |
-| `artifacts`   | Attachment and offload metadata; bytes live in files                                         |
-| `sources`     | Context-source revisions ([agent.md §7](agent.md#7-context-sources-and-the-prompt-cache))    |
-| `catalog`     | Card provenance (§7.3)                                                                       |
+| Table         | Content                                                                                                               |
+| ------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `journal`     | Agent records: `session_id`, `seq`, `id`, `type`, `version`, `body` (JSON)                                            |
+| `sessions`    | Projection: title, created/updated time, head seq, epoch id, state. Rebuildable from journal                          |
+| `receipts`    | Command idempotency: operation id, canonical input hash, produced record ids                                          |
+| `plugins`     | Installation records (§5.3)                                                                                           |
+| `credentials` | Credential instances without secrets (§6.2)                                                                           |
+| `settings`    | Owner-scoped JSON values validated by the owner's schema                                                              |
+| `artifacts`   | Attachment and offload metadata; bytes live in files                                                                  |
+| `sources`     | Context-source revisions ([agent.md §7](agent.md#7-context-sources-and-the-prompt-cache)); added with context sources |
 
 - **Records are versioned.** Each record has `type` and `version`. Decoders accept every released version and upcast to the current shape; released versions are never removed. A record that cannot be decoded marks its session `unreadable` with the cause; other sessions are unaffected.
 - **Records reference, they do not embed foreign schemas.** An epoch stores a frozen copy of the card fields it uses, validated by a record-owned schema, not by the live card schema.
 - **Commands are idempotent.** The same operation id and canonical input returns the original receipt; a different input conflicts. Canonical encoding sorts keys by code point, independent of locale.
 - **Migrations are append-only.** Before migrating, Core writes a backup with `VACUUM INTO`. A failed migration leaves the original file untouched and reports the failure.
 - **Short transactions.** No network I/O or awaits inside a transaction; each command is one DB-worker request.
-- Credentials are in Keychain, never in the database or logs.
+- Secrets are stored only as `safeStorage` ciphertext, never in plain text or logs.
 
 ## 10. Errors
 
@@ -377,7 +391,7 @@ The rail has room for later pages; a page is added when its feature exists, not 
 ### 11.2 Data flow
 
 - Renderer loads a session with a query returning a bounded page of history plus the current head seq, then subscribes with `afterSeq`. Backend pushes committed records in batches after each commit; Renderer folds them into its presentation state. No full snapshots per token.
-- Streaming text is persisted in bounded chunks (by size or a short interval), each chunk one transaction, and published only after commit.
+- Streaming deltas are transient events delivered on the same subscription, coalesced to a short interval, and not stored; the attempt's output is committed when it ends ([agent.md §5.1](agent.md#51-streaming-output)). An `attempt.discarded` event tells the frontend to drop a failed attempt's text before a retry.
 - Commands return acceptance, not completion. The UI shows queued, included, running, retrying, interrupted, failed, and completed states from committed records.
 - Notices ([agent.md §4](agent.md#4-messages-and-notices)) carry `kind` and `origin`; the frontend decides which kinds to display and how.
 

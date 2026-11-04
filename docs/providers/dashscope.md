@@ -22,7 +22,7 @@ Listed with full Responses support (built-in tools): `qwen3.8-max`, `qwen3.8-fla
 ## Thinking
 
 - `reasoning.effort`: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; supported levels and defaults vary by model. It takes precedence over `enable_thinking`, which is deprecated.
-- Default mapping from Whim levels: `off→none`, `low→low`, `medium→medium`, `high→high`, `max→max`. Per-model supported levels are still to be verified when writing seed cards.
+- Default mapping from Whim levels: `off→none`, `low→low`, `medium→medium`, `high→high`, `max→max`. Per-model supported levels are not verified yet.
 
 ## Input
 
@@ -40,6 +40,7 @@ Whim mapping: `web_search → web_search`, `web_fetch → web_extractor`. `code_
 
 - Events include `response.output_text.delta`, `response.reasoning_text.delta`, `response.output_item.added|done`, tool progress events (`web_search_call.*`, `code_interpreter_call.*`, …), `response.incomplete`, and `response.completed` as the terminal event. Web extraction has no progress events; it is observed through output items.
 - `store` defaults to `true`; Whim sends `store: false` and replays context locally. `previous_response_id` is not used.
+- Replaying reasoning output items under `store: false` is unverified, so the adapter does not persist or resend them; visible text is replayed.
 - Input above roughly 80% of the context window is **silently truncated**. The adapter's `inputBudget` must stay below that point.
 - Session cache header `x-dashscope-session-cache: enable` exists; not used until measured.
 
@@ -65,3 +66,7 @@ Whim mapping: `web_search → web_search`, `web_fetch → web_extractor`. `code_
 | —      | connection error                                   | `transport`         | backoff                               |
 
 Codes are compared case-insensitively; snake_case aliases map identically. `response.failed` and `response.incomplete` in-stream map to `protocol` with `outcome` `partial` when output was published.
+
+## Seed cards
+
+`qwen3.8-max` and `qwen3.8-flash` ship with conservative, unverified limits (262144-token context, 32768 output tokens) and all five thinking levels, because the official model list did not state their limits on 2026-11-04. Only text input is declared until image and PDF delivery are implemented. Users can correct values with a patch file in the `models` directory. The adapter's input budget is 75% of `contextWindow`, below the silent-truncation point.

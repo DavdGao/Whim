@@ -1,0 +1,8 @@
+{
+    "plugin.name": "百炼 DashScope",
+    "plugin.description": "通过 Responses API 使用阿里云百炼模型。",
+    "credential.@whimkit/plugin-dashscope#api-key": "百炼 API Key",
+    "schema.@whimkit/plugin-dashscope#api-key./apiKey.title": "API Key",
+    "schema.@whimkit/plugin-dashscope#api-key./baseUrl.title": "Base URL",
+    "schema.@whimkit/plugin-dashscope#api-key./baseUrl.description": "完整的 compatible-mode 地址。留空则使用 https://dashscope.aliyuncs.com/compatible-mode/v1。"
+}

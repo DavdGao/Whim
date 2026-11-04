@@ -1,0 +1,10 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "lib": ["ES2023"],
+        "types": ["node", "electron"]
+    },
+    "include": ["src/main/**/*", "src/backend/**/*", "src/shared/**/*"]
+}

@@ -1,0 +1,141 @@
+import { BoxesIcon, MessageSquareIcon, PuzzleIcon, SettingsIcon } from 'lucide-react';
+import { useState } from 'react';
+
+import { ChatPage } from './features/chat/chat-page';
+import { ModelsPage } from './features/models/models-page';
+import { PluginsPage } from './features/plugins/plugins-page';
+import { SettingsPage } from './features/settings/settings-page';
+import { AppStateProvider } from './lib/app-state';
+import { useAppState } from './lib/app-state-context';
+import { useT } from './lib/i18n';
+import { LocaleProvider } from './lib/locale-provider';
+
+import type { MessageKey } from './lib/messages';
+
+import {
+    Sidebar,
+    SidebarContent,
+    SidebarGroup,
+    SidebarGroupContent,
+    SidebarHeader,
+    SidebarInset,
+    SidebarMenu,
+    SidebarMenuButton,
+    SidebarMenuItem,
+    SidebarProvider,
+} from '@/components/ui/sidebar';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Toaster } from '@/components/ui/sonner';
+import { TooltipProvider } from '@/components/ui/tooltip';
+
+type Page = 'chat' | 'models' | 'plugins' | 'settings';
+
+const pages: { id: Page; label: MessageKey; icon: typeof MessageSquareIcon }[] = [
+    { id: 'chat', label: 'nav.chat', icon: MessageSquareIcon },
+    { id: 'models', label: 'nav.models', icon: BoxesIcon },
+    { id: 'plugins', label: 'nav.plugins', icon: PuzzleIcon },
+    { id: 'settings', label: 'nav.settings', icon: SettingsIcon },
+];
+
+/**
+ * The application shell: a navigation rail and the active page.
+ * @returns The shell.
+ */
+function Shell() {
+    const { state, status } = useAppState();
+    const { t } = useT();
+    const [page, setPage] = useState<Page>('chat');
+    const banner =
+        status === 'restarting'
+            ? t('backend.restarting')
+            : status === 'failed'
+              ? t('backend.failed')
+              : undefined;
+    return (
+        <SidebarProvider defaultOpen={false} className="h-svh">
+            <Sidebar collapsible="icon">
+                <SidebarHeader>
+                    <div className="flex h-8 items-center gap-2 px-1">
+                        <div className="bg-primary text-primary-foreground flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold">
+                            W
+                        </div>
+                        <span className="truncate font-semibold group-data-[collapsible=icon]:hidden">
+                            {t('app.name')}
+                        </span>
+                    </div>
+                </SidebarHeader>
+                <SidebarContent>
+                    <SidebarGroup>
+                        <SidebarGroupContent>
+                            <SidebarMenu>
+                                {pages.map(item => (
+                                    <SidebarMenuItem key={item.id}>
+                                        <SidebarMenuButton
+                                            isActive={page === item.id}
+                                            tooltip={t(item.label)}
+                                            onClick={() => setPage(item.id)}
+                                        >
+                                            <item.icon />
+                                            <span>{t(item.label)}</span>
+                                        </SidebarMenuButton>
+                                    </SidebarMenuItem>
+                                ))}
+                            </SidebarMenu>
+                        </SidebarGroupContent>
+                    </SidebarGroup>
+                </SidebarContent>
+            </Sidebar>
+            <SidebarInset className="min-h-0 overflow-hidden">
+                {banner && (
+                    <div className="bg-destructive/10 text-destructive px-4 py-2 text-sm">
+                        {banner}
+                    </div>
+                )}
+                {!state ? (
+                    <div className="flex flex-1 flex-col gap-3 p-8" aria-busy="true">
+                        <p className="text-muted-foreground text-sm">{t('backend.connecting')}</p>
+                        <Skeleton className="h-8 w-1/3" />
+                        <Skeleton className="h-24 w-2/3" />
+                    </div>
+                ) : (
+                    <main className="min-h-0 flex-1 overflow-auto">
+                        {page === 'chat' && (
+                            <ChatPage state={state} onOpenModels={() => setPage('models')} />
+                        )}
+                        {page === 'models' && <ModelsPage state={state} />}
+                        {page === 'plugins' && <PluginsPage state={state} />}
+                        {page === 'settings' && <SettingsPage state={state} />}
+                    </main>
+                )}
+            </SidebarInset>
+        </SidebarProvider>
+    );
+}
+
+/**
+ * Provide the locale from application state.
+ * @returns The localized shell.
+ */
+function Localized() {
+    const { state } = useAppState();
+    return (
+        <LocaleProvider locale={state?.locale ?? 'en'}>
+            <TooltipProvider>
+                <Shell />
+                <Toaster />
+            </TooltipProvider>
+        </LocaleProvider>
+    );
+}
+
+/**
+ * The Renderer root.
+ * @returns The application.
+ */
+export function App() {
+    return (
+        <AppStateProvider>
+            <Localized />
+        </AppStateProvider>
+    );
+}
