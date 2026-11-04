@@ -5,7 +5,11 @@
     "whim": {
         "host": "./dist/host.js",
         "cards": "./cards",
-        "locales": "./locales"
+        "locales": "./locales",
+        "icon": "./icons/bailian.svg",
+        "icons": {
+            "qwen": "./icons/qwen.svg"
+        }
     },
     "exports": {
         ".": {
@@ -17,7 +21,8 @@
     "files": [
         "dist",
         "cards",
-        "locales"
+        "locales",
+        "icons"
     ],
     "scripts": {
         "build": "tsc -p tsconfig.json",

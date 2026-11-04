@@ -70,3 +70,7 @@ Codes are compared case-insensitively; snake_case aliases map identically. `resp
 ## Seed cards
 
 `qwen3.8-max` and `qwen3.8-flash` ship with conservative, unverified limits (262144-token context, 32768 output tokens) and all five thinking levels, because the official model list did not state their limits on 2026-11-04. Only text input is declared until image and PDF delivery are implemented. Users can correct values with a patch file in the `models` directory. The adapter's input budget is 75% of `contextWindow`, below the silent-truncation point.
+
+## Icons
+
+`icons/bailian.svg` and `icons/qwen.svg` are the colored Bailian and Qwen marks from `@lobehub/icons-static-svg` 1.102.0 (MIT). The marks remain trademarks of their owners and identify the provider and model family only.

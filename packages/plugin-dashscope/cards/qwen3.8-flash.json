@@ -13,5 +13,6 @@
     "output": ["text/plain"],
     "thinking": { "levels": ["off", "low", "medium", "high", "max"], "default": "medium" },
     "nativeTools": [],
-    "options": {}
+    "options": {},
+    "icon": "qwen"
 }

@@ -31,20 +31,35 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [ ] Warn about unreadable attachments before a model switch (with attachments)
 - [ ] Verify seed card limits and per-model thinking levels
 
-## PR 3 — Context
+## PR 3 — Frontend design pass
+
+- [x] Sidebar holds the Whim logo and name; Settings at the bottom; title strip only for dragging, the sidebar toggle, and connection status
+- [x] Consumer design rules (design.md §11.3): large radius, icon on every button, primary/ghost roles, busy state for business actions (`ActionButton`, `useAction`), fixed dialog footer, `ChoiceMenu` instead of shadcn `Select` (lint-enforced), no internal vocabulary in visible text
+- [x] Plugin `icon`/`icons` manifest fields and card `icon` key; DashScope ships Bailian and Qwen icons
+- [x] LaTeX in answers (Streamdown math plugin, KaTeX), including `\(…\)` and `\[…\]`
+- [x] Copy action on answers (AI Elements `MessageActions`)
+- [x] Verified on Linux under Xvfb: credential dialog, model and thinking menus, math rendering, language switch, collapsed sidebar
+
+## PR 4 — Attachments
+
+- [ ] Core attachment store (immutable content, size limits), admission from card `input` and enabled processors
+- [ ] DashScope delivery of images; text files inline; PDF through a processor with page and byte limits
+- [ ] Composer attach button, drag and drop, paste; per-attachment errors; original and prepared references kept for replay
+
+## PR 5 — Context
 
 - [ ] Compaction records, epochs, UI feedback
 - [ ] Context-source tracking and notices
 - [ ] Skills
 - [ ] MEMORY.md plugin
 
-## PR 4 — Tools
+## PR 6 — Tools
 
 - [ ] Bash, Grep (ripgrep), Glob, Read, Edit, Write
 - [ ] Concurrent/serial scheduling, Job service, background handoff, JobOutput/JobStop
 - [ ] Truncation and offload
 - [ ] Permissions (manual, auto)
-- [ ] Native tool resolution (web search/fetch) and PDF processor
+- [ ] Native tool resolution (web search/fetch)
 
 ## Later
 

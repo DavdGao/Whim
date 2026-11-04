@@ -55,6 +55,8 @@ export const chatCardSchema = z.strictObject({
     thinking: thinkingSchema.optional(),
     nativeTools: z.array(idSchema).default([]),
     options: z.record(z.string(), z.unknown()).default({}),
+    /** Key into the `icons` of the adapter's plugin; display only. */
+    icon: z.string().min(1).max(100).optional(),
 });
 export type ChatCard = z.infer<typeof chatCardSchema>;
 

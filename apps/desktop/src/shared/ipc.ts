@@ -67,6 +67,10 @@ export interface PluginInfo {
     readonly availability: string;
     readonly error?: string;
     readonly locales: Readonly<Record<string, Readonly<Record<string, string>>>>;
+    /** Plugin logo as a `data:` URL. */
+    readonly icon?: string;
+    /** Named card icons as `data:` URLs. */
+    readonly icons: Readonly<Record<string, string>>;
 }
 
 export interface CredentialTypeInfo {

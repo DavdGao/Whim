@@ -114,6 +114,23 @@ export default [
         },
     },
     {
+        // design.md §11.3: single choices use dropdown radio menus (ChoiceMenu).
+        files: ['apps/desktop/src/renderer/**/*.{ts,tsx}'],
+        rules: {
+            'no-restricted-imports': [
+                'error',
+                {
+                    paths: [
+                        {
+                            name: '@/components/ui/select',
+                            message: 'Use ChoiceMenu (a DropdownMenu radio menu) instead.',
+                        },
+                    ],
+                },
+            ],
+        },
+    },
+    {
         files: ['**/components/ui/**/*.{ts,tsx}'],
         rules: {
             'jsdoc/require-description': 'off',

@@ -1,10 +1,23 @@
-import { KeyRoundIcon, PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react';
+import {
+    BoxIcon,
+    CheckIcon,
+    KeyRoundIcon,
+    PencilIcon,
+    PlusIcon,
+    RefreshCwIcon,
+    Trash2Icon,
+    XIcon,
+} from 'lucide-react';
 import { useState } from 'react';
-import { toast } from 'sonner';
 
+import { ActionButton } from '../../components/action-button';
+import { ChoiceMenu } from '../../components/choice-menu';
+import { EntityIcon } from '../../components/entity-icon';
 import { call, ClientError } from '../../lib/client';
 import { useT } from '../../lib/i18n';
+import { modelIcon } from '../../lib/icons';
 import { pluginText } from '../../lib/messages';
+import { useAction } from '../../lib/use-action';
 import { modelChoices } from '../chat/model-choices';
 
 import { SchemaForm } from './schema-form';
@@ -32,13 +45,7 @@ import {
 } from '@/components/ui/dialog';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
+import { Spinner } from '@/components/ui/spinner';
 
 /**
  * Display name of a credential type from its plugin's catalog.
@@ -89,12 +96,10 @@ function CredentialDialog({
         return initial;
     });
     const [issues, setIssues] = useState<Record<string, string>>({});
-    const [saving, setSaving] = useState(false);
     const type = state.credentialTypes.find(item => item.id === typeId);
     const plugin = state.plugins.find(item => item.id === type?.pluginId);
 
-    const save = async () => {
-        setSaving(true);
+    const save = useAction(async () => {
         try {
             await call('credentials.save', {
                 ...(editing ? { id: editing.id } : {}),
@@ -102,21 +107,19 @@ function CredentialDialog({
                 label: label.trim() || typeName(state, typeId, locale),
                 values,
             });
-            onOpenChange(false);
         } catch (error) {
             if (error instanceof ClientError && error.error.issues)
                 setIssues(
                     Object.fromEntries(error.error.issues.map(issue => [issue.path, issue.message]))
                 );
-            toast.error(error instanceof ClientError ? error.message : t('error.generic'));
-        } finally {
-            setSaving(false);
+            throw error;
         }
-    };
+        onOpenChange(false);
+    });
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent>
+            <DialogContent className="flex max-h-[85svh] flex-col sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle>
                         {editing ? t('models.editCredential') : t('models.addCredential')}
@@ -126,61 +129,70 @@ function CredentialDialog({
                     </DialogDescription>
                 </DialogHeader>
                 <form
-                    className="flex flex-col gap-6"
+                    className="flex min-h-0 flex-1 flex-col gap-4"
                     onSubmit={event => {
                         event.preventDefault();
-                        void save();
+                        void save.run();
                     }}
                 >
-                    <FieldGroup>
-                        {!editing && state.credentialTypes.length > 1 && (
+                    {/* Only the body scrolls; header and footer stay in place. */}
+                    <div className="-mx-4 flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-4 pb-1">
+                        <FieldGroup>
+                            {!editing && state.credentialTypes.length > 1 && (
+                                <Field>
+                                    <FieldLabel htmlFor="credential-type">
+                                        {t('models.credentialType')}
+                                    </FieldLabel>
+                                    <ChoiceMenu
+                                        id="credential-type"
+                                        value={typeId}
+                                        choices={state.credentialTypes.map(item => ({
+                                            value: item.id,
+                                            label: typeName(state, item.id, locale),
+                                        }))}
+                                        icon={<KeyRoundIcon />}
+                                        placeholder={t('models.credentialType')}
+                                        className="w-full"
+                                        onChange={setTypeId}
+                                    />
+                                </Field>
+                            )}
                             <Field>
-                                <FieldLabel htmlFor="credential-type">
-                                    {t('models.credentialType')}
+                                <FieldLabel htmlFor="credential-label">
+                                    {t('models.label')}
                                 </FieldLabel>
-                                <Select value={typeId} onValueChange={setTypeId}>
-                                    <SelectTrigger id="credential-type">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {state.credentialTypes.map(item => (
-                                            <SelectItem key={item.id} value={item.id}>
-                                                {typeName(state, item.id, locale)}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <Input
+                                    id="credential-label"
+                                    value={label}
+                                    placeholder={typeId ? typeName(state, typeId, locale) : ''}
+                                    onChange={event => setLabel(event.currentTarget.value)}
+                                />
                             </Field>
-                        )}
-                        <Field>
-                            <FieldLabel htmlFor="credential-label">{t('models.label')}</FieldLabel>
-                            <Input
-                                id="credential-label"
-                                value={label}
-                                placeholder={typeId ? typeName(state, typeId, locale) : ''}
-                                onChange={event => setLabel(event.currentTarget.value)}
+                        </FieldGroup>
+                        {type && (
+                            <SchemaForm
+                                schemaId={type.id}
+                                schema={type.schema}
+                                locales={plugin?.locales}
+                                values={values}
+                                secretsSet={editing?.secretsSet ?? []}
+                                issues={issues}
+                                onChange={(name, value) =>
+                                    setValues(current => ({ ...current, [name]: value }))
+                                }
                             />
-                        </Field>
-                    </FieldGroup>
-                    {type && (
-                        <SchemaForm
-                            schemaId={type.id}
-                            schema={type.schema}
-                            locales={plugin?.locales}
-                            values={values}
-                            secretsSet={editing?.secretsSet ?? []}
-                            issues={issues}
-                            onChange={(name, value) =>
-                                setValues(current => ({ ...current, [name]: value }))
-                            }
-                        />
-                    )}
+                        )}
+                    </div>
                     <DialogFooter>
-                        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                            {t('common.cancel')}
+                        <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+                            <XIcon /> {t('common.cancel')}
                         </Button>
-                        <Button type="submit" disabled={saving || !typeId}>
-                            {t('common.save')}
+                        <Button
+                            type="submit"
+                            disabled={save.pending || !typeId}
+                            aria-busy={save.pending || undefined}
+                        >
+                            {save.pending ? <Spinner /> : <CheckIcon />} {t('common.save')}
                         </Button>
                     </DialogFooter>
                 </form>
@@ -229,9 +241,11 @@ export function ModelsPage({ state }: { state: AppState }) {
                     {state.credentials.map(credential => (
                         <div
                             key={credential.id}
-                            className="flex items-center gap-3 rounded-lg border px-3 py-2"
+                            className="flex items-center gap-3 rounded-2xl border px-4 py-3"
                         >
-                            <KeyRoundIcon className="text-muted-foreground size-4" />
+                            <span className="bg-muted flex size-9 shrink-0 items-center justify-center rounded-full">
+                                <KeyRoundIcon className="text-muted-foreground size-4" />
+                            </span>
                             <div className="min-w-0 flex-1">
                                 <p className="truncate text-sm font-medium">{credential.label}</p>
                                 <p className="text-muted-foreground truncate text-xs">
@@ -249,18 +263,13 @@ export function ModelsPage({ state }: { state: AppState }) {
                             >
                                 <PencilIcon />
                             </Button>
-                            <Button
+                            <ActionButton
                                 size="icon-sm"
                                 variant="ghost"
                                 aria-label={t('common.delete')}
-                                onClick={() =>
-                                    void call('credentials.remove', { id: credential.id }).catch(
-                                        () => toast.error(t('error.generic'))
-                                    )
-                                }
-                            >
-                                <Trash2Icon />
-                            </Button>
+                                icon={<Trash2Icon />}
+                                action={() => call('credentials.remove', { id: credential.id })}
+                            />
                         </div>
                     ))}
                 </CardContent>
@@ -272,28 +281,32 @@ export function ModelsPage({ state }: { state: AppState }) {
                     <CardDescription>{t('models.defaultChatDescription')}</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <Select
-                        value={defaultCard ?? ''}
+                    <ChoiceMenu
+                        value={defaultCard}
                         disabled={choices.length === 0}
-                        onValueChange={cardId => {
+                        choices={choices.map(choice => ({
+                            value: choice.card.id,
+                            label: choice.card.name,
+                            icon: (
+                                <EntityIcon
+                                    src={modelIcon(state, choice.card)}
+                                    fallback={BoxIcon}
+                                />
+                            ),
+                        }))}
+                        icon={<BoxIcon />}
+                        placeholder={t('chat.model')}
+                        aria-label={t('models.defaultChat')}
+                        className="w-72"
+                        onChange={cardId => {
                             const choice = choices.find(item => item.card.id === cardId);
-                            if (choice)
-                                void call('settings.chatSlot', {
-                                    slot: { cardId, credentialId: choice.credentialId },
-                                });
+                            return choice
+                                ? call('settings.chatSlot', {
+                                      slot: { cardId, credentialId: choice.credentialId },
+                                  })
+                                : undefined;
                         }}
-                    >
-                        <SelectTrigger className="w-72" aria-label={t('models.defaultChat')}>
-                            <SelectValue placeholder={t('chat.model')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {choices.map(choice => (
-                                <SelectItem key={choice.card.id} value={choice.card.id}>
-                                    {choice.card.name}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
+                    />
                 </CardContent>
             </Card>
 
@@ -304,25 +317,33 @@ export function ModelsPage({ state }: { state: AppState }) {
                         {t('models.catalogDescription', { dir: state.userCardsDir })}
                     </CardDescription>
                     <CardAction>
-                        <Button
+                        <ActionButton
                             size="sm"
                             variant="outline"
-                            onClick={() => void call('catalog.reload', {})}
+                            icon={<RefreshCwIcon />}
+                            action={() => call('catalog.reload', {})}
                         >
-                            <RefreshCwIcon /> {t('models.reload')}
-                        </Button>
+                            {t('models.reload')}
+                        </ActionButton>
                     </CardAction>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-2">
                     {state.catalog.map(entry => (
-                        <div key={entry.id} className="rounded-lg border px-3 py-2">
+                        <div key={entry.id} className="rounded-2xl border px-4 py-3">
                             <div className="flex flex-wrap items-center gap-2">
+                                <EntityIcon
+                                    src={entry.card ? modelIcon(state, entry.card) : undefined}
+                                    fallback={BoxIcon}
+                                    className="size-5"
+                                />
                                 <p className="text-sm font-medium">
                                     {entry.card?.name ?? entry.id}
                                 </p>
-                                <code className="text-muted-foreground text-xs">
-                                    {entry.card ? entry.id : ''}
-                                </code>
+                                {entry.card && (
+                                    <code className="text-muted-foreground text-xs">
+                                        {entry.card.model}
+                                    </code>
+                                )}
                                 <span className="flex-1" />
                                 {entry.card && (
                                     <span className="text-muted-foreground text-xs">

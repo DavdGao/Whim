@@ -1,10 +1,13 @@
-import { MessageSquareIcon, XIcon } from 'lucide-react';
+import { CheckIcon, CopyIcon, MessageSquareIcon, XIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 
+import { ActionButton } from '../../components/action-button';
 import { call } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 
 import { FailureNotice } from './failure-notice';
+import { mathPlugin, normalizeMath } from './math';
 
 import type { Draft } from './use-session';
 import type { Block, Failure, HistoryEntry, SessionView } from '@whimkit/core/contracts';
@@ -15,10 +18,15 @@ import {
     ConversationEmptyState,
     ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
-import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
+import {
+    Message,
+    MessageAction,
+    MessageActions,
+    MessageContent,
+    MessageResponse,
+} from '@/components/ai-elements/message';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 
 /**
  * Join the text of blocks of one type.
@@ -31,6 +39,37 @@ function textOf(blocks: readonly Block[], type: 'text' | 'reasoning'): string {
         .filter(block => block.type === type)
         .map(block => ('text' in block ? block.text : ''))
         .join('');
+}
+
+/**
+ * Copy an answer's text to the clipboard.
+ * @param props The text.
+ * @param props.text Markdown of the answer.
+ * @returns The action row.
+ */
+function CopyAction({ text }: { text: string }) {
+    const { t } = useT();
+    const [copied, setCopied] = useState(false);
+    useEffect(() => {
+        if (!copied) return;
+        const timer = setTimeout(() => setCopied(false), 1500);
+        return () => clearTimeout(timer);
+    }, [copied]);
+    return (
+        <MessageActions>
+            <MessageAction
+                tooltip={copied ? t('common.copied') : t('common.copy')}
+                onClick={() =>
+                    void navigator.clipboard.writeText(text).then(
+                        () => setCopied(true),
+                        () => toast.error(t('error.generic'))
+                    )
+                }
+            >
+                {copied ? <CheckIcon /> : <CopyIcon />}
+            </MessageAction>
+        </MessageActions>
+    );
 }
 
 /**
@@ -57,7 +96,7 @@ function Bubble({
     reasoning?: string;
     streaming?: boolean;
     badge?: string;
-    onRemove?: () => void;
+    onRemove?: () => Promise<unknown>;
 }) {
     const { t } = useT();
     return (
@@ -70,17 +109,25 @@ function Bubble({
                     </Reasoning>
                 ) : null}
                 {role === 'assistant' ? (
-                    <MessageResponse>{text}</MessageResponse>
+                    <MessageResponse plugins={{ math: mathPlugin }}>
+                        {normalizeMath(text)}
+                    </MessageResponse>
                 ) : (
                     <p className="whitespace-pre-wrap">{text}</p>
                 )}
+                {role === 'assistant' && !streaming && text && <CopyAction text={text} />}
                 {(badge || onRemove) && (
                     <div className="flex items-center gap-2">
                         {badge && <Badge variant="secondary">{badge}</Badge>}
                         {onRemove && (
-                            <Button size="xs" variant="ghost" onClick={onRemove}>
-                                <XIcon /> {t('chat.withdraw')}
-                            </Button>
+                            <ActionButton
+                                size="xs"
+                                variant="ghost"
+                                icon={<XIcon />}
+                                action={onRemove}
+                            >
+                                {t('chat.withdraw')}
+                            </ActionButton>
                         )}
                     </div>
                 )}
@@ -187,7 +234,7 @@ export function Transcript({
                             text={textOf(item.item.blocks, 'text')}
                             badge={t('chat.pending')}
                             onRemove={() =>
-                                void call('session.withdraw', {
+                                call('session.withdraw', {
                                     sessionId: view.sessionId,
                                     deliveryId: item.deliveryId,
                                 })

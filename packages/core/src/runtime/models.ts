@@ -55,7 +55,7 @@ export class ModelService {
         const issues = registered.optionsSchema.issues(card.options);
         if (issues.length)
             throw unavailable(
-                `The session's card options are no longer valid: ${issues[0].message}.`
+                `The session's model options are no longer valid: ${issues[0].message}.`
             );
         const credential = await this.credentials.resolve(credentialId);
         if (!registered.adapter.credentialTypes.includes(credential.typeId))

@@ -1,8 +1,10 @@
 import { PuzzleIcon } from 'lucide-react';
 
+import { EntityIcon } from '../../components/entity-icon';
 import { call } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 import { pluginText } from '../../lib/messages';
+import { useAction } from '../../lib/use-action';
 
 import type { AppState } from '../../../shared/ipc';
 
@@ -18,6 +20,37 @@ const availabilityKeys = {
     modified: 'plugins.availability.modified',
     'missing-dependency': 'plugins.availability.missing-dependency',
 } as const;
+
+/**
+ * The desired-activation switch of one plugin, disabled while the change is saved.
+ * @param props Switch props.
+ * @param props.id The element id.
+ * @param props.pluginId The plugin.
+ * @param props.enabled Desired activation.
+ * @returns The switch.
+ */
+function PluginSwitch({
+    id,
+    pluginId,
+    enabled,
+}: {
+    id: string;
+    pluginId: string;
+    enabled: boolean;
+}) {
+    const toggle = useAction((next: boolean) =>
+        call('plugins.setEnabled', { id: pluginId, enabled: next })
+    );
+    return (
+        <Switch
+            id={id}
+            checked={enabled}
+            disabled={toggle.pending}
+            aria-busy={toggle.pending || undefined}
+            onCheckedChange={next => void toggle.run(next)}
+        />
+    );
+}
 
 /**
  * The Plugins page: installation, version, availability, and desired activation.
@@ -40,8 +73,12 @@ export function PluginsPage({ state }: { state: AppState }) {
                 return (
                     <Card key={plugin.id}>
                         <CardContent className="flex items-start gap-4">
-                            <div className="bg-muted rounded-lg p-2">
-                                <PuzzleIcon className="size-5" />
+                            <div className="bg-muted flex size-11 shrink-0 items-center justify-center rounded-2xl">
+                                <EntityIcon
+                                    src={plugin.icon}
+                                    fallback={PuzzleIcon}
+                                    className="size-6"
+                                />
                             </div>
                             <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
@@ -87,15 +124,10 @@ export function PluginsPage({ state }: { state: AppState }) {
                             <div className="flex flex-col items-end gap-1">
                                 <div className="flex items-center gap-2">
                                     <Label htmlFor={switchId}>{t('plugins.enabled')}</Label>
-                                    <Switch
+                                    <PluginSwitch
                                         id={switchId}
-                                        checked={plugin.enabled}
-                                        onCheckedChange={enabled =>
-                                            void call('plugins.setEnabled', {
-                                                id: plugin.id,
-                                                enabled,
-                                            })
-                                        }
+                                        pluginId={plugin.id}
+                                        enabled={plugin.enabled}
                                     />
                                 </div>
                                 {((plugin.enabled && plugin.availability === 'disabled') ||

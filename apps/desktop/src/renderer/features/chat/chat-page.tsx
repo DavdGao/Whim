@@ -1,7 +1,8 @@
-import { PlusIcon, SettingsIcon } from 'lucide-react';
+import { BoxesIcon, MessageSquareIcon, PlayIcon, PlusIcon } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
+import { ActionButton } from '../../components/action-button';
 import { call, ClientError } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 
@@ -57,24 +58,19 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
     const running = Boolean(view?.run);
 
     const changeSlot = async (next: ChatSlot) => {
-        try {
-            if (!view) await call('settings.chatSlot', { slot: next });
-            else if (next.cardId !== view.epoch.card.id || next.credentialId !== view.credentialId)
-                await call('session.switchModel', {
-                    sessionId: view.sessionId,
-                    cardId: next.cardId,
-                    credentialId: next.credentialId,
-                });
-            else if (next.thinking && next.thinking !== view.thinking)
-                await call('session.setThinking', {
-                    sessionId: view.sessionId,
-                    thinking: next.thinking,
-                });
-        } catch (error) {
-            notify(error, t('error.generic'));
-        }
+        if (!view) await call('settings.chatSlot', { slot: next });
+        else if (next.cardId !== view.epoch.card.id || next.credentialId !== view.credentialId)
+            await call('session.switchModel', {
+                sessionId: view.sessionId,
+                cardId: next.cardId,
+                credentialId: next.credentialId,
+            });
+        else if (next.thinking && next.thinking !== view.thinking)
+            await call('session.setThinking', {
+                sessionId: view.sessionId,
+                thinking: next.thinking,
+            });
     };
-
     const send = async (text: string) => {
         try {
             let sessionId = selected;
@@ -121,10 +117,11 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                                 onClick={() => setSelected(item.sessionId)}
                                 aria-current={item.sessionId === selected ? 'page' : undefined}
                                 className={cn(
-                                    'hover:bg-accent focus-visible:ring-ring flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none focus-visible:ring-2',
+                                    'hover:bg-accent focus-visible:ring-ring flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm outline-none focus-visible:ring-2',
                                     item.sessionId === selected && 'bg-accent font-medium'
                                 )}
                             >
+                                <MessageSquareIcon className="text-muted-foreground size-4 shrink-0" />
                                 <span className="min-w-0 flex-1 truncate">
                                     {item.title || t('chat.untitled')}
                                 </span>
@@ -145,7 +142,7 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                         </EmptyHeader>
                         <EmptyContent>
                             <Button onClick={onOpenModels}>
-                                <SettingsIcon /> {t('chat.setup.action')}
+                                <BoxesIcon /> {t('chat.setup.action')}
                             </Button>
                         </EmptyContent>
                     </Empty>
@@ -183,17 +180,18 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                                 !view.run &&
                                 view.lastRun?.result.outcome === 'interrupted' && (
                                     <div className="mx-auto">
-                                        <Button
+                                        <ActionButton
                                             size="sm"
                                             variant="outline"
-                                            onClick={() =>
-                                                void call('session.continue', {
+                                            icon={<PlayIcon />}
+                                            action={() =>
+                                                call('session.continue', {
                                                     sessionId: view.sessionId,
                                                 })
                                             }
                                         >
                                             {t('chat.continue')}
-                                        </Button>
+                                        </ActionButton>
                                     </div>
                                 )}
                             <Composer
@@ -201,7 +199,7 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                                 slot={slot}
                                 running={running}
                                 modelLocked={running}
-                                onSlotChange={next => void changeSlot(next)}
+                                onSlotChange={changeSlot}
                                 onSend={send}
                                 onStop={() =>
                                     view &&
