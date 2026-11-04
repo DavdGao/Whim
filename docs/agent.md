@@ -185,7 +185,7 @@ The switch is recorded as `epoch.started { reason: 'model-switch' }`, and the co
 
 ### 9.1 Definitions
 
-Tools are registered by plugins through `context.tools.register(definition)`; Core registers only the job tools (`JobOutput`, `JobStop`). First-party plugins provide `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep` (`@whimkit/plugin-workspace`) and local `WebSearch`/`WebFetch` (`@whimkit/plugin-web`). An MCP bridge would be one more plugin registering tools; nothing in Core is MCP-specific.
+Tools are registered by plugins through `context.tools.register(definition)`; Core registers only the job tools (`JobOutput`, `JobStop`). First-party plugins provide `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep` (`@whimkit/plugin-workspace`) and local `WebFetch` (`@whimkit/plugin-web`; a local `WebSearch` needs a keyed search API and is not available yet, so web search is native-only for now). An MCP bridge would be one more plugin registering tools; nothing in Core is MCP-specific.
 
 ```ts
 interface ToolDefinition {

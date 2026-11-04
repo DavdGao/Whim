@@ -67,8 +67,10 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [x] Tool runtime: validation, scheduling (parallel safe groups, per-workspace lock), jobs with background handoff, `JobOutput`/`JobStop`, offload above 32 KiB, recovery of lost calls and jobs
 - [x] Manual permissions with session grants; Tool and Confirmation display in chat
 - [x] Responses function calling; DashScope native `web_search`/`web_extractor`
-- [ ] `@whimkit/plugin-workspace`: Bash, Read, Write, Edit, Glob, Grep
-- [ ] `@whimkit/plugin-web`: local WebSearch and WebFetch
+- [x] `@whimkit/plugin-workspace`: Bash, Read, Write, Edit, Glob, Grep (ripgrep via `@vscode/ripgrep`)
+- [x] `@whimkit/plugin-web`: local WebFetch
+- [ ] Local WebSearch through a keyed search API (provider to be chosen); scraping a search engine's HTML was dropped because it is challenged as a bot and goes against the engine's intent
+- [ ] Package the ripgrep binary outside the asar archive when building the macOS app
 - [ ] Live DashScope check of function calling with thinking models (reasoning item replay)
 - [ ] Persistent permission rules in Settings; auto mode with a reviewer model
 

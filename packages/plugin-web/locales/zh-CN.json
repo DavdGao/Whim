@@ -1,0 +1,4 @@
+{
+    "plugin.name": "网络工具",
+    "plugin.description": "为没有原生联网能力的模型读取网页。"
+}

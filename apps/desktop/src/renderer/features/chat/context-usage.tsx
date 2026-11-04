@@ -71,7 +71,9 @@ export function ContextUsage({
             <HoverCardTrigger asChild>
                 <Button type="button" variant="ghost" size="sm" aria-label={t('context.title')}>
                     <Ring percent={percent} />
-                    <span className="text-muted-foreground tabular-nums">{percent}%</span>
+                    <span className="text-muted-foreground tabular-nums">
+                        {used > 0 && percent === 0 ? '<1' : percent}%
+                    </span>
                 </Button>
             </HoverCardTrigger>
             <HoverCardContent align="end" className="flex w-64 flex-col gap-3 rounded-2xl">

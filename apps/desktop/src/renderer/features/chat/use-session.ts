@@ -67,6 +67,7 @@ export function useSession(sessionId: string | undefined): SessionState {
         setState({ view: undefined, draft: undefined, discarded: undefined, error: undefined });
         if (!sessionId) return;
         void load(sessionId);
+        const finishedAttempts = new Set<string>();
         // Coalesce stream deltas to one render per animation frame.
         const flush = () => {
             frame.current = undefined;
@@ -88,6 +89,7 @@ export function useSession(sessionId: string | undefined): SessionState {
         const unsubscribe = subscribe(event => {
             if (!('sessionId' in event) || event.sessionId !== sessionId) return;
             if (event.type === 'stream') {
+                if (finishedAttempts.has(event.attemptId)) return;
                 pendingDeltas.current.push(event);
                 frame.current ??= requestAnimationFrame(flush);
             } else if (event.type === 'discarded') {
@@ -113,9 +115,17 @@ export function useSession(sessionId: string | undefined): SessionState {
                     return;
                 }
                 viewRef.current = view;
-                const finished = event.records.some(
-                    record => record.body.type === 'attempt.finished'
-                );
+                let finished = false;
+                for (const record of event.records)
+                    if (record.body.type === 'attempt.finished') {
+                        finished = true;
+                        // Deltas still waiting for a frame belong to committed text now.
+                        finishedAttempts.add(record.body.attemptId);
+                    }
+                if (finished)
+                    pendingDeltas.current = pendingDeltas.current.filter(
+                        delta => !finishedAttempts.has(delta.attemptId)
+                    );
                 setState(current => ({
                     ...current,
                     view,
