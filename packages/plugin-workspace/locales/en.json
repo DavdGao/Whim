@@ -1,0 +1,4 @@
+{
+    "plugin.name": "Workspace tools",
+    "plugin.description": "Run commands and read, write, edit, and search files in the session workspace."
+}

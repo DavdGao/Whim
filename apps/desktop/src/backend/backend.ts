@@ -760,10 +760,12 @@ class Backend {
  */
 function bundledPlugins(): { dir: string; source: 'bundled' }[] {
     const require = createRequire(import.meta.url);
-    return ['@whimkit/plugin-dashscope'].map(name => ({
-        dir: dirname(require.resolve(`${name}/package.json`)),
-        source: 'bundled' as const,
-    }));
+    return ['@whimkit/plugin-dashscope', '@whimkit/plugin-workspace', '@whimkit/plugin-web'].map(
+        name => ({
+            dir: dirname(require.resolve(`${name}/package.json`)),
+            source: 'bundled' as const,
+        })
+    );
 }
 
 const initSchema = z.strictObject({ type: z.literal('init'), userData: z.string().min(1) });

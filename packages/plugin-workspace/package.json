@@ -1,0 +1,36 @@
+{
+    "name": "@whimkit/plugin-workspace",
+    "version": "0.1.0",
+    "type": "module",
+    "whim": {
+        "host": "./dist/host.js",
+        "category": "tools",
+        "locales": "./locales"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/host.d.ts",
+            "import": "./dist/host.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "dist",
+        "locales"
+    ],
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "test": "node --test \"dist/**/*.test.js\""
+    },
+    "dependencies": {
+        "@vscode/ripgrep": "^1.18.0"
+    },
+    "peerDependencies": {
+        "@whimkit/core": "0.1.0"
+    },
+    "devDependencies": {
+        "@whimkit/core": "workspace:*",
+        "@types/node": "^24.10.0"
+    }
+}

@@ -17,6 +17,8 @@
         "@whimkit/agent": "workspace:*",
         "@whimkit/core": "workspace:*",
         "@whimkit/plugin-dashscope": "workspace:*",
+        "@whimkit/plugin-web": "workspace:*",
+        "@whimkit/plugin-workspace": "workspace:*",
         "ai": "^7.0.162",
         "class-variance-authority": "^0.7.1",
         "cmdk": "^1.1.1",

@@ -1,0 +1,4 @@
+{
+    "plugin.name": "Web tools",
+    "plugin.description": "Reads web pages for models without native web access."
+}
