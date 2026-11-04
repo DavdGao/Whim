@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 
 import { Agent, rendererVersion } from '@whimkit/agent';
 import {
@@ -13,6 +14,7 @@ import {
     PluginHost,
     Store,
     StoreError,
+    ToolRuntime,
 } from '@whimkit/core';
 import { z } from 'zod';
 
@@ -38,7 +40,35 @@ import type { MessagePortMain } from 'electron';
 
 const parentPort = process.parentPort;
 const maxConcurrentRuns = 4;
-const systemPrompt = 'You are Whim, a helpful assistant. Answer clearly and concisely.';
+const basePrompt = 'You are Whim, a helpful assistant. Answer clearly and concisely.';
+
+/**
+ * The system prompt of a new epoch: base instructions plus the environment as observed now.
+ * Frozen with the epoch; it changes only at compaction or a model switch.
+ * @param workspace The session's workspace.
+ * @param tools Whether any tools are offered.
+ * @returns The prompt.
+ */
+function systemPrompt(workspace: string | undefined, tools: boolean): string {
+    const now = new Date();
+    const lines = [
+        basePrompt,
+        '',
+        `<environment observed-at="${now.toISOString()}">`,
+        `Date: ${now.toISOString().slice(0, 10)}`,
+        `Platform: ${process.platform}`,
+        workspace
+            ? `Workspace: ${workspace} (relative paths resolve here)`
+            : 'Workspace: none; file and shell tools are not available in this chat.',
+        '</environment>',
+    ];
+    if (tools)
+        lines.push(
+            '',
+            'Use tools when they help. Read files before editing them. Calls that change files, run commands, or reach the network may ask the user first; if a call is denied, do not retry it unchanged.'
+        );
+    return lines.join('\n');
+}
 
 /** Asks Main to encrypt and decrypt with Electron safeStorage, which is Main-only. */
 class MainCipher implements SecretCipher {
@@ -141,13 +171,16 @@ function toIpcError(error: unknown): IpcError {
     return { code: 'internal', message: describeError(error) };
 }
 
+type RunTrigger = 'user' | 'continue' | 'restart' | 'job';
+
 /** Owns Core services, the agent, run scheduling, and the Renderer connection. */
 class Backend {
     #renderer: MessagePortMain | undefined;
     readonly #runs = new Map<string, { controller: AbortController; done: Promise<void> }>();
-    readonly #queue: { sessionId: string; trigger: 'user' | 'continue' | 'restart' }[] = [];
+    readonly #queue: { sessionId: string; trigger: RunTrigger }[] = [];
     #accepting = true;
     readonly agent: Agent;
+    readonly tools: ToolRuntime;
 
     /**
      * Wire services together.
@@ -156,23 +189,34 @@ class Backend {
      * @param catalog Model cards.
      * @param credentials Credentials.
      * @param models Adapter binding.
+     * @param artifactsDir Directory for offloaded tool output.
      */
     constructor(
         readonly store: Store,
         readonly host: PluginHost,
         readonly catalog: Catalog,
         readonly credentials: CredentialService,
-        readonly models: ModelService
+        readonly models: ModelService,
+        artifactsDir: string
     ) {
-        this.agent = new Agent(store, models);
+        // A finished background job wakes an idle session so the agent can react to it.
+        this.tools = new ToolRuntime(store, host, artifactsDir, sessionId =>
+            this.schedule(sessionId, 'job')
+        );
+        this.agent = new Agent(store, models, this.tools);
         store.onCommit(records => {
             const sessionId = records[0]?.sessionId;
             if (sessionId) this.#emit({ type: 'records', sessionId, records });
             if (
                 records.some(record =>
-                    ['session.created', 'session.updated', 'run.started', 'run.ended'].includes(
-                        record.body.type
-                    )
+                    [
+                        'session.created',
+                        'session.updated',
+                        'run.started',
+                        'run.ended',
+                        'permission.requested',
+                        'permission.decided',
+                    ].includes(record.body.type)
                 )
             )
                 this.#emit({ type: 'state' });
@@ -264,10 +308,20 @@ class Backend {
             }
             case 'session.get':
                 return this.snapshot(methodSchemas[method].parse(raw).sessionId);
-            case 'session.create':
-                return {
-                    sessionId: await this.createSession(methodSchemas[method].parse(raw).slot),
-                };
+            case 'session.create': {
+                const params = methodSchemas[method].parse(raw);
+                return { sessionId: await this.createSession(params.slot, params.workspace) };
+            }
+            case 'session.decide': {
+                const params = methodSchemas[method].parse(raw);
+                await this.tools.decide(
+                    params.sessionId,
+                    params.callId,
+                    params.decision,
+                    params.scope
+                );
+                return null;
+            }
             case 'session.send': {
                 const params = methodSchemas[method].parse(raw);
                 return { deliveryId: await this.send(params.sessionId, params.text) };
@@ -382,12 +436,36 @@ class Backend {
     }
 
     /**
+     * The tool set and prompt of a new epoch.
+     * @param card The card the epoch uses.
+     * @param workspace The session's workspace.
+     * @returns Epoch fields.
+     */
+    #epoch(card: ChatCard, workspace: string | undefined) {
+        const tools = this.tools.declarations(workspace, card.nativeTools);
+        return {
+            epochId: randomUUID(),
+            system: systemPrompt(workspace, tools.length + card.nativeTools.length > 0),
+            card: freeze(card),
+            renderer: rendererVersion,
+            tools,
+            nativeTools: [...card.nativeTools],
+        };
+    }
+
+    /**
      * Create a session from a chat slot.
      * @param slot Credential, card, and thinking level.
+     * @param workspace Absolute directory the session works in.
      * @returns The session id.
      */
-    async createSession(slot: ChatSlot): Promise<string> {
+    async createSession(slot: ChatSlot, workspace?: string): Promise<string> {
         const card = await this.#checkBinding(slot.cardId, slot.credentialId);
+        if (workspace !== undefined) {
+            const info = isAbsolute(workspace) ? await stat(workspace).catch(() => null) : null;
+            if (!info?.isDirectory())
+                throw new StoreError('invalid', 'The workspace folder does not exist.');
+        }
         const sessionId = randomUUID();
         await this.store.execute({
             type: 'create',
@@ -396,12 +474,8 @@ class Backend {
             title: '',
             credentialId: slot.credentialId,
             ...(slot.thinking ? { thinking: slot.thinking } : {}),
-            epoch: {
-                epochId: randomUUID(),
-                system: systemPrompt,
-                card: freeze(card),
-                renderer: rendererVersion,
-            },
+            ...(workspace ? { workspace } : {}),
+            epoch: this.#epoch(card, workspace),
         });
         await this.store.setSetting('slot.chat', slot);
         return sessionId;
@@ -422,12 +496,8 @@ class Backend {
             type: 'switch-model',
             sessionId,
             operationId: randomUUID(),
-            epoch: {
-                epochId: randomUUID(),
-                system: view.epoch.system,
-                card: freeze(card),
-                renderer: rendererVersion,
-            },
+            // The prefix changes with the model anyway, so the tool set and environment refresh.
+            epoch: this.#epoch(card, view.workspace),
         });
         if (credentialId !== view.credentialId)
             await this.store.execute({
@@ -489,7 +559,7 @@ class Backend {
      * @param sessionId The session.
      * @param trigger Why the run starts.
      */
-    schedule(sessionId: string, trigger: 'user' | 'continue' | 'restart'): void {
+    schedule(sessionId: string, trigger: RunTrigger): void {
         if (!this.#accepting || this.#runs.has(sessionId)) return;
         if (this.#runs.size >= maxConcurrentRuns) {
             if (!this.#queue.some(item => item.sessionId === sessionId))
@@ -510,11 +580,7 @@ class Backend {
      * @param trigger Why the run started.
      * @param signal Interruption.
      */
-    async #pump(
-        sessionId: string,
-        trigger: 'user' | 'continue' | 'restart',
-        signal: AbortSignal
-    ): Promise<void> {
+    async #pump(sessionId: string, trigger: RunTrigger, signal: AbortSignal): Promise<void> {
         try {
             for await (const event of this.agent.run(sessionId, trigger, signal))
                 this.#forward(event);
@@ -609,6 +675,7 @@ class Backend {
             Promise.all(stopping),
             new Promise(resolve => setTimeout(resolve, 5000)),
         ]);
+        await this.tools.shutdown();
         this.catalog.stop();
         await this.host.stop();
         await this.store.close();
@@ -679,7 +746,8 @@ async function start(userData: string): Promise<void> {
             host,
             catalog,
             credentials,
-            new ModelService(host, credentials)
+            new ModelService(host, credentials),
+            join(userData, 'artifacts')
         );
         await backend.recover();
         for (const port of pendingPorts.splice(0)) backend.attach(port);

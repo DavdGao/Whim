@@ -136,7 +136,7 @@ Startup applies the same rules when a plugin is missing or fails to activate.
 | Credential type | A JSON Schema for one kind of account credential (§6)                                                               |
 | Model adapter   | Implements one model kind (`chat`, later `decision`, `tts`, `asr`, `embedding`) (§7.4)                              |
 | Processor       | Converts an attachment media type into model-deliverable content (§8)                                               |
-| Tool            | A local tool declaration and executor ([agent.md §9](agent.md#9-tools))                                             |
+| Tool            | A local tool definition and executor ([agent.md §9](agent.md#9-tools)); names are unique across plugins             |
 | Context source  | A prefix-affecting source such as skills or memory ([agent.md §7](agent.md#7-context-sources-and-the-prompt-cache)) |
 | Settings        | A JSON Schema for plugin-level settings, stored by Core                                                             |
 

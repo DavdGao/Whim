@@ -1,7 +1,15 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { app, BrowserWindow, MessageChannelMain, safeStorage, utilityProcess } from 'electron';
+import {
+    app,
+    BrowserWindow,
+    dialog,
+    ipcMain,
+    MessageChannelMain,
+    safeStorage,
+    utilityProcess,
+} from 'electron';
 
 import type { UtilityProcess } from 'electron';
 
@@ -134,6 +142,14 @@ if (!app.requestSingleInstanceLock()) {
         window?.focus();
     });
     app.whenReady().then(() => {
+        // Folder picker for a chat's workspace; only the application window may ask.
+        ipcMain.handle('whim:choose-directory', async event => {
+            if (!window || event.sender !== window.webContents) return null;
+            const result = await dialog.showOpenDialog(window, {
+                properties: ['openDirectory', 'createDirectory'],
+            });
+            return result.canceled ? null : (result.filePaths[0] ?? null);
+        });
         startBackend();
         createWindow();
         app.on('activate', () => {

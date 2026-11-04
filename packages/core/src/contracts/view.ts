@@ -1,6 +1,14 @@
 import type { FrozenChatCard, ThinkingLevel } from './card.js';
 import type { Failure } from './failure.js';
-import type { AgentRecord, BodyOf, ContextItem, Usage } from './records.js';
+import type {
+    Access,
+    AgentRecord,
+    BodyOf,
+    ContextItem,
+    PermissionRule,
+    ToolDeclaration,
+    Usage,
+} from './records.js';
 
 export interface HistoryEntry {
     readonly seq: number;
@@ -23,6 +31,26 @@ export interface Epoch {
     readonly system: string;
     readonly card: FrozenChatCard;
     readonly renderer: number;
+    readonly tools: readonly ToolDeclaration[];
+    readonly nativeTools: readonly string[];
+}
+
+/** A tool call of the current step that has no result yet. */
+export interface OpenCall {
+    readonly callId: string;
+    readonly name: string;
+    readonly arguments: string;
+    readonly state: 'pending' | 'asking' | 'running';
+    /** Set while asking: what the call touches. */
+    readonly access?: readonly Access[];
+    readonly jobId?: string;
+}
+
+/** A job that moved to the background and has not ended. */
+export interface BackgroundJob {
+    readonly jobId: string;
+    readonly callId: string;
+    readonly name: string;
 }
 
 export interface ActiveRun {
@@ -44,11 +72,15 @@ export interface SessionView {
     readonly title: string;
     readonly credentialId: string;
     readonly thinking?: ThinkingLevel;
+    readonly workspace?: string;
     readonly epoch: Epoch;
     readonly history: readonly HistoryEntry[];
     readonly inbox: ReadonlyMap<string, PendingDelivery>;
     readonly run?: ActiveRun;
     readonly lastRun?: { readonly runId: string; readonly result: BodyOf<'run.ended'>['result'] };
+    readonly calls: readonly OpenCall[];
+    readonly jobs: readonly BackgroundJob[];
+    readonly permissionRules: readonly PermissionRule[];
     readonly usage: Usage;
     readonly createdAt: string;
     readonly updatedAt: string;
@@ -98,9 +130,13 @@ export function foldSession(records: readonly AgentRecord[]): SessionView {
         title: first.body.title,
         credentialId: first.body.credentialId,
         ...(first.body.thinking ? { thinking: first.body.thinking } : {}),
+        ...(first.body.workspace ? { workspace: first.body.workspace } : {}),
         epoch: { seq: 2, ...epochOf(second.body) },
         history: [],
         inbox: new Map(),
+        calls: [],
+        jobs: [],
+        permissionRules: [],
         usage: {},
         createdAt: first.createdAt,
         updatedAt: second.createdAt,
@@ -121,6 +157,8 @@ function epochOf(body: BodyOf<'epoch.started'>): Omit<Epoch, 'seq'> {
         system: body.system,
         card: body.card,
         renderer: body.renderer,
+        tools: body.tools,
+        nativeTools: body.nativeTools,
     };
 }
 
@@ -212,6 +250,21 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
             const usage = addUsage(view.usage, body.usage);
             const result = body.result;
             if (result.status === 'failed') return { ...base, usage, run: rest };
+            const calls: OpenCall[] = [];
+            for (const block of result.output.blocks)
+                if (block.type === 'tool_call') {
+                    if (result.status !== 'completed')
+                        throw new InvalidJournalError(
+                            'An interrupted attempt cannot request tools.',
+                            record.seq
+                        );
+                    calls.push({
+                        callId: block.callId,
+                        name: block.name,
+                        arguments: block.arguments,
+                        state: 'pending',
+                    });
+                }
             const history =
                 result.output.blocks.length > 0
                     ? [
@@ -228,7 +281,7 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
                           },
                       ]
                     : view.history;
-            return { ...base, usage, history, run: rest };
+            return { ...base, usage, history, calls: [...view.calls, ...calls], run: rest };
         }
         case 'retry.scheduled': {
             const active = requireRun(view, body.runId, record.seq);
@@ -248,10 +301,94 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
             const active = requireRun(view, body.runId, record.seq);
             if (active.attempt)
                 throw new InvalidJournalError('Run ended with an open attempt.', record.seq);
+            if (view.calls.length)
+                throw new InvalidJournalError('Run ended with unanswered tool calls.', record.seq);
             const { run: _run, ...rest } = base;
             return { ...rest, lastRun: { runId: body.runId, result: body.result } };
         }
+        case 'permission.requested': {
+            requireRun(view, body.runId, record.seq);
+            const call = requireCall(view, body.callId, 'pending', record.seq);
+            return {
+                ...base,
+                calls: replaceCall(view, { ...call, state: 'asking', access: body.access }),
+            };
+        }
+        case 'permission.decided': {
+            requireRun(view, body.runId, record.seq);
+            const { access: _access, ...call } = requireCall(
+                view,
+                body.callId,
+                'asking',
+                record.seq
+            );
+            return {
+                ...base,
+                calls: replaceCall(view, { ...call, state: 'pending' }),
+                permissionRules: [...view.permissionRules, ...body.rules],
+            };
+        }
+        case 'tool.started': {
+            requireRun(view, body.runId, record.seq);
+            const call = requireCall(view, body.callId, 'pending', record.seq);
+            return {
+                ...base,
+                calls: replaceCall(view, { ...call, state: 'running', jobId: body.jobId }),
+            };
+        }
+        case 'tool.finished': {
+            const result = body.result;
+            const call = requireCall(view, result.callId, undefined, record.seq);
+            if (result.status === 'background' && !result.jobId)
+                throw new InvalidJournalError('A background result needs a job.', record.seq);
+            return {
+                ...base,
+                calls: view.calls.filter(item => item.callId !== call.callId),
+                history: [...view.history, { seq: record.seq, item: result }],
+                jobs:
+                    result.status === 'background' && result.jobId
+                        ? [
+                              ...view.jobs,
+                              { jobId: result.jobId, callId: call.callId, name: call.name },
+                          ]
+                        : view.jobs,
+            };
+        }
+        case 'job.ended':
+            if (!view.jobs.some(job => job.jobId === body.jobId))
+                throw new InvalidJournalError('Ended job is not running.', record.seq);
+            return { ...base, jobs: view.jobs.filter(job => job.jobId !== body.jobId) };
     }
+}
+
+/**
+ * Find an open call, optionally in a required state.
+ * @param view The current view.
+ * @param callId The call.
+ * @param state The state it must be in, if any.
+ * @param seq The record sequence for error reporting.
+ * @returns The call.
+ */
+function requireCall(
+    view: SessionView,
+    callId: string,
+    state: OpenCall['state'] | undefined,
+    seq: number
+): OpenCall {
+    const call = view.calls.find(item => item.callId === callId);
+    if (!call || (state && call.state !== state))
+        throw new InvalidJournalError(`Tool call is not ${state ?? 'open'}.`, seq);
+    return call;
+}
+
+/**
+ * Replace one open call, keeping order.
+ * @param view The current view.
+ * @param call The updated call.
+ * @returns The new call list.
+ */
+function replaceCall(view: SessionView, call: OpenCall): OpenCall[] {
+    return view.calls.map(item => (item.callId === call.callId ? call : item));
 }
 
 /**

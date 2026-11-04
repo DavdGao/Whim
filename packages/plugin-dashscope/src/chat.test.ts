@@ -6,7 +6,7 @@ import { ApplicationError } from '@whimkit/core/contracts';
 import { createChatAdapter, credentialTypeId } from './chat.js';
 
 import type { FrozenChatCard } from '@whimkit/core/contracts';
-import type { ChatEvent } from '@whimkit/core/plugin';
+import type { ChatEvent, ChatRequest } from '@whimkit/core/plugin';
 
 const card: FrozenChatCard = {
     id: 'dashscope/qwen3.8-flash',
@@ -57,9 +57,20 @@ function sse(frames: unknown[]): Response {
  * Run one attempt and collect its events or failure.
  * @param transport The fake transport.
  * @param baseUrl Optional credential base URL.
+ * @param request The chat request.
  * @returns Events and the thrown failure, if any.
  */
-async function run(transport: typeof fetch, baseUrl?: string) {
+async function run(
+    transport: typeof fetch,
+    baseUrl?: string,
+    request: ChatRequest = {
+        system: 'sys',
+        messages: [{ role: 'user', blocks: [{ type: 'text', text: 'hi' }] }],
+        thinking: 'high',
+        tools: [],
+        nativeTools: [],
+    }
+) {
     const session = createChatAdapter(transport).open({
         card,
         credential: {
@@ -70,14 +81,7 @@ async function run(transport: typeof fetch, baseUrl?: string) {
     });
     const events: ChatEvent[] = [];
     try {
-        for await (const event of session.stream(
-            {
-                system: 'sys',
-                messages: [{ role: 'user', blocks: [{ type: 'text', text: 'hi' }] }],
-                thinking: 'high',
-            },
-            new AbortController().signal
-        ))
+        for await (const event of session.stream(request, new AbortController().signal))
             events.push(event);
         return { events };
     } catch (error) {
@@ -113,6 +117,140 @@ describe('DashScope Responses adapter', () => {
             max_output_tokens: 100,
             reasoning: { effort: 'xhigh' },
         });
+    });
+
+    it('declares tools, replays calls and results, and reports tool calls', async () => {
+        const search = {
+            type: 'web_search_call',
+            id: 'ws_1',
+            status: 'completed',
+            action: {
+                type: 'search',
+                query: 'whim',
+                sources: [{ type: 'url', url: 'https://a.example' }],
+            },
+        };
+        const extract = {
+            type: 'web_extractor_call',
+            id: 'we_1',
+            status: 'completed',
+            goal: 'read it',
+            urls: ['https://a.example'],
+            output: 'A summary.',
+        };
+        const { transport, requests } = fakeFetch(() =>
+            sse([
+                { type: 'response.output_item.done', item: search },
+                { type: 'response.output_item.done', item: extract },
+                {
+                    type: 'response.output_item.done',
+                    item: {
+                        type: 'function_call',
+                        id: 'fc_1',
+                        call_id: 'call_2',
+                        name: 'Read',
+                        arguments: '{"path":"b"}',
+                    },
+                },
+                { type: 'response.completed', response: { status: 'completed' } },
+            ])
+        );
+        const adapter = '@whimkit/plugin-dashscope#responses';
+        const result = await run(transport, undefined, {
+            system: 'sys',
+            messages: [
+                { role: 'user', blocks: [{ type: 'text', text: 'read a' }] },
+                {
+                    role: 'assistant',
+                    blocks: [
+                        {
+                            type: 'native_tool_call',
+                            adapter,
+                            format: 1,
+                            tool: 'web_search',
+                            status: 'completed',
+                            data: search,
+                        },
+                        {
+                            type: 'native_tool_call',
+                            adapter,
+                            format: 1,
+                            tool: 'web_fetch',
+                            status: 'completed',
+                            urls: ['https://a.example'],
+                            data: extract,
+                        },
+                        { type: 'text', text: 'Reading.' },
+                        {
+                            type: 'tool_call',
+                            callId: 'call_1',
+                            name: 'Read',
+                            arguments: '{"path":"a"}',
+                        },
+                    ],
+                },
+                { role: 'tool', callId: 'call_1', status: 'success', content: 'file a' },
+            ],
+            tools: [{ name: 'Read', description: 'Read a file.', inputSchema: { type: 'object' } }],
+            nativeTools: ['web_search', 'web_fetch'],
+        });
+        assert.deepEqual(requests[0].body, {
+            model: 'qwen3.8-flash',
+            instructions: 'sys',
+            input: [
+                { role: 'user', content: [{ type: 'input_text', text: 'read a' }] },
+                search,
+                {
+                    role: 'assistant',
+                    content: [
+                        { type: 'output_text', text: 'Fetched https://a.example:\nA summary.' },
+                    ],
+                },
+                { role: 'assistant', content: [{ type: 'output_text', text: 'Reading.' }] },
+                {
+                    type: 'function_call',
+                    call_id: 'call_1',
+                    name: 'Read',
+                    arguments: '{"path":"a"}',
+                },
+                { type: 'function_call_output', call_id: 'call_1', output: 'file a' },
+            ],
+            tools: [
+                { type: 'web_search' },
+                { type: 'web_extractor' },
+                {
+                    type: 'function',
+                    name: 'Read',
+                    description: 'Read a file.',
+                    parameters: { type: 'object' },
+                },
+            ],
+            stream: true,
+            store: false,
+            max_output_tokens: 100,
+        });
+        assert.deepEqual(result.events, [
+            {
+                type: 'native-tool-call',
+                format: 1,
+                tool: 'web_search',
+                status: 'completed',
+                query: 'whim',
+                urls: ['https://a.example'],
+                data: search,
+            },
+            {
+                type: 'native-tool-call',
+                format: 1,
+                tool: 'web_fetch',
+                status: 'completed',
+                query: 'read it',
+                urls: ['https://a.example'],
+                data: extract,
+            },
+            { type: 'tool-call', callId: 'call_2', name: 'Read', arguments: '{"path":"b"}' },
+            { type: 'completed', usage: {} },
+        ]);
     });
 
     it('maps HTTP failures with provider detail', async () => {

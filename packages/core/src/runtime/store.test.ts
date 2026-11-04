@@ -55,7 +55,14 @@ async function createSession(store: Store): Promise<string> {
             type: 'create',
             title: 'Chat',
             credentialId: 'cred',
-            epoch: { epochId: randomUUID(), system: 'system', card, renderer: 1 },
+            epoch: {
+                epochId: randomUUID(),
+                system: 'system',
+                card,
+                renderer: 1,
+                tools: [],
+                nativeTools: [],
+            },
         })
     );
     return sessionId;

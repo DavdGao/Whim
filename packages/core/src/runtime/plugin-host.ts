@@ -14,6 +14,7 @@ import type {
     Disposer,
     PluginContext,
     PluginDefinition,
+    ToolDefinition,
 } from '../plugin/index.js';
 
 const manifestSchema = z.object({
@@ -143,6 +144,14 @@ export interface RegisteredChatAdapter {
     readonly optionsSchema: CompiledSchema;
 }
 
+export interface RegisteredTool {
+    readonly pluginId: string;
+    readonly tool: ToolDefinition<unknown>;
+    readonly inputSchema: CompiledSchema;
+}
+
+const toolNamePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+
 const activationTimeoutMs = 10_000;
 
 /**
@@ -191,6 +200,8 @@ export function describeError(error: unknown): string {
 export class PluginHost {
     readonly credentialTypes = new Map<string, RegisteredCredentialType>();
     readonly chatAdapters = new Map<string, RegisteredChatAdapter>();
+    /** Tools in registration order, keyed by model-facing name. */
+    readonly tools = new Map<string, RegisteredTool>();
     readonly #statuses = new Map<string, PluginStatus>();
     readonly #scopes = new Map<
         string,
@@ -332,9 +343,11 @@ export class PluginHost {
         const staged: {
             credentialTypes: RegisteredCredentialType[];
             adapters: RegisteredChatAdapter[];
+            tools: RegisteredTool[];
         } = {
             credentialTypes: [],
             adapters: [],
+            tools: [],
         };
         const abort = new AbortController();
         const prefix = `${id}#`;
@@ -370,6 +383,23 @@ export class PluginHost {
                     return () => this.chatAdapters.delete(adapter.id);
                 },
             },
+            tools: {
+                register: tool => {
+                    if (!toolNamePattern.test(tool.name))
+                        throw new Error(`Invalid tool name ${tool.name}.`);
+                    if (
+                        this.tools.has(tool.name) ||
+                        staged.tools.some(entry => entry.tool.name === tool.name)
+                    )
+                        throw new Error(`Tool ${tool.name} exists.`);
+                    staged.tools.push({
+                        pluginId: id,
+                        tool,
+                        inputSchema: new CompiledSchema(tool.inputSchema),
+                    });
+                    return () => this.tools.delete(tool.name);
+                },
+            },
         };
         try {
             const module: unknown = await import(pathToFileURL(join(dir, manifest.whim.host)).href);
@@ -394,6 +424,10 @@ export class PluginHost {
             for (const entry of staged.adapters) {
                 this.chatAdapters.set(entry.adapter.id, entry);
                 disposers.push(() => this.chatAdapters.delete(entry.adapter.id));
+            }
+            for (const entry of staged.tools) {
+                this.tools.set(entry.tool.name, entry);
+                disposers.push(() => this.tools.delete(entry.tool.name));
             }
             this.#scopes.set(id, { disposers, definition, abort });
             this.#setStatus(id, 'active');

@@ -4,6 +4,7 @@ interface Bridge {
     invoke(method: string, params: unknown): Promise<unknown>;
     onEvent(listener: (event: unknown) => void): () => void;
     onStatus(listener: (status: string) => void): () => void;
+    chooseDirectory(): Promise<string | null>;
 }
 
 declare global {
@@ -78,4 +79,12 @@ export function subscribe(listener: (event: BackendEvent) => void): () => void {
  */
 export function onStatus(listener: (status: string) => void): () => void {
     return window.whim.onStatus(listener);
+}
+
+/**
+ * Ask the user for a folder with the system dialog.
+ * @returns The absolute path, or null when cancelled.
+ */
+export function chooseDirectory(): Promise<string | null> {
+    return window.whim.chooseDirectory();
 }

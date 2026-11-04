@@ -21,6 +21,15 @@ export interface AgentStore {
     view(sessionId: string): Promise<SessionView>;
 }
 
+/** Tool port; Core's ToolRuntime implements it. */
+export interface AgentTools {
+    /**
+     * Execute the open calls of the current step, committing one result for each. Returns
+     * early when the run is interrupted.
+     */
+    run(sessionId: string, runId: string, signal: AbortSignal): Promise<void>;
+}
+
 /** Model port; Core's ModelService implements it. */
 export interface AgentModels {
     open(card: FrozenChatCard, credentialId: string): Promise<ChatSession>;
@@ -60,7 +69,10 @@ export type AgentEvent =
       };
 
 type StepOutcome =
-    { kind: 'completed' } | { kind: 'interrupted' } | { kind: 'failed'; failure: Failure };
+    | { kind: 'completed' }
+    | { kind: 'tools' }
+    | { kind: 'interrupted' }
+    | { kind: 'failed'; failure: Failure };
 
 const defaultRetry: RetryPolicy = { maxAttempts: 4, baseDelayMs: 1000, maxDelayMs: 30_000 };
 
@@ -113,11 +125,13 @@ export class Agent {
      * Create an agent over its ports.
      * @param store Persistence.
      * @param models Model binding.
+     * @param tools Tool execution.
      * @param options Retry and timing policy.
      */
     constructor(
         private readonly store: AgentStore,
         private readonly models: AgentModels,
+        private readonly tools: AgentTools,
         options: AgentOptions = {}
     ) {
         this.#retry = options.retry ?? defaultRetry;
@@ -149,7 +163,7 @@ export class Agent {
      */
     async *run(
         sessionId: string,
-        trigger: 'user' | 'continue' | 'restart',
+        trigger: 'user' | 'continue' | 'restart' | 'job',
         signal: AbortSignal
     ): AsyncGenerator<AgentEvent> {
         const runId = randomUUID();
@@ -184,6 +198,16 @@ export class Agent {
                 if (outcome.kind === 'failed') {
                     result = { outcome: 'failed', failure: outcome.failure };
                     break;
+                }
+                if (outcome.kind === 'tools') {
+                    await this.tools.run(sessionId, runId, signal);
+                    if (signal.aborted) {
+                        result = {
+                            outcome: 'interrupted',
+                            reason: (await this.store.view(sessionId)).run?.interrupt ?? 'user',
+                        };
+                        break;
+                    }
                 }
             }
         } catch (error) {
@@ -239,6 +263,8 @@ export class Agent {
             system: view.epoch.system,
             messages: toRequestMessages(view.history),
             ...(thinking ? { thinking } : {}),
+            tools: view.epoch.tools,
+            nativeTools: view.epoch.nativeTools,
         };
         let session: ChatSession;
         try {
@@ -248,7 +274,7 @@ export class Agent {
         }
         const estimate = session.countTokens
             ? await session.countTokens(request, signal)
-            : estimateTokens(request.system, request.messages);
+            : estimateTokens(request.system, request.messages, request.tools);
         if (estimate > session.inputBudget())
             return {
                 kind: 'failed',
@@ -275,6 +301,8 @@ export class Agent {
             const text: string[] = [];
             const reasoning: string[] = [];
             const continuations: Block[] = [];
+            const natives: Block[] = [];
+            const calls: Block[] = [];
             const thinking: { start?: number; end?: number } = {};
             let usage: Usage = {};
             let published = false;
@@ -305,6 +333,16 @@ export class Agent {
                             format: event.format,
                             data: event.data,
                         });
+                    } else if (event.type === 'tool-call') {
+                        calls.push({
+                            type: 'tool_call',
+                            callId: event.callId,
+                            name: event.name,
+                            arguments: event.arguments,
+                        });
+                    } else if (event.type === 'native-tool-call') {
+                        const { type: _type, ...rest } = event;
+                        natives.push({ type: 'native_tool_call', adapter: card.adapter, ...rest });
                     } else usage = event.usage;
                 }
                 await this.#exec(sessionId, {
@@ -315,11 +353,19 @@ export class Agent {
                         status: 'completed',
                         output: {
                             messageId: randomUUID(),
-                            blocks: outputBlocks(reasoning, continuations, text, thinking),
+                            blocks: [
+                                ...outputBlocks(
+                                    reasoning,
+                                    [...continuations, ...natives],
+                                    text,
+                                    thinking
+                                ),
+                                ...calls,
+                            ],
                         },
                     },
                 });
-                return { kind: 'completed' };
+                return calls.length ? { kind: 'tools' } : { kind: 'completed' };
             } catch (error) {
                 if (signal.aborted) {
                     await this.#exec(sessionId, {
@@ -330,7 +376,8 @@ export class Agent {
                             status: 'interrupted',
                             output: {
                                 messageId: randomUUID(),
-                                blocks: outputBlocks(reasoning, [], text, thinking),
+                                // Calls of an interrupted attempt are never executed.
+                                blocks: outputBlocks(reasoning, natives, text, thinking),
                             },
                         },
                     });

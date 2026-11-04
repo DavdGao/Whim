@@ -71,6 +71,10 @@ contextBridge.exposeInMainWorld('whim', {
         listeners.add(listener);
         return () => listeners.delete(listener);
     },
+    async chooseDirectory(): Promise<string | null> {
+        const path: unknown = await ipcRenderer.invoke('whim:choose-directory');
+        return typeof path === 'string' ? path : null;
+    },
     onStatus(listener: (status: string) => void): () => void {
         statusListeners.add(listener);
         return () => statusListeners.delete(listener);

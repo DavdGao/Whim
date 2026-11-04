@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { readSse } from './sse.js';
 
-import type { Usage } from '@whimkit/core/contracts';
+import type { NativeToolCallBlock, ToolDeclaration, Usage } from '@whimkit/core/contracts';
 import type { ChatEvent, ChatRequestMessage } from '@whimkit/core/plugin';
 
 /** Continuation format version for Responses output items replayed with `store: false`. */
@@ -63,38 +63,148 @@ export function normalizeUsage(usage: z.infer<typeof usageSchema>): Usage {
     };
 }
 
+export interface InputOptions {
+    /**
+     * Input items that replay a provider-executed call; by default its stored output item.
+     * Return an empty array to drop it.
+     */
+    readonly replayNative?: (block: NativeToolCallBlock) => unknown[];
+}
+
 /**
- * Serialize messages as Responses `input` items. Continuation items are replayed only when
- * they were produced by the same adapter in the current format.
+ * Serialize messages as Responses `input` items. Continuation and native items are replayed
+ * only when they were produced by the same adapter in the current format.
  * @param messages Request messages.
  * @param adapterId The adapter serializing the request.
+ * @param options Native replay policy.
  * @returns The `input` array.
  */
 export function toResponsesInput(
     messages: readonly ChatRequestMessage[],
-    adapterId: string
+    adapterId: string,
+    options: InputOptions = {}
 ): unknown[] {
     const input: unknown[] = [];
     for (const message of messages) {
+        if (message.role === 'tool') {
+            input.push({
+                type: 'function_call_output',
+                call_id: message.callId,
+                output: message.content,
+            });
+            continue;
+        }
         const content: unknown[] = [];
+        const flush = () => {
+            if (content.length) input.push({ role: message.role, content: content.splice(0) });
+        };
         for (const block of message.blocks) {
             if (block.type === 'text' && block.text.length > 0)
                 content.push({
                     type: message.role === 'assistant' ? 'output_text' : 'input_text',
                     text: block.text,
                 });
-            else if (
-                block.type === 'continuation' &&
+            else if (block.type === 'tool_call') {
+                flush();
+                input.push({
+                    type: 'function_call',
+                    call_id: block.callId,
+                    name: block.name,
+                    arguments: block.arguments,
+                });
+            } else if (
+                (block.type === 'continuation' || block.type === 'native_tool_call') &&
                 block.adapter === adapterId &&
                 block.format === responsesContinuationFormat
             ) {
-                if (content.length) input.push({ role: message.role, content: content.splice(0) });
-                input.push(block.data);
+                flush();
+                if (block.type === 'continuation') input.push(block.data);
+                else input.push(...(options.replayNative?.(block) ?? [block.data]));
             }
         }
-        if (content.length) input.push({ role: message.role, content });
+        flush();
     }
     return input;
+}
+
+/**
+ * Declare local tools as Responses function tools.
+ * @param tools Tool declarations.
+ * @returns Entries for the request's `tools` array.
+ */
+export function toResponsesTools(tools: readonly ToolDeclaration[]): unknown[] {
+    return tools.map(tool => ({
+        type: 'function',
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.inputSchema,
+    }));
+}
+
+const functionCallSchema = z.looseObject({
+    type: z.literal('function_call'),
+    call_id: z.string().min(1),
+    name: z.string().min(1),
+    arguments: z.string(),
+});
+
+const webSearchCallSchema = z.looseObject({
+    type: z.literal('web_search_call'),
+    status: z.string().optional(),
+    action: z
+        .looseObject({
+            query: z.string().nullish(),
+            sources: z.array(z.looseObject({ url: z.string().nullish() })).nullish(),
+        })
+        .nullish(),
+});
+
+/** A provider-executed call as a stream event, minus the parts the caller fills in. */
+export type NativeEvent = Extract<ChatEvent, { type: 'native-tool-call' }>;
+
+export interface StreamOptions {
+    /** Map vendor-specific output items to native calls; consulted before the defaults. */
+    readonly nativeItem?: (item: Readonly<Record<string, unknown>>) => NativeEvent | undefined;
+}
+
+/**
+ * Interpret a finished output item.
+ * @param item The item.
+ * @param options Vendor mapping.
+ * @returns The event it produces, if any.
+ */
+function itemEvent(
+    item: Readonly<Record<string, unknown>> & { type: string },
+    options: StreamOptions
+): ChatEvent | undefined {
+    if (item.type === 'reasoning')
+        return { type: 'continuation', format: responsesContinuationFormat, data: item };
+    const call = functionCallSchema.safeParse(item);
+    if (call.success)
+        return {
+            type: 'tool-call',
+            callId: call.data.call_id,
+            name: call.data.name,
+            arguments: call.data.arguments,
+        };
+    const vendor = options.nativeItem?.(item);
+    if (vendor) return vendor;
+    const search = webSearchCallSchema.safeParse(item);
+    if (search.success) {
+        const urls = (search.data.action?.sources ?? []).flatMap(source =>
+            source.url ? [source.url] : []
+        );
+        return {
+            type: 'native-tool-call',
+            format: responsesContinuationFormat,
+            tool: 'web_search',
+            status: search.data.status === 'failed' ? 'failed' : 'completed',
+            ...(search.data.action?.query ? { query: search.data.action.query } : {}),
+            ...(urls.length ? { urls } : {}),
+            data: item,
+        };
+    }
+    return undefined;
 }
 
 /** A terminal stream failure reported by the provider inside the event stream. */
@@ -121,10 +231,12 @@ export class ResponsesStreamError extends Error {
  * Decode a Responses SSE body into normalized chat events. Ends with `completed` or throws
  * `ResponsesStreamError`; JSON and framing errors propagate unchanged for the adapter to map.
  * @param body The response body.
+ * @param options Vendor mapping of output items.
  * @yields Normalized events.
  */
 export async function* readResponsesStream(
-    body: ReadableStream<Uint8Array>
+    body: ReadableStream<Uint8Array>,
+    options: StreamOptions = {}
 ): AsyncGenerator<ChatEvent> {
     for await (const frame of readSse(body)) {
         if (frame.data === '[DONE]') continue;
@@ -137,14 +249,11 @@ export async function* readResponsesStream(
             case 'response.reasoning_summary_text.delta':
                 if (event.delta) yield { type: 'reasoning-delta', text: event.delta };
                 break;
-            case 'response.output_item.done':
-                if (event.item?.type === 'reasoning')
-                    yield {
-                        type: 'continuation',
-                        format: responsesContinuationFormat,
-                        data: event.item,
-                    };
+            case 'response.output_item.done': {
+                const produced = event.item ? itemEvent(event.item, options) : undefined;
+                if (produced) yield produced;
                 break;
+            }
             case 'response.completed':
                 yield { type: 'completed', usage: normalizeUsage(event.response?.usage) };
                 return;

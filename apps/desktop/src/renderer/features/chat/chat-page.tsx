@@ -45,6 +45,7 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
     const { t } = useT();
     const [selected, setSelected] = useState<string | undefined>(state.sessions[0]?.sessionId);
     const session = useSession(selected);
+    const [workspace, setWorkspace] = useState<string | undefined>();
     const view = session.view;
     const hasModels = modelChoices(state).length > 0;
     const fallbackSlot = state.chatSlot ?? firstSlot(state);
@@ -76,7 +77,12 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
             let sessionId = selected;
             if (!sessionId) {
                 if (!slot) return;
-                sessionId = (await call('session.create', { slot })).sessionId;
+                sessionId = (
+                    await call('session.create', {
+                        slot,
+                        ...(workspace ? { workspace } : {}),
+                    })
+                ).sessionId;
                 setSelected(sessionId);
             }
             await call('session.send', { sessionId, text });
@@ -201,6 +207,8 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                                 modelLocked={running}
                                 onSlotChange={changeSlot}
                                 onSend={send}
+                                workspace={view ? view.workspace : workspace}
+                                {...(selected ? {} : { onWorkspaceChange: setWorkspace })}
                                 onStop={() =>
                                     view &&
                                     void call('session.stop', { sessionId: view.sessionId }).catch(

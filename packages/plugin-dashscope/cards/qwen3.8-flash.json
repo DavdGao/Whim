@@ -12,7 +12,7 @@
     },
     "output": ["text/plain"],
     "thinking": { "levels": ["off", "low", "medium", "high", "max"], "default": "medium" },
-    "nativeTools": [],
+    "nativeTools": ["web_search", "web_fetch"],
     "options": {},
     "icon": "qwen"
 }
