@@ -69,14 +69,14 @@ Keep the foundational packages `@whimkit/core` and `@whimkit/agent`, plus protoc
 - Stop admitting calls before bounded draining or cancellation, then clean up in reverse dependency order. Disabling or uninstalling code must not implicitly delete business history. Follow design.md §5.4: preview impact, stop admission, interrupt runs that use the plugin, deactivate dependents first, keep sessions and credentials.
 - Bind in-flight calls to a configuration revision and adapter generation. Non-prompt configuration applies to later calls; prompt-affecting changes wait for compaction. Package upgrades take effect after restart; the first release does not hot-swap production code.
 - Use the application's commands, queries, and model services. Do not bypass them to write SQL directly or omit model usage accounting. Keep atomic work completion inside Core rather than exposing arbitrary plugin transactions.
-- Describe credentials, plugin settings, and card options with JSON Schema 2020-12. Mark secrets with `writeOnly` and `format: "password"`; Core stores them in Keychain. Add `x-whim-` keywords only when documented in design.md.
+- Describe credentials, plugin settings, and card options with JSON Schema 2020-12. Mark secrets with `writeOnly` and `format: "password"`; Core stores them encrypted with Electron `safeStorage`. Add `x-whim-` keywords only when documented in design.md.
 - Plugins register credential types; adapters declare which credential types they accept. Do not duplicate credential fields per model kind.
 - Do not put provider protocol compatibility layers or vendor heuristics in Core. Shared protocol code is a library plugins import; vendor differences are stated in each plugin's code, never inferred from URLs.
 - Process isolation is not a permission sandbox. Trusted plugins share Backend's failure domain. An uncooperative host task may require restarting Backend.
 
 ## Database and recovery invariants
 
-- Use one SQLite business database. Store credentials in macOS Keychain and references in the database. Do not put credentials, request headers, or full request bodies into diagnostic logs.
+- Use one SQLite business database. Store credential secrets only as `safeStorage` ciphertext (its key lives in the macOS Keychain); never store or log them in plain text. Do not put credentials, request headers, or full request bodies into diagnostic logs.
 - Preserve the complete agent state as append-only records: messages, state transitions, tasks, compaction, plans, attempts, effects, and usage. Stable record IDs and ordered session sequences must support replay and future immutable-prefix forks. Mutable agent views must be rebuildable.
 - Global activity is only an atomic operation index with references, without logical content or a duplicate execution-result state machine. Do not impose a general event-sourcing framework on unrelated settings.
 - Keep parameterized SQL inside core's storage implementation. Send each short transaction to the DB worker as one operation. Do not await network I/O inside a transaction or hold it across RPC calls.
@@ -128,7 +128,7 @@ Keep the foundational packages `@whimkit/core` and `@whimkit/agent`, plus protoc
 
 - The project is English-first, including documentation, identifiers, comments, and commit titles. The frontend must offer English and Simplified Chinese from the initial shell, with a persistent language selector.
 - Put application and plugin UI strings in typed en/zh-CN catalogs, including accessibility labels, errors, and loading states. Verify key parity and English fallback. Never implicitly translate user content or model output.
-- Use official shadcn/ui components and AI Elements installed with the official CLI into `apps/desktop/src/components/ui`, with Tailwind CSS and lucide-react. Do not hand-write lookalikes or override component internals with broad selectors. Introduce a shared UI package only when plugin client entries need it.
+- Use official shadcn/ui components and AI Elements installed with the official CLI into `apps/desktop/src/components/ui`, with Tailwind CSS and lucide-react. Do not hand-write lookalikes or override component internals with broad selectors. CLI-installed component directories are vendored: lint excludes them, and they change through the CLI, except for minimal documented fixes. Introduce a shared UI package only when plugin client entries need it.
 - The shell has a navigation rail with Chat, Models, Plugins, and Settings pages. Add a page when its feature exists, not as an empty placeholder.
 - Deliver session updates incrementally by sequence number after commit; never re-send full snapshots per streamed token.
 - Keep data access in typed clients and hooks. Components render props and hook state and submit commands; they do not implement backend business operations.

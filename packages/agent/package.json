@@ -14,16 +14,12 @@
     "scripts": {
         "build": "tsc -p tsconfig.json",
         "typecheck": "tsc -p tsconfig.json --noEmit",
-        "test": "node --test test/*.test.mjs"
+        "test": "node --test \"dist/**/*.test.js\""
     },
     "dependencies": {
-        "@whimkit/core": "workspace:*",
-        "@whimkit/models": "workspace:*",
-        "@opentelemetry/api": "^1.9.0"
+        "@whimkit/core": "workspace:*"
     },
     "devDependencies": {
-        "@types/node": "^24.10.0",
-        "@opentelemetry/sdk-trace-base": "^2.2.0",
-        "@opentelemetry/context-async-hooks": "^2.2.0"
+        "@types/node": "^24.10.0"
     }
 }

@@ -1,0 +1,8 @@
+{
+    "plugin.name": "DashScope",
+    "plugin.description": "Alibaba Cloud Model Studio models through the Responses API.",
+    "credential.@whimkit/plugin-dashscope#api-key": "DashScope API key",
+    "schema.@whimkit/plugin-dashscope#api-key./apiKey.title": "API key",
+    "schema.@whimkit/plugin-dashscope#api-key./baseUrl.title": "Base URL",
+    "schema.@whimkit/plugin-dashscope#api-key./baseUrl.description": "Full compatible-mode base URL. Leave empty for https://dashscope.aliyuncs.com/compatible-mode/v1."
+}

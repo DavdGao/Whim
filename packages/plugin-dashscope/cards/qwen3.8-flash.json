@@ -1,0 +1,17 @@
+{
+    "id": "dashscope/qwen3.8-flash",
+    "revision": 1,
+    "kind": "chat",
+    "adapter": "@whimkit/plugin-dashscope#responses",
+    "model": "qwen3.8-flash",
+    "name": "Qwen3.8 Flash",
+    "contextWindow": 262144,
+    "maxOutputTokens": 32768,
+    "input": {
+        "text/plain": {}
+    },
+    "output": ["text/plain"],
+    "thinking": { "levels": ["off", "low", "medium", "high", "max"], "default": "medium" },
+    "nativeTools": [],
+    "options": {}
+}

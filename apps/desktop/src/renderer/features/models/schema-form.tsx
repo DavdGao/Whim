@@ -1,0 +1,139 @@
+import { useT } from '../../lib/i18n';
+import { pluginText } from '../../lib/messages';
+
+import { readSchema } from './schema';
+
+import type { FormValue } from './schema';
+
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+
+export interface SchemaFormProps {
+    readonly schemaId: string;
+    readonly schema: Readonly<Record<string, unknown>>;
+    readonly locales: Readonly<Record<string, Readonly<Record<string, string>>>> | undefined;
+    readonly values: Readonly<Record<string, FormValue>>;
+    readonly secretsSet: readonly string[];
+    readonly issues: Readonly<Record<string, string>>;
+    readonly onChange: (name: string, value: FormValue) => void;
+}
+
+/**
+ * Render a form for a plugin-provided JSON Schema with shadcn fields.
+ * @param props Form props.
+ * @param props.schemaId
+ * @param props.schema
+ * @param props.locales
+ * @param props.values
+ * @param props.secretsSet
+ * @param props.issues
+ * @param props.onChange
+ * @returns The fields.
+ */
+export function SchemaForm({
+    schemaId,
+    schema,
+    locales,
+    values,
+    secretsSet,
+    issues,
+    onChange,
+}: SchemaFormProps) {
+    const { t, locale } = useT();
+    const parsed = readSchema(schema);
+    if ('error' in parsed) return <p className="text-destructive text-sm">{parsed.error}</p>;
+    return (
+        <FieldGroup>
+            {parsed.properties.map(property => {
+                const id = `field-${property.name}`;
+                const label = pluginText(
+                    locales,
+                    locale,
+                    `schema.${schemaId}./${property.name}.title`,
+                    property.title
+                );
+                const description = pluginText(
+                    locales,
+                    locale,
+                    `schema.${schemaId}./${property.name}.description`,
+                    property.description ?? ''
+                );
+                const value = values[property.name];
+                const error = issues[`/${property.name}`];
+                return (
+                    <Field key={property.name} data-invalid={Boolean(error)}>
+                        <FieldLabel htmlFor={id}>
+                            {label}
+                            {property.required && !property.secret ? ' *' : ''}
+                        </FieldLabel>
+                        {property.type === 'boolean' ? (
+                            <Switch
+                                id={id}
+                                checked={value === true}
+                                onCheckedChange={checked => onChange(property.name, checked)}
+                            />
+                        ) : property.options ? (
+                            <Select
+                                value={typeof value === 'string' ? value : ''}
+                                onValueChange={next => onChange(property.name, next)}
+                            >
+                                <SelectTrigger id={id}>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {property.options.map(option => (
+                                        <SelectItem key={option} value={option}>
+                                            {option}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        ) : (
+                            <Input
+                                id={id}
+                                type={
+                                    property.secret
+                                        ? 'password'
+                                        : property.type === 'string'
+                                          ? property.format === 'uri'
+                                              ? 'url'
+                                              : 'text'
+                                          : 'number'
+                                }
+                                autoComplete="off"
+                                value={value === null || value === undefined ? '' : String(value)}
+                                placeholder={
+                                    property.secret && secretsSet.includes(property.name)
+                                        ? t('models.secretSet')
+                                        : undefined
+                                }
+                                aria-invalid={Boolean(error)}
+                                onChange={event => {
+                                    const text = event.currentTarget.value;
+                                    onChange(
+                                        property.name,
+                                        property.type === 'string'
+                                            ? text
+                                            : text === ''
+                                              ? null
+                                              : Number(text)
+                                    );
+                                }}
+                            />
+                        )}
+                        {description && <FieldDescription>{description}</FieldDescription>}
+                        {error && <FieldError>{error}</FieldError>}
+                    </Field>
+                );
+            })}
+        </FieldGroup>
+    );
+}

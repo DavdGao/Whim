@@ -18,7 +18,7 @@ The agent is an async generator consumed by the Backend scheduler, never by a UI
 
 A session's state is the fold of its journal:
 
-- **Epoch** — the frozen prefix: system sections, tool declarations, frozen card and thinking level, source snapshots. Replaced only by compaction.
+- **Epoch** — the frozen prefix: system sections, tool declarations, the frozen card, source snapshots, and the notice renderer version. Replaced by compaction or a model switch.
 - **History** — committed context items appended after the epoch: messages, tool calls and results, notices.
 - **Inbox** — accepted deliveries not yet consumed by a reasoning step.
 - **Runs** — one active run at most. A run is a sequence of steps; each step makes one or more model attempts.
@@ -32,7 +32,8 @@ Each record has `id`, `sessionId`, `seq`, `type`, `version`, `createdAt`, `opera
 
 | Record                            | Written when                                            | Key fields                                                                                                                             |
 | --------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `session.created`                 | Session creation                                        | slot binding copied from settings                                                                                                      |
+| `session.created`                 | Session creation                                        | title, credential, thinking level                                                                                                      |
+| `session.updated`                 | Rename, credential change, thinking level change        | changed fields; none of them alter the prompt prefix, so they apply to the next attempt                                                |
 | `epoch.started`                   | Creation, successful compaction, model switch           | `epochId`, `reason`, system sections, tool declarations, frozen card, source snapshots                                                 |
 | `delivery.accepted`               | Input admitted to the inbox                             | `deliveryId`, `placement`, item (message or notice)                                                                                    |
 | `delivery.withdrawn`              | User removes a pending item                             | `deliveryId`                                                                                                                           |
@@ -41,7 +42,6 @@ Each record has `id`, `sessionId`, `seq`, `type`, `version`, `createdAt`, `opera
 | `attempt.started`                 | Each model request                                      | `attemptId`, `stepId`, attempt number                                                                                                  |
 | `attempt.finished`                | Attempt terminal                                        | `status` (completed, failed, interrupted), usage, failure; for completed and interrupted attempts, the output (text, reasoning, items) |
 | `retry.scheduled`                 | Runtime decides to retry                                | `stepId`, next attempt number, `at`, failure that caused it                                                                            |
-| `message.finalized`               | Assistant message enters history                        | `messageId`, `state`: complete, interrupted, or failed                                                                                 |
 | `interrupt.requested`             | Stop or shutdown                                        | `runId`, `reason`: user, shutdown, or plugin-removed                                                                                   |
 | `run.ended`                       | Run terminal                                            | `{ outcome: 'completed' }` / `{ outcome: 'interrupted', reason }` / `{ outcome: 'failed', failure }`                                   |
 | `compaction.started`              | Compaction begins                                       | `compactionId`, trigger                                                                                                                |
