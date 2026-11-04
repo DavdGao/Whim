@@ -12,7 +12,7 @@ This document defines how the agent runs a session: records, messages and notice
 | Adapter (plugin)  | Translate a frozen request into provider calls and normalize the stream and failures                                |
 | Renderer          | Observe committed records; submit commands                                                                          |
 
-The agent is an async generator consumed by the Backend scheduler, never by a UI subscription. Every value it yields is already committed. The agent reaches Core only through ports (store, model slots, tools, jobs, sources), so it is testable with fixtures and a real SQLite store.
+The agent is an async generator consumed by the Backend scheduler, never by a UI subscription. It yields two kinds of values: committed records, and transient stream events (§5.1) that are never stored. The agent reaches Core only through ports (store, model slots, tools, jobs, sources), so it is testable with fixtures and a real SQLite store.
 
 ## 2. Session state
 
@@ -30,25 +30,23 @@ The journal head (latest seq), the epoch, and the run generation are separate va
 
 Each record has `id`, `sessionId`, `seq`, `type`, `version`, `createdAt`, `operationId`, and a typed body. Bodies are discriminated by `type`; incompatible states are separate variants, not optional fields.
 
-| Record                            | Written when                                            | Key fields                                                                                                       |
-| --------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `session.created`                 | Session creation                                        | slot binding copied from settings                                                                                |
-| `epoch.started`                   | Creation, successful compaction, model switch           | `epochId`, `reason`, system sections, tool declarations, frozen card, source snapshots                           |
-| `delivery.accepted`               | Input admitted to the inbox                             | `deliveryId`, `placement`, item (message or notice)                                                              |
-| `delivery.withdrawn`              | User removes a pending item                             | `deliveryId`                                                                                                     |
-| `run.started`                     | Scheduler begins a run                                  | `runId`, trigger                                                                                                 |
-| `step.prepared`                   | Before reasoning                                        | `stepId`, consumed delivery ids, plan (epoch id, history end seq, estimate)                                      |
-| `attempt.started`                 | Each model request                                      | `attemptId`, `stepId`, attempt number                                                                            |
-| `output.chunk`                    | Bounded batches of streamed text/reasoning              | `attemptId`, `messageId`, part, text                                                                             |
-| `output.item`                     | A complete output item                                  | function call, provider-executed tool call, continuation                                                         |
-| `attempt.finished`                | Attempt terminal                                        | `{ status: 'completed', usage }` / `{ status: 'failed', failure, usage? }` / `{ status: 'interrupted', usage? }` |
-| `retry.scheduled`                 | Runtime decides to retry                                | `stepId`, next attempt number, `at`, failure that caused it                                                      |
-| `message.finalized`               | Assistant message enters history                        | `messageId`, `state`: complete, interrupted, or failed                                                           |
-| `interrupt.requested`             | Stop or shutdown                                        | `runId`, `reason`: user or shutdown                                                                              |
-| `run.ended`                       | Run terminal                                            | `{ outcome: 'completed' }` / `{ outcome: 'interrupted', reason }` / `{ outcome: 'failed', failure }`             |
-| `compaction.started`              | Compaction begins                                       | `compactionId`, trigger                                                                                          |
-| `compaction.finished`             | Compaction terminal                                     | `{ status: 'succeeded', epochId, coveredSeq }` / `{ status: 'failed', failure }`                                 |
-| `tool.*`, `job.*`, `permission.*` | Tool execution ([§9](#9-tools), [§10](#10-permissions)) |                                                                                                                  |
+| Record                            | Written when                                            | Key fields                                                                                                                             |
+| --------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `session.created`                 | Session creation                                        | slot binding copied from settings                                                                                                      |
+| `epoch.started`                   | Creation, successful compaction, model switch           | `epochId`, `reason`, system sections, tool declarations, frozen card, source snapshots                                                 |
+| `delivery.accepted`               | Input admitted to the inbox                             | `deliveryId`, `placement`, item (message or notice)                                                                                    |
+| `delivery.withdrawn`              | User removes a pending item                             | `deliveryId`                                                                                                                           |
+| `run.started`                     | Scheduler begins a run                                  | `runId`, trigger                                                                                                                       |
+| `step.prepared`                   | Before reasoning                                        | `stepId`, consumed delivery ids, plan (epoch id, history end seq, estimate)                                                            |
+| `attempt.started`                 | Each model request                                      | `attemptId`, `stepId`, attempt number                                                                                                  |
+| `attempt.finished`                | Attempt terminal                                        | `status` (completed, failed, interrupted), usage, failure; for completed and interrupted attempts, the output (text, reasoning, items) |
+| `retry.scheduled`                 | Runtime decides to retry                                | `stepId`, next attempt number, `at`, failure that caused it                                                                            |
+| `message.finalized`               | Assistant message enters history                        | `messageId`, `state`: complete, interrupted, or failed                                                                                 |
+| `interrupt.requested`             | Stop or shutdown                                        | `runId`, `reason`: user, shutdown, or plugin-removed                                                                                   |
+| `run.ended`                       | Run terminal                                            | `{ outcome: 'completed' }` / `{ outcome: 'interrupted', reason }` / `{ outcome: 'failed', failure }`                                   |
+| `compaction.started`              | Compaction begins                                       | `compactionId`, trigger                                                                                                                |
+| `compaction.finished`             | Compaction terminal                                     | `{ status: 'succeeded', epochId, coveredSeq }` / `{ status: 'failed', failure }`                                                       |
+| `tool.*`, `job.*`, `permission.*` | Tool execution ([§9](#9-tools), [§10](#10-permissions)) |                                                                                                                                        |
 
 Usage is recorded on every `attempt.finished`, including failures, with missing fields left unknown. Compaction and reviewer attempts are attempts too.
 
@@ -87,7 +85,7 @@ run:
   loop:
     prepare step  (atomic: consume deliveries + freeze plan)
     if nothing new to respond to: end run
-    attempt with retries (§6), committing chunks as they arrive
+    attempt with retries (§6), streaming transient deltas
     finalize assistant message
     if tool calls: execute (§9), append results, continue
     else: end run
@@ -96,26 +94,32 @@ run:
 - A run with no unconsumed deliveries and no pending tool results ends immediately without calling the model.
 - One runner per session. A second start request for a running session is a no-op returning the active run.
 
+### 5.1 Streaming output
+
+Model output is committed once per attempt, when the attempt ends: `attempt.finished` carries the complete output of a completed attempt, or the partial output of an interrupted one. While the attempt runs, deltas are published to subscribers as transient `stream` events tagged with `attemptId`; they are not written to the journal. This keeps the journal to a few records per reply and makes retries trivial: a failed attempt's text was never history.
+
+Trade-off: if Backend crashes mid-stream, the partial text of the running attempt is lost; the attempt is recorded as interrupted with unknown usage. User Stop and shutdown do not lose text, because the runner still holds the buffer and commits it.
+
 **Stop.** The user's Stop writes `interrupt.requested { reason: 'user' }` before any cancellation signal is sent. Then:
 
-- The active attempt is aborted. Committed chunks remain; the assistant message is finalized as `interrupted` with its text verbatim.
+- The active attempt is aborted. Its buffered output is committed in `attempt.finished { status: 'interrupted' }`, and the assistant message is finalized as `interrupted` with that text verbatim.
 - Running foreground tools are cancelled; background jobs are not (they have their own Stop).
 - An `interrupted` notice is delivered so the next step sees `<system-reminder>The user interrupted you.</system-reminder>` after the partial answer and before the next user input.
 - Pending deliveries survive. The run ends `interrupted`; the next user message starts a new run normally.
 
 **Shutdown.** Uses `reason: 'shutdown'`. No user-interrupt notice is written; on the next start a `restarted` notice tells the agent its previous response was cut off by an application restart. Whether an interrupted run resumes automatically after restart is a user setting (`agent.resumeAfterRestart`, default off). When off, the session resumes when the user sends input or presses Continue; when on, the scheduler starts a run that sees the `restarted` notice.
 
-**Crash.** On start, Core finds runs without `run.ended`, closes their open attempts as `interrupted` with unknown usage, and proceeds as for shutdown.
+**Crash.** On start, Core finds runs without `run.ended`, closes their open attempts as `interrupted` with no output and unknown usage, and proceeds as for shutdown.
 
 ## 6. Errors and retries
 
 Adapters throw `ApplicationError` carrying a `Failure` ([design.md §10](design.md#10-errors)). The runtime decides:
 
-- `retry.kind === 'backoff'` and `outcome !== 'partial'`: schedule a retry. Exponential backoff with jitter, honoring `afterMs`, bounded by a maximum attempt count and total time. `retry.scheduled` is committed before waiting, so the UI shows "Rate limited — retrying in 6 s (2/4)" with a cancel action, and restart resumes the schedule.
-- `outcome === 'partial'`: no automatic retry, because visible output already exists. The message is finalized as `failed` with its partial text and the user can retry.
+- `retry.kind === 'backoff'`: schedule a retry, whether or not output was already streamed. Exponential backoff with jitter, honoring `afterMs`, bounded by a maximum attempt count and total time. `retry.scheduled` is committed before waiting, so the UI shows "Rate limited — retrying in 6 s (2/4)" with a cancel action, and restart resumes the schedule.
+- If the failed attempt had streamed output, subscribers receive a transient `attempt.discarded { attemptId, failure }` event. The frontend hides that attempt's text and shows the retry state; the next attempt streams a fresh answer under a new attempt id. The discarded text is never stored.
 - `outcome === 'unknown'` on a non-idempotent effect: no automatic retry before reconciliation. Model calls are side-effect free, so for them `unknown` with `backoff` is retried.
 - Anything else: the step fails, the run ends `failed`, and the failure is shown with its translated category and the provider detail.
-- Each retry is a new attempt with its own id and usage. Adapters never retry internally.
+- Each retry is a new attempt with its own id; the failed attempt's `attempt.finished` records its failure and usage, without output. Adapters never retry internally.
 - `context-limit` triggers compaction once ([§8](#8-compaction)) before failing.
 
 There is no run-wide timeout. Attempts have an idle timeout between stream events (no bytes for a configured period → `timeout`, `backoff`); tools have their own limits.
@@ -162,12 +166,12 @@ On failure or cancellation, `compaction.finished { failed }` is committed and th
 
 ### 8.1 Model switch
 
-Switching the model starts a new epoch at the next reasoning step without summarizing. The provider cache is lost anyway when the model changes, so the switch also refreshes all source snapshots.
+The model selector is disabled while a run is active. Switching between runs starts a new epoch at the next reasoning step without summarizing. The provider cache is lost anyway when the model changes, so the switch also refreshes all source snapshots.
 
 The new epoch re-renders the existing history for the new card:
 
 - Continuation items from a different adapter are dropped; the visible text and reasoning summaries remain.
-- Blocks with media types the new card cannot accept become short text placeholders naming the attachment; the originals stay in storage.
+- Blocks with media types the new card cannot accept become short text placeholders naming the attachment; the originals stay in storage. Before switching, the frontend warns which attachments the new model cannot read.
 - Provider-executed tool calls from the previous provider are kept as text records of what was called and returned.
 - If the history does not fit the new adapter's `inputBudget`, the switch runs compaction with the new model first.
 
@@ -235,7 +239,7 @@ Plugins can contribute to context only by appending: they register a context sou
 
 - Stop during streaming keeps the verbatim partial answer, the next step sees the interrupt notice, and the conversation continues.
 - A user message sent during a run is included at the next step without restarting the in-flight attempt.
-- Retries are visible, cancellable, survive restart, and never follow partial output automatically.
+- Retries are visible and cancellable, survive restart, and also apply after partial output; the frontend replaces the discarded attempt's text.
 - Source edits between compactions never change captured request prefixes; compaction refreshes them once with timestamps.
 - An oversized message is rejected at submission; a pending item can be withdrawn.
 - Killing Backend mid-stream and restarting yields a consistent session with an interrupted message and a `restarted` notice.

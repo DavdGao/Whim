@@ -40,7 +40,7 @@ Core exposes subpaths:
 
 Dependency rules: agent depends on `core/contracts`; Core does not import agent; desktop wires agent to Core's ports. Plugins depend on Core's public subpaths and libraries such as `openai-protocol`, never on another package's internals.
 
-There is no shared UI package. shadcn components are installed with the official CLI into `apps/desktop`. A UI package is introduced only when plugin client entries need to share components with the host (§5.6).
+There is no shared UI package. shadcn components are installed with the official CLI into `apps/desktop`. A UI package is introduced only when plugin client entries need to share components with the host (§5.7).
 
 ## 4. Processes
 
@@ -79,7 +79,7 @@ A plugin is an npm package with a `whim` field in `package.json`:
 ```
 
 - The plugin id is the package name; the version is `package.json.version`. Whim-owned packages share one version, and `peerDependencies` pins Core exactly.
-- `host` is the Backend entry. `client` (Renderer entry) is reserved for UI slots (§5.6).
+- `host` is the Backend entry. `client` (Renderer entry) is reserved for UI slots (§5.7).
 - `cards` is a directory of seed model cards (§7.3).
 - `requires` lists plugin ids whose registrations this plugin uses, e.g. another plugin's credential type.
 - Display strings come from the plugin's `locales/en.json` and `locales/zh-CN.json`.
@@ -109,9 +109,23 @@ Core stores one row per installed plugin: `id`, `version`, `source` (`bundled` o
 - `contentHash` is a SHA-256 over the package's files, computed at installation.
 - On start Core recomputes it. A mismatch sets availability `modified` and the plugin is not activated until the user re-trusts it in the Plugins page, which records the new hash.
 - Bundled plugins live inside the signed application bundle; the check matters mainly for local installs.
-- Disabling or uninstalling a plugin never deletes business history, credentials, or sessions that used it. Sessions whose adapter is unavailable show that state and cannot run until it returns.
 
-### 5.4 Registrations
+### 5.4 Disabling and removing a plugin
+
+Disable keeps the package and its data; uninstall also removes the package (local plugins only; bundled plugins can only be disabled). Both follow the same sequence:
+
+1. **Impact preview.** The Plugins page lists what depends on the plugin: dependent plugins, model slots bound to its cards, credentials of its types, sessions whose epoch uses its adapter, active runs, background jobs from its tools. The user confirms.
+2. **Stop admission.** New calls to the plugin's adapters, tools, and processors fail with `model-unavailable` or a tool-unavailable result.
+3. **Settle in-flight work.** Active runs using its adapter are interrupted with reason `plugin-removed` and receive an `interrupted` notice naming the cause; its background jobs are cancelled. Waiting is bounded.
+4. **Deactivate dependents first, then the plugin**, disposing registrations in reverse order. Dependent plugins become `missing-dependency`.
+5. **Propagate.** Removed tools and context sources deliver `source-changed` notices to sessions; removed tools are revoked immediately.
+6. **Remove the package** (uninstall only). The install row stays, marked uninstalled, so history can name the plugin.
+
+What is kept: sessions and their history (readable; they show "model unavailable" and can continue after a model switch), credentials (marked orphaned; the confirm dialog offers to delete them and their Keychain items), user-layer card files (inactive until the plugin returns). Slots bound to its cards become unset and the Models page asks for a replacement; Whim never silently substitutes another model. Reinstalling restores everything that was kept.
+
+Startup applies the same rules when a plugin is missing or fails to activate.
+
+### 5.5 Registrations
 
 | Registration    | Purpose                                                                                                             |
 | --------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -124,7 +138,7 @@ Core stores one row per installed plugin: `id`, `version`, `source` (`bundled` o
 
 Plugins call Core services (store commands, model slots, files, jobs). They never open the database or write SQL, and they cannot make model calls that bypass attempt and usage accounting.
 
-### 5.5 JSON Schema conventions
+### 5.6 JSON Schema conventions
 
 Credential types, plugin settings, and card `options` are JSON Schema 2020-12 objects. Core validates values with a standard validator and renders forms from the schema.
 
@@ -133,7 +147,7 @@ Credential types, plugin settings, and card `options` are JSON Schema 2020-12 ob
 - `title` and `description` are the English text. Translations are looked up in the plugin's locale catalog under `schema.<schemaId>.<JSON pointer>.title|description`.
 - Extension keywords use the `x-whim-` prefix and are limited to those listed here. Currently there is one: `x-whim-order`, an integer for form field ordering.
 
-### 5.6 Client entries
+### 5.7 Client entries
 
 A plugin may later ship a `client` entry that registers React components into named Renderer slots. It runs with the host's React and component modules and communicates only through typed application interfaces. The first release generates all plugin configuration forms from JSON Schema and ships no client entries; the slot registry is built with its first consumer.
 
@@ -177,7 +191,7 @@ Changing a credential is not prompt-affecting: it applies to the next attempt of
 
 A slot is a role in the application that needs a model: `chat` (default for new sessions), `compaction`, `reviewer`, later `tts`, `asr`, `embedding`. A slot value is `{ credentialId, cardId, thinking? }`. The Models page lists, per slot, the credentials whose type an adapter of the slot's kind accepts, then the cards of that adapter.
 
-A session copies the `chat` slot when it is created. The user can switch the session's model at any time; it applies from the next reasoning step ([agent.md §8.1](agent.md#81-model-switch)).
+A session copies the `chat` slot when it is created. The user can switch the session's model whenever no run is active; it applies from the next reasoning step ([agent.md §8.1](agent.md#81-model-switch)).
 
 ## 7. Model cards
 
@@ -377,7 +391,7 @@ The rail has room for later pages; a page is added when its feature exists, not 
 ### 11.2 Data flow
 
 - Renderer loads a session with a query returning a bounded page of history plus the current head seq, then subscribes with `afterSeq`. Backend pushes committed records in batches after each commit; Renderer folds them into its presentation state. No full snapshots per token.
-- Streaming text is persisted in bounded chunks (by size or a short interval), each chunk one transaction, and published only after commit.
+- Streaming deltas are transient events delivered on the same subscription, coalesced to a short interval, and not stored; the attempt's output is committed when it ends ([agent.md §5.1](agent.md#51-streaming-output)). An `attempt.discarded` event tells the frontend to drop a failed attempt's text before a retry.
 - Commands return acceptance, not completion. The UI shows queued, included, running, retrying, interrupted, failed, and completed states from committed records.
 - Notices ([agent.md §4](agent.md#4-messages-and-notices)) carry `kind` and `origin`; the frontend decides which kinds to display and how.
 
