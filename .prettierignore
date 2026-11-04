@@ -1,0 +1,11 @@
+**/node_modules/
+**/dist/
+**/build/
+**/out/
+**/coverage/
+**/*.tsbuildinfo
+**/*.log
+**/.DS_Store
+.idea/
+.husky/_/
+pnpm-lock.yaml
