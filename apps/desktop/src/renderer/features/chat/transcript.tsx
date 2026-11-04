@@ -8,9 +8,17 @@ import { useT } from '../../lib/i18n';
 
 import { FailureNotice } from './failure-notice';
 import { mathPlugin, normalizeMath } from './math';
+import { NativeToolView, ToolCallView } from './tool-call';
 
 import type { Draft } from './use-session';
-import type { Block, Failure, HistoryEntry, SessionView } from '@whimkit/core/contracts';
+import type {
+    Block,
+    Failure,
+    HistoryEntry,
+    SessionView,
+    ToolResult,
+} from '@whimkit/core/contracts';
+import type { ReactNode } from 'react';
 
 import {
     Conversation,
@@ -95,6 +103,8 @@ function CopyAction({ text }: { text: string }) {
  * @param props.streaming Whether it is still streaming.
  * @param props.badge Optional status badge.
  * @param props.onRemove Optional remove action.
+ * @param props.children Tool calls shown after the text.
+ * @param props.leading Provider-executed calls, which happen before the answer text.
  * @returns The message.
  */
 function Bubble({
@@ -105,6 +115,8 @@ function Bubble({
     streaming,
     badge,
     onRemove,
+    children,
+    leading,
 }: {
     role: 'user' | 'assistant';
     text: string;
@@ -113,6 +125,8 @@ function Bubble({
     streaming?: boolean;
     badge?: string;
     onRemove?: () => Promise<unknown>;
+    children?: ReactNode;
+    leading?: ReactNode;
 }) {
     const { t } = useT();
     return (
@@ -140,13 +154,15 @@ function Bubble({
                         <ReasoningContent>{reasoning}</ReasoningContent>
                     </Reasoning>
                 ) : null}
-                {role === 'assistant' ? (
+                {leading}
+                {role === 'assistant' && !text ? null : role === 'assistant' ? (
                     <MessageResponse plugins={{ math: mathPlugin }}>
                         {normalizeMath(text)}
                     </MessageResponse>
                 ) : (
                     <p className="whitespace-pre-wrap">{text}</p>
                 )}
+                {children}
                 {role === 'assistant' && !streaming && text && <CopyAction text={text} />}
                 {(badge || onRemove) && (
                     <div className="flex items-center gap-2">
@@ -177,12 +193,17 @@ function Bubble({
 function NoticeLine({ entry }: { entry: HistoryEntry }) {
     const { t } = useT();
     if (entry.item.type !== 'notice') return null;
+    const notice = entry.item;
     const text =
-        entry.item.kind === 'restarted'
+        notice.kind === 'restarted'
             ? t('chat.restarted')
-            : entry.item.payload.reason === 'user'
-              ? t('chat.userInterrupted')
-              : null;
+            : notice.kind === 'interrupted'
+              ? notice.payload.reason === 'user'
+                  ? t('chat.userInterrupted')
+                  : null
+              : notice.kind === 'job-finished'
+                ? t('tool.jobFinished', { tool: notice.payload.tool })
+                : t('tool.jobLost', { tool: notice.payload.tool });
     if (!text) return null;
     return <p className="text-muted-foreground text-center text-xs">{text}</p>;
 }
@@ -233,6 +254,9 @@ export function Transcript({
             ? view.lastRun.result.failure
             : undefined;
     const empty = view.history.length === 0 && pending.length === 0 && !draft;
+    const results = new Map<string, ToolResult>();
+    for (const entry of view.history)
+        if (entry.item.type === 'tool_result') results.set(entry.item.callId, entry.item);
     return (
         <Conversation className="min-h-0 flex-1">
             <ConversationContent className="mx-auto w-full max-w-3xl">
@@ -254,10 +278,33 @@ export function Transcript({
                             {...(entry.status === 'interrupted'
                                 ? { badge: t('chat.interrupted') }
                                 : {})}
-                        />
-                    ) : (
+                            leading={entry.item.blocks.map(block =>
+                                block.type === 'native_tool_call' ? (
+                                    <NativeToolView
+                                        key={`${block.tool}:${block.query ?? ''}:${(block.urls ?? []).join()}`}
+                                        block={block}
+                                    />
+                                ) : null
+                            )}
+                        >
+                            {entry.item.blocks.map(block =>
+                                block.type === 'tool_call' ? (
+                                    <ToolCallView
+                                        key={block.callId}
+                                        sessionId={view.sessionId}
+                                        block={block}
+                                        open={view.calls.find(item => item.callId === block.callId)}
+                                        result={results.get(block.callId)}
+                                        jobRunning={view.jobs.some(
+                                            job => job.callId === block.callId
+                                        )}
+                                    />
+                                ) : null
+                            )}
+                        </Bubble>
+                    ) : entry.item.type === 'notice' ? (
                         <NoticeLine key={entry.item.id} entry={entry} />
-                    )
+                    ) : null
                 )}
                 {pending.map(item =>
                     item.item.type === 'message' ? (

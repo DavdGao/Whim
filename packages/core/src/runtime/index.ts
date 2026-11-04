@@ -14,5 +14,13 @@ export { CompiledSchema } from './json-schema.js';
 export type { SchemaIssue } from './json-schema.js';
 export { ModelService } from './models.js';
 export { PluginHost, describeError } from './plugin-host.js';
-export type { PluginAvailability, PluginPackage, PluginStatus } from './plugin-host.js';
+export type {
+    PluginAvailability,
+    PluginPackage,
+    PluginStatus,
+    RegisteredTool,
+} from './plugin-host.js';
 export { Store } from './store.js';
+export { ToolRuntime, maxResultBytes } from './tools.js';
+export { evaluate, isInside, rulesFor } from './permissions.js';
+export type { PermissionEnv } from './permissions.js';

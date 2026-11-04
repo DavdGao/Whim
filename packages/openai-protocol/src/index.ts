@@ -7,5 +7,6 @@ export {
     responsesContinuationFormat,
     streamEventSchema,
     toResponsesInput,
+    toResponsesTools,
 } from './responses.js';
-export type { StreamEvent } from './responses.js';
+export type { InputOptions, NativeEvent, StreamEvent, StreamOptions } from './responses.js';

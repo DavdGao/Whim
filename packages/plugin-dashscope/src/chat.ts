@@ -1,14 +1,16 @@
 import { ApplicationError } from '@whimkit/core/contracts';
 import {
     readResponsesStream,
+    responsesContinuationFormat,
     ResponsesStreamError,
     toResponsesInput,
+    toResponsesTools,
 } from '@whimkit/openai-protocol';
 import { z } from 'zod';
 
 import { httpFailure, streamFailure } from './errors.js';
 
-import type { FrozenChatCard, ThinkingLevel } from '@whimkit/core/contracts';
+import type { FrozenChatCard, NativeToolCallBlock, ThinkingLevel } from '@whimkit/core/contracts';
 import type {
     ChatAdapter,
     ChatEvent,
@@ -16,6 +18,7 @@ import type {
     ChatSession,
     ResolvedCredential,
 } from '@whimkit/core/plugin';
+import type { NativeEvent } from '@whimkit/openai-protocol';
 
 export const pluginId = '@whimkit/plugin-dashscope';
 export const credentialTypeId = `${pluginId}#api-key`;
@@ -68,6 +71,63 @@ const optionsSchema = {
         },
     },
 } as const;
+
+/** Standard native tool ids this adapter implements, and the DashScope tool each maps to. */
+const nativeToolTypes: Readonly<Record<string, string>> = {
+    web_search: 'web_search',
+    web_fetch: 'web_extractor',
+};
+
+const extractorCallSchema = z.looseObject({
+    type: z.literal('web_extractor_call'),
+    status: z.string().optional(),
+    goal: z.string().nullish(),
+    urls: z.array(z.string()).nullish(),
+    output: z.string().nullish(),
+});
+
+/**
+ * Map DashScope's `web_extractor_call` items, which OpenAI does not define, to `web_fetch`.
+ * @param item An output item.
+ * @returns The native call, or undefined for other items.
+ */
+function extractorItem(item: Readonly<Record<string, unknown>>): NativeEvent | undefined {
+    const parsed = extractorCallSchema.safeParse(item);
+    if (!parsed.success) return undefined;
+    return {
+        type: 'native-tool-call',
+        format: responsesContinuationFormat,
+        tool: 'web_fetch',
+        status: parsed.data.status === 'failed' ? 'failed' : 'completed',
+        ...(parsed.data.goal ? { query: parsed.data.goal } : {}),
+        ...(parsed.data.urls?.length ? { urls: parsed.data.urls } : {}),
+        data: item,
+    };
+}
+
+/**
+ * Replay a provider-executed call. `web_search_call` items are documented as valid input;
+ * extractor calls have no input form, so their summary is replayed as assistant text.
+ * @param block The native call.
+ * @returns Input items.
+ */
+function replayNative(block: NativeToolCallBlock): unknown[] {
+    if (block.tool !== 'web_fetch') return [block.data];
+    const summary = extractorCallSchema.safeParse(block.data).data?.output;
+    return summary
+        ? [
+              {
+                  role: 'assistant',
+                  content: [
+                      {
+                          type: 'output_text',
+                          text: `Fetched ${(block.urls ?? []).join(', ')}:\n${summary}`,
+                      },
+                  ],
+              },
+          ]
+        : [];
+}
 
 const credentialValues = z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() });
 const cardOptions = z.object({
@@ -146,7 +206,17 @@ class DashScopeSession implements ChatSession {
         const body = JSON.stringify({
             model: this.card.model,
             instructions: request.system,
-            input: toResponsesInput(request.messages, adapterId),
+            input: toResponsesInput(request.messages, adapterId, { replayNative }),
+            ...(request.tools.length || request.nativeTools.length
+                ? {
+                      tools: [
+                          ...request.nativeTools.flatMap(id =>
+                              nativeToolTypes[id] ? [{ type: nativeToolTypes[id] }] : []
+                          ),
+                          ...toResponsesTools(request.tools),
+                      ],
+                  }
+                : {}),
             stream: true,
             store: false,
             max_output_tokens: this.card.maxOutputTokens,
@@ -204,7 +274,9 @@ class DashScopeSession implements ChatSession {
             });
         let published = false;
         try {
-            for await (const event of readResponsesStream(response.body)) {
+            for await (const event of readResponsesStream(response.body, {
+                nativeItem: extractorItem,
+            })) {
                 // Reasoning replay with store:false is unverified for DashScope; do not persist it.
                 if (event.type === 'continuation') continue;
                 if (event.type !== 'completed') published = true;
@@ -248,9 +320,15 @@ export function createChatAdapter(transport: typeof fetch = fetch): ChatAdapter 
         validateCard(card) {
             const issues = [];
             for (const tool of card.nativeTools)
+                if (!(tool in nativeToolTypes))
+                    issues.push({
+                        path: 'nativeTools',
+                        message: `Native tool ${tool} is not supported by this adapter.`,
+                    });
+            if (card.nativeTools.includes('web_fetch') && !card.nativeTools.includes('web_search'))
                 issues.push({
                     path: 'nativeTools',
-                    message: `Native tool ${tool} is not implemented yet.`,
+                    message: 'DashScope web_fetch (web_extractor) requires web_search.',
                 });
             for (const type of Object.keys(card.input))
                 if (type !== 'text/plain')

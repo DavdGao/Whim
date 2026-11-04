@@ -1,0 +1,631 @@
+import { randomUUID } from 'node:crypto';
+import { appendFile, mkdir, open, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+import { z } from 'zod';
+
+import { CompiledSchema } from './json-schema.js';
+import { evaluate } from './permissions.js';
+import { describeError } from './plugin-host.js';
+
+import type { Command } from './commands.js';
+import type { PluginHost } from './plugin-host.js';
+import type { Store } from './store.js';
+import type { ToolDeclaration, ToolResult } from '../contracts/records.js';
+import type { OpenCall, SessionView } from '../contracts/view.js';
+import type { ToolDefinition, ToolOutput } from '../plugin/index.js';
+
+/** Results above this many UTF-8 bytes are offloaded to a file with a preview in context. */
+export const maxResultBytes = 32 * 1024;
+const previewBytes = 8 * 1024;
+const maxParallel = 4;
+const maxJobOutputRead = 32 * 1024;
+/** How long a cancelled foreground job may take to settle before its result is written. */
+const cancelGraceMs = 5000;
+
+type Decision = { decision: 'allow' | 'deny' } | { decision: 'cancelled' };
+
+interface Job {
+    readonly jobId: string;
+    readonly sessionId: string;
+    readonly callId: string;
+    readonly name: string;
+    readonly controller: AbortController;
+    readonly log: string;
+    /** Serializes appends so output stays in order. */
+    writes: Promise<void>;
+    bytes: number;
+    tail: string;
+    done: Promise<ToolOutput>;
+}
+
+interface Resolved {
+    readonly tool: ToolDefinition<unknown>;
+    readonly input: unknown;
+}
+
+const jobOutputSchema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['jobId'],
+    properties: {
+        jobId: { type: 'string', description: 'The job id from a background tool result.' },
+        offset: {
+            type: 'integer',
+            minimum: 0,
+            description: 'Byte offset to read from; omit to read from the start.',
+        },
+    },
+} as const;
+
+const jobStopSchema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['jobId'],
+    properties: { jobId: { type: 'string', description: 'The job to cancel.' } },
+} as const;
+
+/**
+ * Keep the end of a text within a byte budget.
+ * @param text The text.
+ * @param bytes The budget.
+ * @returns The tail.
+ */
+function tailOf(text: string, bytes: number): string {
+    const encoded = Buffer.from(text, 'utf8');
+    return encoded.byteLength <= bytes
+        ? text
+        : encoded
+              .subarray(encoded.byteLength - bytes)
+              .toString('utf8')
+              .replace(/^�+/, '');
+}
+
+/**
+ * Wait for a promise, a timeout, or an abort, whichever comes first.
+ * @param promise The work.
+ * @param ms Timeout; undefined waits forever.
+ * @param signal Abort.
+ * @returns Which happened.
+ */
+function race<T>(
+    promise: Promise<T>,
+    ms: number | undefined,
+    signal: AbortSignal
+): Promise<{ kind: 'done'; value: T } | { kind: 'timeout' } | { kind: 'aborted' }> {
+    return new Promise(resolve => {
+        let timer: NodeJS.Timeout | undefined;
+        const finish = (
+            outcome: { kind: 'done'; value: T } | { kind: 'timeout' } | { kind: 'aborted' }
+        ) => {
+            clearTimeout(timer);
+            signal.removeEventListener('abort', onAbort);
+            resolve(outcome);
+        };
+        const onAbort = () => finish({ kind: 'aborted' });
+        if (signal.aborted) return finish({ kind: 'aborted' });
+        signal.addEventListener('abort', onAbort, { once: true });
+        if (ms !== undefined) timer = setTimeout(() => finish({ kind: 'timeout' }), ms);
+        void promise.then(value => finish({ kind: 'done', value }));
+    });
+}
+
+/**
+ * Runs tool calls: validation, permissions, scheduling, jobs, background handoff, and
+ * truncation. It is the only writer of tool records.
+ */
+export class ToolRuntime {
+    readonly #jobs = new Map<string, Job>();
+    readonly #waiters = new Map<string, (decision: Decision) => void>();
+    readonly #locks = new Map<string, Promise<void>>();
+    readonly #builtins: ToolDefinition<unknown>[];
+    readonly #builtinSchemas: Map<string, CompiledSchema>;
+    #closing = false;
+
+    /**
+     * Create the runtime.
+     * @param store Persistence.
+     * @param host Registered tools.
+     * @param artifactsDir Directory for offloaded results and job output.
+     * @param onJobEnded Called after a background job's end is committed.
+     */
+    constructor(
+        private readonly store: Store,
+        private readonly host: PluginHost,
+        readonly artifactsDir: string,
+        private readonly onJobEnded: (sessionId: string) => void
+    ) {
+        this.#builtins = [this.#jobOutputTool(), this.#jobStopTool()];
+        this.#builtinSchemas = new Map(
+            this.#builtins.map(tool => [tool.name, new CompiledSchema(tool.inputSchema)])
+        );
+    }
+
+    /**
+     * The tools to freeze into a new epoch.
+     * @param workspace The session's workspace.
+     * @param nativeTools Standard ids the provider executes natively.
+     * @returns Declarations in registration order, then the job tools.
+     */
+    declarations(workspace: string | undefined, nativeTools: readonly string[]): ToolDeclaration[] {
+        const tools = [...this.host.tools.values()]
+            .map(entry => entry.tool)
+            .filter(
+                tool =>
+                    (workspace || !tool.needsWorkspace) &&
+                    !nativeTools.includes(tool.standard ?? '')
+            );
+        if (tools.length === 0) return [];
+        return [...tools, ...this.#builtins].map(tool => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+        }));
+    }
+
+    /**
+     * Execute the open calls of the current step and commit one result for each. Returns early
+     * when the run is interrupted; ending the run closes calls that never started.
+     * @param sessionId The session.
+     * @param runId The active run.
+     * @param signal Run interruption.
+     */
+    async run(sessionId: string, runId: string, signal: AbortSignal): Promise<void> {
+        const view = await this.store.view(sessionId);
+        const calls = view.calls.filter(call => call.state === 'pending');
+        let index = 0;
+        while (index < calls.length && !signal.aborted) {
+            const group = [calls[index]];
+            if (this.#concurrencySafe(view, calls[index]))
+                while (
+                    index + group.length < calls.length &&
+                    this.#concurrencySafe(view, calls[index + group.length])
+                )
+                    group.push(calls[index + group.length]);
+            index += group.length;
+            if (group.length === 1 && !this.#concurrencySafe(view, group[0])) {
+                await this.#locked(view.workspace ?? sessionId, () =>
+                    this.#call(sessionId, runId, group[0], signal)
+                );
+                continue;
+            }
+            for (let start = 0; start < group.length; start += maxParallel)
+                await Promise.all(
+                    group
+                        .slice(start, start + maxParallel)
+                        .map(call => this.#call(sessionId, runId, call, signal))
+                );
+        }
+    }
+
+    /**
+     * Record the user's answer to a permission ask and release the waiting call.
+     * @param sessionId The session.
+     * @param callId The call.
+     * @param decision Allow or deny.
+     * @param scope Once, or for the rest of the session.
+     */
+    async decide(
+        sessionId: string,
+        callId: string,
+        decision: 'allow' | 'deny',
+        scope: 'once' | 'session'
+    ): Promise<void> {
+        await this.#exec(sessionId, { type: 'decide-permission', callId, decision, scope });
+        this.#waiters.get(callId)?.({ decision });
+    }
+
+    /** Cancel every job without committing; recovery records them as lost. */
+    async shutdown(): Promise<void> {
+        this.#closing = true;
+        for (const job of this.#jobs.values())
+            job.controller.abort(new Error('Whim is shutting down.'));
+        await Promise.race([
+            Promise.allSettled([...this.#jobs.values()].map(job => job.done)),
+            new Promise(resolve => setTimeout(resolve, cancelGraceMs)),
+        ]);
+    }
+
+    /**
+     * Whether a call may run alongside its neighbours.
+     * @param view The session view.
+     * @param call The call.
+     * @returns True for concurrency-safe tools and for calls that will fail validation.
+     */
+    #concurrencySafe(view: SessionView, call: OpenCall): boolean {
+        const tool = this.#resolveTool(view, call.name);
+        return tool === undefined || tool.concurrencySafe;
+    }
+
+    /**
+     * Find the executable for a declared tool.
+     * @param view The session view.
+     * @param name The tool name.
+     * @returns The definition, or undefined when not declared or no longer registered.
+     */
+    #resolveTool(view: SessionView, name: string): ToolDefinition<unknown> | undefined {
+        if (!view.epoch.tools.some(tool => tool.name === name)) return undefined;
+        return this.host.tools.get(name)?.tool ?? this.#builtins.find(tool => tool.name === name);
+    }
+
+    /**
+     * Validate a call's arguments.
+     * @param view The session view.
+     * @param call The call.
+     * @returns The tool and input, or the error text for the model.
+     */
+    #resolve(view: SessionView, call: OpenCall): Resolved | { error: string } {
+        if (!view.epoch.tools.some(tool => tool.name === call.name))
+            return { error: `There is no tool named ${call.name}.` };
+        const registered = this.host.tools.get(call.name);
+        const tool = registered?.tool ?? this.#builtins.find(item => item.name === call.name);
+        if (!tool) return { error: `The tool ${call.name} is not available right now.` };
+        let input: unknown;
+        try {
+            input = JSON.parse(call.arguments || '{}');
+        } catch (error) {
+            return { error: `The arguments are not valid JSON: ${describeError(error)}` };
+        }
+        if (typeof input !== 'object' || input === null || Array.isArray(input))
+            return { error: 'The arguments must be a JSON object.' };
+        const schema = registered?.inputSchema ?? this.#builtinSchemas.get(call.name);
+        const issues = schema?.issues(input) ?? [];
+        if (issues.length)
+            return {
+                error: `Invalid arguments: ${issues.map(issue => `${issue.path} ${issue.message}`).join('; ')}`,
+            };
+        return { tool, input };
+    }
+
+    /**
+     * Take a call from validation to its committed result.
+     * @param sessionId The session.
+     * @param runId The run.
+     * @param call The call.
+     * @param signal Run interruption.
+     */
+    async #call(
+        sessionId: string,
+        runId: string,
+        call: OpenCall,
+        signal: AbortSignal
+    ): Promise<void> {
+        if (signal.aborted) return;
+        const view = await this.store.view(sessionId);
+        const finish = (
+            status: ToolResult['status'],
+            content: string,
+            extra: Partial<ToolResult> = {}
+        ) => this.#finish(sessionId, call, status, content, extra);
+        const resolved = this.#resolve(view, call);
+        if ('error' in resolved) {
+            await finish('error', resolved.error);
+            return;
+        }
+        const { tool, input } = resolved;
+        const env = view.workspace ? { workspace: view.workspace } : {};
+        let access;
+        try {
+            access = tool.access(input, env);
+        } catch (error) {
+            await finish('error', describeError(error));
+            return;
+        }
+        const verdict = evaluate(call.name, access, view.permissionRules, {
+            ...env,
+            artifactsDir: this.artifactsDir,
+        });
+        if (verdict === 'ask') {
+            const answer = new Promise<Decision>(resolve =>
+                this.#waiters.set(call.callId, resolve)
+            );
+            await this.#exec(sessionId, {
+                type: 'request-permission',
+                runId,
+                callId: call.callId,
+                access: [...access],
+            });
+            const outcome = await race(answer, undefined, signal);
+            this.#waiters.delete(call.callId);
+            if (outcome.kind !== 'done' || outcome.value.decision === 'cancelled') return;
+            if (outcome.value.decision === 'deny') {
+                await finish('denied', 'The user denied this tool call.');
+                return;
+            }
+        }
+        const job = await this.#startJob(sessionId, runId, call, tool, input, env.workspace);
+        const limit = tool.backgroundAfterMs?.(input);
+        const outcome = await race(job.done, limit, signal);
+        if (outcome.kind === 'done') {
+            this.#jobs.delete(job.jobId);
+            const output = outcome.value;
+            {
+                await this.#finishWithOutput(sessionId, call, output, job.jobId);
+                return;
+            }
+        }
+        if (outcome.kind === 'aborted') {
+            job.controller.abort(new Error('The user stopped the response.'));
+            const settled = await race(job.done, cancelGraceMs, new AbortController().signal);
+            this.#jobs.delete(job.jobId);
+            const partial = settled.kind === 'done' ? settled.value.content : job.tail;
+            {
+                await finish(
+                    'cancelled',
+                    `The user stopped the response while this tool was running.${partial ? `\nOutput before stopping:\n${tailOf(partial, previewBytes)}` : ''}`,
+                    { jobId: job.jobId }
+                );
+                return;
+            }
+        }
+        await finish(
+            'background',
+            `Still running after ${Math.round((limit ?? 0) / 1000)} s, so it continues in the background as job ${job.jobId}. You will be notified when it ends. Use JobOutput to read its output and JobStop to cancel it.${job.tail ? `\nOutput so far:\n${tailOf(job.tail, previewBytes)}` : ''}`,
+            { jobId: job.jobId }
+        );
+        void job.done.then(output => this.#endBackground(job, output));
+    }
+
+    /**
+     * Commit the start and launch the job.
+     * @param sessionId The session.
+     * @param runId The run.
+     * @param call The call.
+     * @param tool The definition.
+     * @param input Validated input.
+     * @param workspace The session's workspace.
+     * @returns The running job.
+     */
+    async #startJob(
+        sessionId: string,
+        runId: string,
+        call: OpenCall,
+        tool: ToolDefinition<unknown>,
+        input: unknown,
+        workspace: string | undefined
+    ): Promise<Job> {
+        const jobId = randomUUID();
+        await this.#exec(sessionId, { type: 'start-tool', runId, callId: call.callId, jobId });
+        await mkdir(join(this.artifactsDir, 'jobs'), { recursive: true });
+        const controller = new AbortController();
+        const job: Job = {
+            jobId,
+            sessionId,
+            callId: call.callId,
+            name: call.name,
+            controller,
+            log: join(this.artifactsDir, 'jobs', `${jobId}.log`),
+            writes: Promise.resolve(),
+            bytes: 0,
+            tail: '',
+            done: Promise.resolve({ content: '' }),
+        };
+        const output = (chunk: string) => {
+            if (!chunk) return;
+            job.bytes += Buffer.byteLength(chunk);
+            job.tail = tailOf(job.tail + chunk, previewBytes);
+            job.writes = job.writes
+                .then(() => appendFile(job.log, chunk))
+                .catch(error => console.error(`Job ${jobId} output:`, describeError(error)));
+        };
+        job.done = tool
+            .execute(input, {
+                signal: controller.signal,
+                sessionId,
+                callId: call.callId,
+                ...(workspace ? { workspace } : {}),
+                output,
+            })
+            .catch((error: unknown) => ({
+                content: controller.signal.aborted
+                    ? `Cancelled: ${describeError(controller.signal.reason)}`
+                    : describeError(error),
+                isError: true,
+            }));
+        this.#jobs.set(jobId, job);
+        return job;
+    }
+
+    /**
+     * Commit the end of a background job and let the session react.
+     * @param job The job.
+     * @param output Its final output.
+     */
+    async #endBackground(job: Job, output: ToolOutput): Promise<void> {
+        this.#jobs.delete(job.jobId);
+        if (this.#closing) return;
+        await job.writes;
+        const status = job.controller.signal.aborted
+            ? 'cancelled'
+            : output.isError
+              ? 'failed'
+              : 'completed';
+        const text = tailOf(output.content || job.tail, previewBytes);
+        try {
+            await this.#exec(job.sessionId, {
+                type: 'end-job',
+                jobId: job.jobId,
+                status,
+                text:
+                    Buffer.byteLength(output.content) > previewBytes
+                        ? `${text}\n(Showing the last ${previewBytes / 1024} KiB; use JobOutput for the rest.)`
+                        : text,
+                observedAt: new Date().toISOString(),
+            });
+            this.onJobEnded(job.sessionId);
+        } catch (error) {
+            console.error(`Cannot record the end of job ${job.jobId}:`, describeError(error));
+        }
+    }
+
+    /**
+     * Commit a result from tool output, offloading it when large.
+     * @param sessionId The session.
+     * @param call The call.
+     * @param output The tool output.
+     * @param jobId The job that produced it.
+     * @returns Resolves once the result is committed.
+     */
+    async #finishWithOutput(
+        sessionId: string,
+        call: OpenCall,
+        output: ToolOutput,
+        jobId: string
+    ): Promise<void> {
+        const status = output.isError ? 'error' : 'success';
+        const bytes = Buffer.byteLength(output.content);
+        if (bytes <= maxResultBytes)
+            return this.#finish(sessionId, call, status, output.content, { jobId });
+        const path = join(this.artifactsDir, `${call.callId.replace(/[^A-Za-z0-9_-]/g, '_')}.txt`);
+        await mkdir(this.artifactsDir, { recursive: true });
+        await writeFile(path, output.content);
+        const encoded = Buffer.from(output.content);
+        const head = encoded.subarray(0, previewBytes).toString('utf8').replace(/�+$/, '');
+        const tail = tailOf(output.content, previewBytes);
+        return this.#finish(
+            sessionId,
+            call,
+            status,
+            `${head}\n\n[… ${bytes - 2 * previewBytes} bytes omitted. The full output (${bytes} bytes) is in ${path}; read it with Read and an offset.]\n\n${tail}`,
+            { jobId, offload: { path, bytes } }
+        );
+    }
+
+    /**
+     * Commit a call's result.
+     * @param sessionId The session.
+     * @param call The call.
+     * @param status Result status.
+     * @param content Text for the model.
+     * @param extra Job and offload references.
+     */
+    async #finish(
+        sessionId: string,
+        call: OpenCall,
+        status: ToolResult['status'],
+        content: string,
+        extra: Partial<ToolResult> = {}
+    ): Promise<void> {
+        await this.#exec(sessionId, {
+            type: 'finish-tool',
+            result: {
+                type: 'tool_result',
+                id: randomUUID(),
+                callId: call.callId,
+                name: call.name,
+                status,
+                content,
+                ...(extra.jobId ? { jobId: extra.jobId } : {}),
+                ...(extra.offload ? { offload: extra.offload } : {}),
+            },
+        });
+    }
+
+    /**
+     * Run work exclusively per key.
+     * @param key The workspace or session.
+     * @param work The work.
+     */
+    async #locked(key: string, work: () => Promise<void>): Promise<void> {
+        const previous = this.#locks.get(key) ?? Promise.resolve();
+        let release!: () => void;
+        const current = new Promise<void>(resolve => (release = resolve));
+        const chained = previous.then(() => current);
+        this.#locks.set(key, chained);
+        await previous;
+        try {
+            await work();
+        } finally {
+            release();
+            if (this.#locks.get(key) === chained) this.#locks.delete(key);
+        }
+    }
+
+    /**
+     * Execute a command with a fresh operation id.
+     * @param sessionId The session.
+     * @param command The command body.
+     * @returns Produced records.
+     */
+    #exec(sessionId: string, command: DistributiveOmit<Command, 'sessionId' | 'operationId'>) {
+        return this.store.execute({ ...command, sessionId, operationId: randomUUID() } as Command);
+    }
+
+    /**
+     * The JobOutput tool.
+     * @returns Its definition.
+     */
+    #jobOutputTool(): ToolDefinition<unknown> {
+        return {
+            name: 'JobOutput',
+            description:
+                'Read the output of a background job by byte offset. Returns up to 32 KiB and the offset to continue from.',
+            inputSchema: jobOutputSchema,
+            readOnly: true,
+            concurrencySafe: true,
+            needsWorkspace: false,
+            access: () => [],
+            execute: async input => {
+                const { jobId, offset = 0 } = z
+                    .object({
+                        jobId: z.string(),
+                        offset: z.number().int().nonnegative().optional(),
+                    })
+                    .parse(input);
+                const job = this.#jobs.get(jobId);
+                await job?.writes;
+                const path = join(
+                    this.artifactsDir,
+                    'jobs',
+                    `${jobId.replace(/[^A-Za-z0-9-]/g, '')}.log`
+                );
+                let handle;
+                try {
+                    handle = await open(path, 'r');
+                } catch {
+                    return { content: `There is no output for job ${jobId}.`, isError: true };
+                }
+                try {
+                    const { size } = await handle.stat();
+                    const buffer = Buffer.alloc(
+                        Math.max(0, Math.min(maxJobOutputRead, size - offset))
+                    );
+                    await handle.read(buffer, 0, buffer.length, offset);
+                    const next = offset + buffer.length;
+                    return {
+                        content: `${buffer.toString('utf8')}\n[Job ${job ? 'running' : 'finished'}; bytes ${offset}–${next} of ${size}${next < size ? `; continue with offset ${next}` : ''}.]`,
+                    };
+                } finally {
+                    await handle.close();
+                }
+            },
+        };
+    }
+
+    /**
+     * The JobStop tool.
+     * @returns Its definition.
+     */
+    #jobStopTool(): ToolDefinition<unknown> {
+        return {
+            name: 'JobStop',
+            description: 'Cancel a running background job.',
+            inputSchema: jobStopSchema,
+            readOnly: false,
+            concurrencySafe: true,
+            needsWorkspace: false,
+            access: () => [],
+            execute: async input => {
+                const { jobId } = z.object({ jobId: z.string() }).parse(input);
+                const job = this.#jobs.get(jobId);
+                if (!job) return { content: `Job ${jobId} is not running.`, isError: true };
+                job.controller.abort(new Error('Stopped with JobStop.'));
+                return {
+                    content: `Job ${jobId} was asked to stop; you will be notified when it ends.`,
+                };
+            },
+        };
+    }
+}
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;

@@ -17,12 +17,35 @@ export const continuationBlockSchema = z.strictObject({
     format: z.number().int().positive(),
     data: z.unknown(),
 });
+/** A complete function call; `arguments` is the provider's exact JSON text, kept for replay. */
+export const toolCallBlockSchema = z.strictObject({
+    type: z.literal('tool_call'),
+    callId: idSchema,
+    name: z.string().min(1).max(200),
+    arguments: z.string(),
+});
+/** A call the provider executed itself; Core shows and replays it but never runs it. */
+export const nativeToolCallBlockSchema = z.strictObject({
+    type: z.literal('native_tool_call'),
+    adapter: idSchema,
+    format: z.number().int().positive(),
+    /** Standard id (`web_search`, `web_fetch`) or a plugin-namespaced id. */
+    tool: z.string().min(1).max(200),
+    status: z.enum(['completed', 'failed']),
+    query: z.string().optional(),
+    urls: z.array(z.string()).optional(),
+    data: z.unknown(),
+});
 export const blockSchema = z.discriminatedUnion('type', [
     textBlockSchema,
     reasoningBlockSchema,
     continuationBlockSchema,
+    toolCallBlockSchema,
+    nativeToolCallBlockSchema,
 ]);
 export type Block = z.infer<typeof blockSchema>;
+export type ToolCallBlock = z.infer<typeof toolCallBlockSchema>;
+export type NativeToolCallBlock = z.infer<typeof nativeToolCallBlockSchema>;
 
 export const messageSchema = z.strictObject({
     type: z.literal('message'),
@@ -60,10 +83,50 @@ export const noticeSchema = z.discriminatedUnion('kind', [
         kind: z.literal('restarted'),
         payload: z.strictObject({ runId: idSchema }),
     }),
+    z.strictObject({
+        ...noticeBase,
+        kind: z.literal('job-finished'),
+        payload: z.strictObject({
+            jobId: idSchema,
+            callId: idSchema,
+            tool: z.string(),
+            status: z.enum(['completed', 'failed', 'cancelled']),
+        }),
+        /** Output tail, already bounded. */
+        text: z.string(),
+    }),
+    z.strictObject({
+        ...noticeBase,
+        kind: z.literal('job-lost'),
+        payload: z.strictObject({ jobId: idSchema, callId: idSchema, tool: z.string() }),
+    }),
 ]);
 export type Notice = z.infer<typeof noticeSchema>;
 
-export const contextItemSchema = z.union([messageSchema, noticeSchema]);
+export const toolResultStatusSchema = z.enum([
+    'success',
+    'error',
+    'denied',
+    'cancelled',
+    'background',
+    'lost',
+]);
+
+/** The one result of a tool call. */
+export const toolResultSchema = z.strictObject({
+    type: z.literal('tool_result'),
+    id: idSchema,
+    callId: idSchema,
+    name: z.string(),
+    status: toolResultStatusSchema,
+    content: z.string(),
+    jobId: idSchema.optional(),
+    /** Where the full output was written when `content` is a preview. */
+    offload: z.strictObject({ path: z.string(), bytes: z.number().int().nonnegative() }).optional(),
+});
+export type ToolResult = z.infer<typeof toolResultSchema>;
+
+export const contextItemSchema = z.union([messageSchema, noticeSchema, toolResultSchema]);
 export type ContextItem = z.infer<typeof contextItemSchema>;
 
 export const usageSchema = z.strictObject({
@@ -80,6 +143,31 @@ const assistantOutputSchema = z.strictObject({
     blocks: z.array(blockSchema),
 });
 export type AssistantOutput = z.infer<typeof assistantOutputSchema>;
+
+/** What a tool call touches; permissions are decided from it. Paths are absolute. */
+export const accessSchema = z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.enum(['read', 'write']), path: z.string().min(1) }),
+    z.strictObject({ kind: z.literal('execute'), command: z.string() }),
+    z.strictObject({ kind: z.literal('network'), url: z.string() }),
+]);
+export type Access = z.infer<typeof accessSchema>;
+
+/** A session-scoped permission grant. */
+export const permissionRuleSchema = z.strictObject({
+    tool: z.string(),
+    kind: z.enum(['read', 'write', 'execute', 'network']),
+    /** Path prefix, command word, or host. */
+    pattern: z.string(),
+});
+export type PermissionRule = z.infer<typeof permissionRuleSchema>;
+
+/** A tool as declared to the model, frozen in the epoch. */
+export const toolDeclarationSchema = z.strictObject({
+    name: z.string().min(1).max(64),
+    description: z.string(),
+    inputSchema: z.record(z.string(), z.unknown()),
+});
+export type ToolDeclaration = z.infer<typeof toolDeclarationSchema>;
 
 export const placementSchema = z.enum(['next-step', 'next-run']);
 export const interruptReasonSchema = z.enum(['user', 'shutdown', 'crash', 'plugin-removed']);
@@ -103,6 +191,7 @@ export const bodySchema = z.discriminatedUnion('type', [
         title: z.string().max(200),
         credentialId: idSchema,
         thinking: thinkingLevelSchema.optional(),
+        workspace: z.string().min(1).optional(),
     }),
     z.strictObject({
         type: z.literal('session.updated'),
@@ -117,6 +206,8 @@ export const bodySchema = z.discriminatedUnion('type', [
         system: z.string(),
         card: frozenChatCardSchema,
         renderer: z.number().int().positive(),
+        tools: z.array(toolDeclarationSchema).default([]),
+        nativeTools: z.array(z.string()).default([]),
     }),
     z.strictObject({
         type: z.literal('delivery.accepted'),
@@ -128,7 +219,7 @@ export const bodySchema = z.discriminatedUnion('type', [
     z.strictObject({
         type: z.literal('run.started'),
         runId: idSchema,
-        trigger: z.enum(['user', 'continue', 'restart']),
+        trigger: z.enum(['user', 'continue', 'restart', 'job']),
     }),
     z.strictObject({
         type: z.literal('step.prepared'),
@@ -166,6 +257,34 @@ export const bodySchema = z.discriminatedUnion('type', [
         type: z.literal('run.ended'),
         runId: idSchema,
         result: runResultSchema,
+    }),
+    z.strictObject({
+        type: z.literal('permission.requested'),
+        runId: idSchema,
+        callId: idSchema,
+        name: z.string(),
+        access: z.array(accessSchema),
+    }),
+    z.strictObject({
+        type: z.literal('permission.decided'),
+        runId: idSchema,
+        callId: idSchema,
+        decision: z.enum(['allow', 'deny']),
+        scope: z.enum(['once', 'session']),
+        /** Rules granted for the rest of the session when `scope` is `session`. */
+        rules: z.array(permissionRuleSchema).default([]),
+    }),
+    z.strictObject({
+        type: z.literal('tool.started'),
+        runId: idSchema,
+        callId: idSchema,
+        jobId: idSchema,
+    }),
+    z.strictObject({ type: z.literal('tool.finished'), result: toolResultSchema }),
+    z.strictObject({
+        type: z.literal('job.ended'),
+        jobId: idSchema,
+        status: z.enum(['completed', 'failed', 'cancelled', 'lost']),
     }),
 ]);
 export type Body = z.infer<typeof bodySchema>;

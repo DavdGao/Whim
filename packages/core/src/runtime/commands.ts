@@ -5,14 +5,19 @@ import { z } from 'zod';
 import { frozenChatCardSchema, idSchema, thinkingLevelSchema } from '../contracts/card.js';
 import { failureSchema } from '../contracts/failure.js';
 import {
+    accessSchema,
     attemptResultSchema,
     contextItemSchema,
     placementSchema,
     runResultSchema,
+    toolDeclarationSchema,
+    toolResultSchema,
     usageSchema,
 } from '../contracts/records.js';
 
-import type { Body, BodyOf } from '../contracts/records.js';
+import { rulesFor } from './permissions.js';
+
+import type { Body, BodyOf, ToolResult } from '../contracts/records.js';
 import type { SessionView } from '../contracts/view.js';
 
 /** Store failures distinguish conflicts, missing targets, invalid input, and corrupt sessions. */
@@ -39,6 +44,8 @@ const epochInput = {
     system: z.string(),
     card: frozenChatCardSchema,
     renderer: z.number().int().positive(),
+    tools: z.array(toolDeclarationSchema),
+    nativeTools: z.array(z.string()),
 };
 
 export const commandSchema = z.discriminatedUnion('type', [
@@ -48,6 +55,7 @@ export const commandSchema = z.discriminatedUnion('type', [
         title: z.string().max(200),
         credentialId: idSchema,
         thinking: thinkingLevelSchema.optional(),
+        workspace: z.string().min(1).optional(),
         epoch: z.strictObject(epochInput),
     }),
     z.strictObject({
@@ -70,7 +78,7 @@ export const commandSchema = z.discriminatedUnion('type', [
         ...base,
         type: z.literal('start-run'),
         runId: idSchema,
-        trigger: z.enum(['user', 'continue', 'restart']),
+        trigger: z.enum(['user', 'continue', 'restart', 'job']),
     }),
     z.strictObject({ ...base, type: z.literal('prepare-step'), runId: idSchema, stepId: idSchema }),
     z.strictObject({
@@ -112,6 +120,37 @@ export const commandSchema = z.discriminatedUnion('type', [
     }),
     z.strictObject({
         ...base,
+        type: z.literal('request-permission'),
+        runId: idSchema,
+        callId: idSchema,
+        access: z.array(accessSchema),
+    }),
+    z.strictObject({
+        ...base,
+        type: z.literal('decide-permission'),
+        callId: idSchema,
+        decision: z.enum(['allow', 'deny']),
+        scope: z.enum(['once', 'session']),
+    }),
+    z.strictObject({
+        ...base,
+        type: z.literal('start-tool'),
+        runId: idSchema,
+        callId: idSchema,
+        jobId: idSchema,
+    }),
+    z.strictObject({ ...base, type: z.literal('finish-tool'), result: toolResultSchema }),
+    z.strictObject({
+        ...base,
+        type: z.literal('end-job'),
+        jobId: idSchema,
+        status: z.enum(['completed', 'failed', 'cancelled']),
+        /** Bounded output tail for the agent. */
+        text: z.string(),
+        observedAt: z.iso.datetime(),
+    }),
+    z.strictObject({
+        ...base,
         type: z.literal('recover'),
         reason: z.enum(['shutdown', 'crash']),
         observedAt: z.iso.datetime(),
@@ -135,6 +174,7 @@ export function decide(view: SessionView | null, command: Command): Body[] {
                 title: command.title,
                 credentialId: command.credentialId,
                 ...(command.thinking ? { thinking: command.thinking } : {}),
+                ...(command.workspace ? { workspace: command.workspace } : {}),
             },
             { type: 'epoch.started', reason: 'initial', ...command.epoch },
         ];
@@ -173,12 +213,16 @@ export function decide(view: SessionView | null, command: Command): Body[] {
         case 'prepare-step': {
             requireActive(view, command.runId);
             if (run?.interrupt) throw new StoreError('conflict', 'The run was interrupted.');
+            if (view.calls.length)
+                throw new StoreError('conflict', 'Tool calls are still unanswered.');
             const firstStep = run?.stepId === undefined;
             const consumed = [...view.inbox.values()]
                 .filter(pending => firstStep || pending.placement === 'next-step')
                 .sort((left, right) => left.seq - right.seq)
                 .map(pending => pending.deliveryId);
-            if (!firstStep && consumed.length === 0) return [];
+            // After tool results the model must respond even without new input.
+            const afterTools = view.history.at(-1)?.item.type === 'tool_result';
+            if (!firstStep && consumed.length === 0 && !afterTools) return [];
             return [
                 { type: 'step.prepared', runId: command.runId, stepId: command.stepId, consumed },
             ];
@@ -251,14 +295,113 @@ export function decide(view: SessionView | null, command: Command): Body[] {
         case 'end-run':
             requireActive(view, command.runId);
             if (run?.attempt) throw new StoreError('conflict', 'An attempt is still open.');
-            return [{ type: 'run.ended', runId: command.runId, result: command.result }];
+            return [
+                ...closeCalls(view),
+                { type: 'run.ended', runId: command.runId, result: command.result },
+            ];
+        case 'request-permission': {
+            requireActive(view, command.runId);
+            if (run?.interrupt) throw new StoreError('conflict', 'The run was interrupted.');
+            const call = view.calls.find(item => item.callId === command.callId);
+            if (call?.state !== 'pending')
+                throw new StoreError('conflict', 'The tool call is not waiting to start.');
+            return [
+                {
+                    type: 'permission.requested',
+                    runId: command.runId,
+                    callId: command.callId,
+                    name: call.name,
+                    access: command.access,
+                },
+            ];
+        }
+        case 'decide-permission': {
+            const call = view.calls.find(item => item.callId === command.callId);
+            if (!run || call?.state !== 'asking' || !call.access)
+                throw new StoreError('conflict', 'The tool call is no longer waiting for you.');
+            return [
+                {
+                    type: 'permission.decided',
+                    runId: run.runId,
+                    callId: command.callId,
+                    decision: command.decision,
+                    scope: command.scope,
+                    rules:
+                        command.decision === 'allow' && command.scope === 'session'
+                            ? rulesFor(call.name, call.access, view.workspace)
+                            : [],
+                },
+            ];
+        }
+        case 'start-tool': {
+            requireActive(view, command.runId);
+            if (run?.interrupt) throw new StoreError('conflict', 'The run was interrupted.');
+            const call = view.calls.find(item => item.callId === command.callId);
+            if (call?.state !== 'pending')
+                throw new StoreError('conflict', 'The tool call cannot start.');
+            return [
+                {
+                    type: 'tool.started',
+                    runId: command.runId,
+                    callId: command.callId,
+                    jobId: command.jobId,
+                },
+            ];
+        }
+        case 'finish-tool':
+            if (!view.calls.some(item => item.callId === command.result.callId))
+                throw new StoreError('conflict', 'The tool call already has a result.');
+            return [{ type: 'tool.finished', result: command.result }];
+        case 'end-job': {
+            const job = view.jobs.find(item => item.jobId === command.jobId);
+            if (!job) throw new StoreError('conflict', 'The job is not running.');
+            return [
+                { type: 'job.ended', jobId: job.jobId, status: command.status },
+                {
+                    type: 'delivery.accepted',
+                    deliveryId: randomUUID(),
+                    placement: 'next-step',
+                    item: {
+                        type: 'notice',
+                        id: randomUUID(),
+                        kind: 'job-finished',
+                        origin: { type: 'core', service: 'jobs' },
+                        observedAt: command.observedAt,
+                        payload: {
+                            jobId: job.jobId,
+                            callId: job.callId,
+                            tool: job.name,
+                            status: command.status,
+                        },
+                        text: command.text,
+                    },
+                },
+            ];
+        }
         case 'recover': {
+            // Jobs never survive a restart, whether or not a run was active.
+            const lost: Body[] = view.jobs.flatMap((job): Body[] => [
+                { type: 'job.ended', jobId: job.jobId, status: 'lost' },
+                {
+                    type: 'delivery.accepted',
+                    deliveryId: randomUUID(),
+                    placement: 'next-run',
+                    item: {
+                        type: 'notice',
+                        id: randomUUID(),
+                        kind: 'job-lost',
+                        origin: { type: 'core', service: 'jobs' },
+                        observedAt: command.observedAt,
+                        payload: { jobId: job.jobId, callId: job.callId, tool: job.name },
+                    },
+                },
+            ]);
             if (!run) {
                 const last = view.lastRun;
-                if (!last || !needsRestartNotice(view)) return [];
-                return [restartedNotice(last.runId, command.observedAt)];
+                if (!last || !needsRestartNotice(view)) return lost;
+                return [...lost, restartedNotice(last.runId, command.observedAt)];
             }
-            const facts: Body[] = [];
+            const facts: Body[] = [...lost];
             if (run.attempt)
                 facts.push({
                     type: 'attempt.finished',
@@ -271,6 +414,7 @@ export function decide(view: SessionView | null, command: Command): Body[] {
                 });
             const reason = run.interrupt ?? command.reason;
             facts.push(
+                ...closeCalls(view),
                 {
                     type: 'run.ended',
                     runId: run.runId,
@@ -320,6 +464,29 @@ function restartedNotice(runId: string, observedAt: string): Body {
             payload: { runId },
         },
     };
+}
+
+/**
+ * Results for every tool call that has none, so provider history stays valid.
+ * @param view The session view.
+ * @returns `tool.finished` facts: `cancelled` before start, `lost` after.
+ */
+function closeCalls(view: SessionView): Body[] {
+    return view.calls.map(call => {
+        const result: ToolResult = {
+            type: 'tool_result',
+            id: randomUUID(),
+            callId: call.callId,
+            name: call.name,
+            status: call.state === 'running' ? 'lost' : 'cancelled',
+            content:
+                call.state === 'running'
+                    ? 'The tool was interrupted; whether it completed is unknown.'
+                    : 'The tool was not run because the response was interrupted.',
+            ...(call.jobId ? { jobId: call.jobId } : {}),
+        };
+        return { type: 'tool.finished', result };
+    });
 }
 
 /**

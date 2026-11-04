@@ -5,14 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
-import { Store } from '@whimkit/core';
+import { CompiledSchema, PluginHost, Store, ToolRuntime } from '@whimkit/core';
 import { ApplicationError } from '@whimkit/core/contracts';
 
 import { Agent } from './agent.js';
 
 import type { AgentEvent } from './agent.js';
 import type { FrozenChatCard } from '@whimkit/core/contracts';
-import type { ChatEvent, ChatRequest, ChatSession } from '@whimkit/core/plugin';
+import type { ChatEvent, ChatRequest, ChatSession, ToolDefinition } from '@whimkit/core/plugin';
 
 const card: FrozenChatCard = {
     id: 'test/model',
@@ -67,9 +67,13 @@ after(async () => {
 /**
  * Create a session and accept one user message.
  * @param text The message.
+ * @param tools
  * @returns The session id.
  */
-async function sessionWith(text: string): Promise<string> {
+async function sessionWith(
+    text: string,
+    tools: { name: string; description: string; inputSchema: Record<string, unknown> }[] = []
+): Promise<string> {
     const sessionId = randomUUID();
     await store.execute({
         type: 'create',
@@ -77,7 +81,14 @@ async function sessionWith(text: string): Promise<string> {
         operationId: randomUUID(),
         title: 'Chat',
         credentialId: 'cred',
-        epoch: { epochId: randomUUID(), system: 'Be brief.', card, renderer: 1 },
+        epoch: {
+            epochId: randomUUID(),
+            system: 'Be brief.',
+            card,
+            renderer: 1,
+            tools,
+            nativeTools: [],
+        },
     });
     await say(sessionId, text);
     return sessionId;
@@ -124,11 +135,14 @@ async function transcript(sessionId: string) {
                   entry.item.blocks.map(block => ('text' in block ? block.text : '')).join(''),
                   entry.status ?? '',
               ]
-            : ['notice', entry.item.kind, '']
+            : entry.item.type === 'notice'
+              ? ['notice', entry.item.kind, '']
+              : ['tool', entry.item.status, entry.item.content]
     );
 }
 
 const noSleep = async () => {};
+const noTools = { run: async () => {} };
 
 describe('Agent', () => {
     it('streams a reply, commits it once, and does not call the model again without input', async () => {
@@ -137,7 +151,7 @@ describe('Agent', () => {
             yield { type: 'text-delta', text: 'there' };
             yield { type: 'completed', usage: { outputTokens: 2 } };
         });
-        const agent = new Agent(store, models, { sleep: noSleep });
+        const agent = new Agent(store, models, noTools, { sleep: noSleep });
         const sessionId = await sessionWith('hello');
         const before = (await store.read(sessionId)).length;
         const events = await drain(agent.run(sessionId, 'user', new AbortController().signal));
@@ -165,7 +179,7 @@ describe('Agent', () => {
             yield { type: 'text-delta', text: 'Yes' };
             yield { type: 'completed', usage: {} };
         });
-        const agent = new Agent(store, models, { sleep: noSleep });
+        const agent = new Agent(store, models, noTools, { sleep: noSleep });
         const sessionId = await sessionWith('think');
         await drain(agent.run(sessionId, 'user', new AbortController().signal));
         const answer = (await store.view(sessionId)).history.at(-1)?.item;
@@ -194,7 +208,7 @@ describe('Agent', () => {
         });
         const sessionId = await sessionWith('hi');
         const events = await drain(
-            new Agent(store, models, { sleep: noSleep }).run(
+            new Agent(store, models, noTools, { sleep: noSleep }).run(
                 sessionId,
                 'user',
                 new AbortController().signal
@@ -224,7 +238,7 @@ describe('Agent', () => {
         });
         const sessionId = await sessionWith('hi');
         await drain(
-            new Agent(store, models, { sleep: noSleep }).run(
+            new Agent(store, models, noTools, { sleep: noSleep }).run(
                 sessionId,
                 'user',
                 new AbortController().signal
@@ -249,7 +263,7 @@ describe('Agent', () => {
             yield { type: 'text-delta', text: 'ok' };
             yield { type: 'completed', usage: {} };
         });
-        const agent = new Agent(store, models, { sleep: noSleep });
+        const agent = new Agent(store, models, noTools, { sleep: noSleep });
         const sessionId = await sessionWith('tell a story');
         const controller = new AbortController();
         const iterator = agent.run(sessionId, 'user', controller.signal)[Symbol.asyncIterator]();
@@ -280,7 +294,9 @@ describe('Agent', () => {
         await drain(agent.run(sessionId, 'user', new AbortController().signal));
         assert.deepEqual(
             requests[1].messages.map(message =>
-                message.blocks.map(block => ('text' in block ? block.text : '')).join('')
+                message.role === 'tool'
+                    ? message.content
+                    : message.blocks.map(block => ('text' in block ? block.text : '')).join('')
             ),
             [
                 'tell a story',
@@ -296,9 +312,317 @@ describe('Agent', () => {
             yield { type: 'completed', usage: {} };
         }, 5);
         const sessionId = await sessionWith('this message is far too long for the tiny budget');
-        await drain(new Agent(store, models).run(sessionId, 'user', new AbortController().signal));
+        await drain(
+            new Agent(store, models, noTools).run(sessionId, 'user', new AbortController().signal)
+        );
         assert.equal(requests.length, 0);
         const result = (await store.view(sessionId)).lastRun?.result;
         assert.equal(result?.outcome === 'failed' && result.failure.category, 'context-limit');
+    });
+
+    describe('tools', () => {
+        const textSchema = {
+            type: 'object',
+            required: ['text'],
+            additionalProperties: false,
+            properties: { text: { type: 'string' } },
+        };
+
+        /**
+         * A tool runtime over a host holding the given tools.
+         * @param tools Tool definitions.
+         * @returns The runtime, its declarations, and sessions whose jobs ended.
+         */
+        function runtimeWith(tools: ToolDefinition<{ text: string }>[]) {
+            const host = new PluginHost(store, []);
+            for (const tool of tools)
+                host.tools.set(tool.name, {
+                    pluginId: 'test',
+                    tool,
+                    inputSchema: new CompiledSchema(tool.inputSchema),
+                });
+            const ended: string[] = [];
+            const runtime = new ToolRuntime(store, host, join(dir, 'artifacts'), id =>
+                ended.push(id)
+            );
+            return { runtime, declarations: runtime.declarations(undefined, []), ended };
+        }
+
+        const echo: ToolDefinition<{ text: string }> = {
+            name: 'Echo',
+            description: 'Echo text.',
+            inputSchema: textSchema,
+            readOnly: true,
+            concurrencySafe: true,
+            needsWorkspace: false,
+            access: () => [],
+            execute: async input => ({ content: `echo: ${input.text}` }),
+        };
+
+        /**
+         * A model that calls a tool once and then answers with the tool result it saw.
+         * @param name Tool to call.
+         * @param args Its JSON arguments.
+         * @returns The model port and recorded requests.
+         */
+        function callingModel(name: string, args: string) {
+            return scripted(async function* (request, _signal, attempt) {
+                if (attempt === 1) {
+                    yield { type: 'tool-call', callId: 'call-1', name, arguments: args };
+                } else {
+                    const result = request.messages.find(message => message.role === 'tool');
+                    yield {
+                        type: 'text-delta',
+                        text: `saw ${result?.role === 'tool' ? result.status : 'nothing'}`,
+                    };
+                }
+                yield { type: 'completed', usage: {} };
+            });
+        }
+
+        it('runs a call, commits its result, and answers in the same run', async () => {
+            const { runtime, declarations } = runtimeWith([echo]);
+            const { models, requests } = callingModel('Echo', '{"text":"hi"}');
+            const sessionId = await sessionWith('use echo', declarations);
+            const agent = new Agent(store, models, runtime, { sleep: noSleep });
+            await drain(agent.run(sessionId, 'user', new AbortController().signal));
+            assert.deepEqual(await transcript(sessionId), [
+                ['user', 'use echo', ''],
+                ['assistant', '', 'completed'],
+                ['tool', 'success', 'echo: hi'],
+                ['assistant', 'saw success', 'completed'],
+            ]);
+            assert.deepEqual(
+                requests[1].messages.map(message => message.role),
+                ['user', 'assistant', 'tool']
+            );
+            assert.deepEqual(
+                requests[0].tools.map(tool => tool.name),
+                ['Echo', 'JobOutput', 'JobStop']
+            );
+            assert.equal((await store.view(sessionId)).lastRun?.result.outcome, 'completed');
+        });
+
+        it('reports invalid arguments to the model without running the tool', async () => {
+            let ran = false;
+            const { runtime, declarations } = runtimeWith([
+                { ...echo, execute: async () => ((ran = true), { content: '' }) },
+            ]);
+            const { models } = callingModel('Echo', '{"text":1}');
+            const sessionId = await sessionWith('bad args', declarations);
+            await drain(
+                new Agent(store, models, runtime, { sleep: noSleep }).run(
+                    sessionId,
+                    'user',
+                    new AbortController().signal
+                )
+            );
+            const result = (await transcript(sessionId))[2];
+            assert.equal(result?.[1], 'error');
+            assert.match(String(result?.[2]), /Invalid arguments/);
+            assert.equal(ran, false);
+        });
+
+        it('asks before writing and records a denial', async () => {
+            const writer = {
+                ...echo,
+                name: 'Write',
+                readOnly: false,
+                concurrencySafe: false,
+                access: () => [{ kind: 'write' as const, path: '/tmp/x' }],
+            };
+            const { runtime, declarations } = runtimeWith([writer]);
+            const { models } = callingModel('Write', '{"text":"x"}');
+            const sessionId = await sessionWith('write it', declarations);
+            const stop = store.onCommit(records => {
+                if (records.some(record => record.body.type === 'permission.requested'))
+                    void runtime.decide(sessionId, 'call-1', 'deny', 'once');
+            });
+            await drain(
+                new Agent(store, models, runtime, { sleep: noSleep }).run(
+                    sessionId,
+                    'user',
+                    new AbortController().signal
+                )
+            );
+            stop();
+            assert.deepEqual((await transcript(sessionId)).slice(2), [
+                ['tool', 'denied', 'The user denied this tool call.'],
+                ['assistant', 'saw denied', 'completed'],
+            ]);
+        });
+
+        it('grants a session rule so the next identical call does not ask', async () => {
+            const writer = {
+                ...echo,
+                name: 'Write',
+                readOnly: false,
+                concurrencySafe: false,
+                access: () => [{ kind: 'execute' as const, command: 'ls -la' }],
+            };
+            const { runtime, declarations } = runtimeWith([writer]);
+            const sessionId = await sessionWith('first', declarations);
+            let asks = 0;
+            const stop = store.onCommit(records => {
+                for (const record of records)
+                    if (record.body.type === 'permission.requested') {
+                        asks++;
+                        void runtime.decide(sessionId, record.body.callId, 'allow', 'session');
+                    }
+            });
+            for (const round of [1, 2]) {
+                const { models } = scripted(async function* (_request, _signal, attempt) {
+                    if (attempt === 1)
+                        yield {
+                            type: 'tool-call',
+                            callId: `call-${round}`,
+                            name: 'Write',
+                            arguments: '{"text":"x"}',
+                        };
+                    else yield { type: 'text-delta', text: 'ok' };
+                    yield { type: 'completed', usage: {} };
+                });
+                if (round === 2) await say(sessionId, 'again');
+                await drain(
+                    new Agent(store, models, runtime, { sleep: noSleep }).run(
+                        sessionId,
+                        'user',
+                        new AbortController().signal
+                    )
+                );
+            }
+            stop();
+            assert.equal(asks, 1);
+            assert.deepEqual((await store.view(sessionId)).permissionRules, [
+                { tool: 'Write', kind: 'execute', pattern: 'ls' },
+            ]);
+        });
+
+        it('cancels an open ask on Stop and closes the call', async () => {
+            const writer = {
+                ...echo,
+                name: 'Write',
+                readOnly: false,
+                concurrencySafe: false,
+                access: () => [{ kind: 'write' as const, path: '/tmp/x' }],
+            };
+            const { runtime, declarations } = runtimeWith([writer]);
+            const { models } = callingModel('Write', '{"text":"x"}');
+            const sessionId = await sessionWith('write it', declarations);
+            const agent = new Agent(store, models, runtime, { sleep: noSleep });
+            const controller = new AbortController();
+            const stop = store.onCommit(records => {
+                const asked = records.find(record => record.body.type === 'permission.requested');
+                if (asked?.body.type === 'permission.requested')
+                    void store
+                        .execute({
+                            type: 'interrupt',
+                            sessionId,
+                            operationId: randomUUID(),
+                            runId: asked.body.runId,
+                            reason: 'user',
+                            observedAt: new Date().toISOString(),
+                        })
+                        .then(() => controller.abort());
+            });
+            await drain(agent.run(sessionId, 'user', controller.signal));
+            stop();
+            const view = await store.view(sessionId);
+            assert.deepEqual(view.calls, []);
+            assert.equal((await transcript(sessionId))[2]?.[1], 'cancelled');
+            assert.deepEqual(view.lastRun?.result, { outcome: 'interrupted', reason: 'user' });
+        });
+
+        it('moves a slow call to the background and delivers its completion', async () => {
+            let finish!: () => void;
+            const released = new Promise<void>(resolve => (finish = resolve));
+            const slow: ToolDefinition<{ text: string }> = {
+                ...echo,
+                name: 'Slow',
+                backgroundAfterMs: () => 0,
+                execute: async (input, context) => {
+                    context.output('started\n');
+                    await released;
+                    return { content: `done ${input.text}` };
+                },
+            };
+            const { runtime, declarations, ended } = runtimeWith([slow]);
+            const { models } = callingModel('Slow', '{"text":"job"}');
+            const sessionId = await sessionWith('run slow', declarations);
+            await drain(
+                new Agent(store, models, runtime, { sleep: noSleep }).run(
+                    sessionId,
+                    'user',
+                    new AbortController().signal
+                )
+            );
+            let view = await store.view(sessionId);
+            assert.equal(view.jobs.length, 1);
+            const jobId = view.jobs[0]?.jobId ?? '';
+            assert.equal((await transcript(sessionId))[2]?.[1], 'background');
+            finish();
+            while (ended.length === 0) await new Promise(resolve => setTimeout(resolve, 10));
+            view = await store.view(sessionId);
+            assert.deepEqual(view.jobs, []);
+            const notice = [...view.inbox.values()][0]?.item;
+            assert.ok(notice?.type === 'notice' && notice.kind === 'job-finished');
+            assert.deepEqual(notice.payload, {
+                jobId,
+                callId: 'call-1',
+                tool: 'Slow',
+                status: 'completed',
+            });
+            assert.equal(notice.text, 'done job');
+        });
+
+        it('offloads a large result to a file and keeps a preview', async () => {
+            const big = { ...echo, execute: async () => ({ content: 'x'.repeat(100_000) }) };
+            const { runtime, declarations } = runtimeWith([big]);
+            const { models } = callingModel('Echo', '{"text":"x"}');
+            const sessionId = await sessionWith('big', declarations);
+            await drain(
+                new Agent(store, models, runtime, { sleep: noSleep }).run(
+                    sessionId,
+                    'user',
+                    new AbortController().signal
+                )
+            );
+            const item = (await store.view(sessionId)).history[2]?.item;
+            assert.ok(item?.type === 'tool_result');
+            assert.equal(item.offload?.bytes, 100_000);
+            assert.ok(item.content.length < 20_000);
+            assert.match(item.content, /bytes omitted/);
+        });
+
+        it('records job loss on recovery', async () => {
+            const slow: ToolDefinition<{ text: string }> = {
+                ...echo,
+                name: 'Slow',
+                backgroundAfterMs: () => 0,
+                execute: () => new Promise(() => {}),
+            };
+            const { runtime, declarations } = runtimeWith([slow]);
+            const { models } = callingModel('Slow', '{"text":"x"}');
+            const sessionId = await sessionWith('lose it', declarations);
+            await drain(
+                new Agent(store, models, runtime, { sleep: noSleep }).run(
+                    sessionId,
+                    'user',
+                    new AbortController().signal
+                )
+            );
+            assert.ok((await store.recoverySessions()).some(item => item.sessionId === sessionId));
+            await store.execute({
+                type: 'recover',
+                sessionId,
+                operationId: randomUUID(),
+                reason: 'crash',
+                observedAt: new Date().toISOString(),
+            });
+            const view = await store.view(sessionId);
+            assert.deepEqual(view.jobs, []);
+            const notice = [...view.inbox.values()][0]?.item;
+            assert.equal(notice?.type === 'notice' && notice.kind, 'job-lost');
+        });
     });
 });

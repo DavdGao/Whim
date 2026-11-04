@@ -36,7 +36,16 @@ export const methodSchemas = {
     'catalog.reload': z.strictObject({}),
     'plugins.setEnabled': z.strictObject({ id: idSchema, enabled: z.boolean() }),
     'session.get': z.strictObject({ sessionId: idSchema }),
-    'session.create': z.strictObject({ slot: chatSlotSchema }),
+    'session.create': z.strictObject({
+        slot: chatSlotSchema,
+        workspace: z.string().min(1).max(4096).optional(),
+    }),
+    'session.decide': z.strictObject({
+        sessionId: idSchema,
+        callId: idSchema,
+        decision: z.enum(['allow', 'deny']),
+        scope: z.enum(['once', 'session']),
+    }),
     'session.send': z.strictObject({
         sessionId: idSchema,
         text: z.string().trim().min(1).max(200_000),
@@ -147,6 +156,7 @@ export interface Results {
     'plugins.setEnabled': null;
     'session.get': SessionSnapshot;
     'session.create': { sessionId: string };
+    'session.decide': null;
     'session.send': { deliveryId: string };
     'session.stop': null;
     'session.continue': null;

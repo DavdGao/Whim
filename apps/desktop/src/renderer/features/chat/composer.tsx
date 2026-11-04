@@ -8,6 +8,7 @@ import { useT } from '../../lib/i18n';
 import { modelIcon } from '../../lib/icons';
 
 import { modelChoices } from './model-choices';
+import { WorkspacePicker } from './workspace-picker';
 
 import type { AppState, ChatSlot } from '../../../shared/ipc';
 
@@ -29,6 +30,9 @@ export interface ComposerProps {
     readonly onSlotChange: (slot: ChatSlot) => Promise<void>;
     readonly onSend: (text: string) => Promise<void>;
     readonly onStop: () => void;
+    readonly workspace: string | undefined;
+    /** Absent once the chat exists: the folder is fixed for its life. */
+    readonly onWorkspaceChange?: (workspace: string | undefined) => void;
 }
 
 /**
@@ -41,6 +45,8 @@ export interface ComposerProps {
  * @param props.onSlotChange
  * @param props.onSend
  * @param props.onStop
+ * @param props.workspace
+ * @param props.onWorkspaceChange
  * @returns The composer.
  */
 export function Composer({
@@ -51,6 +57,8 @@ export function Composer({
     onSlotChange,
     onSend,
     onStop,
+    workspace,
+    onWorkspaceChange,
 }: ComposerProps) {
     const { t } = useT();
     const [text, setText] = useState('');
@@ -94,6 +102,10 @@ export function Composer({
             </PromptInputBody>
             <PromptInputFooter>
                 <PromptInputTools>
+                    <WorkspacePicker
+                        workspace={workspace}
+                        {...(onWorkspaceChange ? { onChange: onWorkspaceChange } : {})}
+                    />
                     <ChoiceMenu
                         value={current?.card.id}
                         choices={choices.map(choice => ({

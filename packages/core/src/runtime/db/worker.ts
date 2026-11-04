@@ -267,7 +267,7 @@ function execute(command: Command): AgentRecord[] {
                 after.updatedAt,
                 after.head,
                 after.run ? 1 : 0,
-                after.run || needsRestartNotice(after) ? 1 : 0
+                after.run || after.jobs.length > 0 || needsRestartNotice(after) ? 1 : 0
             );
             views.set(after.sessionId, after);
         }

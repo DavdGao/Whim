@@ -55,11 +55,14 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 
 ## PR 6 — Tools
 
-- [ ] Bash, Grep (ripgrep), Glob, Read, Edit, Write
-- [ ] Concurrent/serial scheduling, Job service, background handoff, JobOutput/JobStop
-- [ ] Truncation and offload
-- [ ] Permissions (manual, auto)
-- [ ] Native tool resolution (web search/fetch)
+- [x] Foundation: tool definitions and plugin registration, `tool_call`/`native_tool_call` blocks, tool results, permission/tool/job records, epoch tool sets, session workspace
+- [x] Tool runtime: validation, scheduling (parallel safe groups, per-workspace lock), jobs with background handoff, `JobOutput`/`JobStop`, offload above 32 KiB, recovery of lost calls and jobs
+- [x] Manual permissions with session grants; Tool and Confirmation display in chat
+- [x] Responses function calling; DashScope native `web_search`/`web_extractor`
+- [ ] `@whimkit/plugin-workspace`: Bash, Read, Write, Edit, Glob, Grep
+- [ ] `@whimkit/plugin-web`: local WebSearch and WebFetch
+- [ ] Live DashScope check of function calling with thinking models (reasoning item replay)
+- [ ] Persistent permission rules in Settings; auto mode with a reviewer model
 
 ## Later
 

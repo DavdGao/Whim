@@ -24,35 +24,39 @@ A session's state is the fold of its journal:
 - **Runs** — one active run at most. A run is a sequence of steps; each step makes one or more model attempts.
 - **Jobs** — tool executions owned by Core's Job service, referenced from history.
 
+A session may have a **workspace**: a directory the user picks when creating it, fixed for the session's life. Workspace tools are offered only with a workspace, and the epoch's system prompt states the workspace path, platform, and date as of the epoch's start.
+
 The journal head (latest seq), the epoch, and the run generation are separate values. New input advances the head without invalidating an in-flight step.
 
 ## 3. Records
 
 Each record has `id`, `sessionId`, `seq`, `type`, `version`, `createdAt`, `operationId`, and a typed body. Bodies are discriminated by `type`; incompatible states are separate variants, not optional fields.
 
-| Record                            | Written when                                            | Key fields                                                                                                                             |
-| --------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `session.created`                 | Session creation                                        | title, credential, thinking level                                                                                                      |
-| `session.updated`                 | Rename, credential change, thinking level change        | changed fields; none of them alter the prompt prefix, so they apply to the next attempt                                                |
-| `epoch.started`                   | Creation, successful compaction, model switch           | `epochId`, `reason`, system sections, tool declarations, frozen card, source snapshots                                                 |
-| `delivery.accepted`               | Input admitted to the inbox                             | `deliveryId`, `placement`, item (message or notice)                                                                                    |
-| `delivery.withdrawn`              | User removes a pending item                             | `deliveryId`                                                                                                                           |
-| `run.started`                     | Scheduler begins a run                                  | `runId`, trigger                                                                                                                       |
-| `step.prepared`                   | Before reasoning                                        | `stepId`, consumed delivery ids, plan (epoch id, history end seq, estimate)                                                            |
-| `attempt.started`                 | Each model request                                      | `attemptId`, `stepId`, attempt number                                                                                                  |
-| `attempt.finished`                | Attempt terminal                                        | `status` (completed, failed, interrupted), usage, failure; for completed and interrupted attempts, the output (text, reasoning, items) |
-| `retry.scheduled`                 | Runtime decides to retry                                | `stepId`, next attempt number, `at`, failure that caused it                                                                            |
-| `interrupt.requested`             | Stop or shutdown                                        | `runId`, `reason`: user, shutdown, or plugin-removed                                                                                   |
-| `run.ended`                       | Run terminal                                            | `{ outcome: 'completed' }` / `{ outcome: 'interrupted', reason }` / `{ outcome: 'failed', failure }`                                   |
-| `compaction.started`              | Compaction begins                                       | `compactionId`, trigger                                                                                                                |
-| `compaction.finished`             | Compaction terminal                                     | `{ status: 'succeeded', epochId, coveredSeq }` / `{ status: 'failed', failure }`                                                       |
-| `tool.*`, `job.*`, `permission.*` | Tool execution ([§9](#9-tools), [§10](#10-permissions)) |                                                                                                                                        |
+| Record                                       | Written when                                                                 | Key fields                                                                                                                             |
+| -------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `session.created`                            | Session creation                                                             | title, credential, thinking level                                                                                                      |
+| `session.updated`                            | Rename, credential change, thinking level change                             | changed fields; none of them alter the prompt prefix, so they apply to the next attempt                                                |
+| `epoch.started`                              | Creation, successful compaction, model switch                                | `epochId`, `reason`, system sections, tool declarations, frozen card, source snapshots                                                 |
+| `delivery.accepted`                          | Input admitted to the inbox                                                  | `deliveryId`, `placement`, item (message or notice)                                                                                    |
+| `delivery.withdrawn`                         | User removes a pending item                                                  | `deliveryId`                                                                                                                           |
+| `run.started`                                | Scheduler begins a run                                                       | `runId`, trigger                                                                                                                       |
+| `step.prepared`                              | Before reasoning                                                             | `stepId`, consumed delivery ids, plan (epoch id, history end seq, estimate)                                                            |
+| `attempt.started`                            | Each model request                                                           | `attemptId`, `stepId`, attempt number                                                                                                  |
+| `attempt.finished`                           | Attempt terminal                                                             | `status` (completed, failed, interrupted), usage, failure; for completed and interrupted attempts, the output (text, reasoning, items) |
+| `retry.scheduled`                            | Runtime decides to retry                                                     | `stepId`, next attempt number, `at`, failure that caused it                                                                            |
+| `interrupt.requested`                        | Stop or shutdown                                                             | `runId`, `reason`: user, shutdown, or plugin-removed                                                                                   |
+| `run.ended`                                  | Run terminal                                                                 | `{ outcome: 'completed' }` / `{ outcome: 'interrupted', reason }` / `{ outcome: 'failed', failure }`                                   |
+| `compaction.started`                         | Compaction begins                                                            | `compactionId`, trigger                                                                                                                |
+| `compaction.finished`                        | Compaction terminal                                                          | `{ status: 'succeeded', epochId, coveredSeq }` / `{ status: 'failed', failure }`                                                       |
+| `permission.requested`, `permission.decided` | A call needs the user's decision ([§10](#10-permissions))                    | `callId`, access / decision and scope                                                                                                  |
+| `tool.started`, `tool.finished`              | A call starts / gets its result ([§9.2](#92-calls-and-results))              | `callId`, `jobId` / result item                                                                                                        |
+| `job.ended`                                  | A background job ends or is lost ([§9.4](#94-jobs-and-background-execution)) | `jobId`, status                                                                                                                        |
 
 Usage is recorded on every `attempt.finished`, including failures, with missing fields left unknown. Compaction and reviewer attempts are attempts too.
 
 ## 4. Messages and notices
 
-A context item is a message `{ id, role: 'user' | 'assistant', blocks }`. Blocks are a discriminated union: `text`, `image`, `file` (artifact reference plus prepared content), `reasoning` (with the measured `durationMs` from its first delta to the first answer delta), `continuation`, `tool_call`, `tool_result`, `native_tool_call`, and `notice`.
+A context item is a message `{ id, role: 'user' | 'assistant', blocks }`. Blocks are a discriminated union: `text`, `image`, `file` (artifact reference plus prepared content), `reasoning` (with the measured `durationMs` from its first delta to the first answer delta), `continuation`, `tool_call`, and `native_tool_call`. Tool results (§9.2) and notices are context items of their own.
 
 A notice is how anything other than the user tells the agent something:
 
@@ -69,7 +73,7 @@ type Notice = {
 };
 ```
 
-- `kind` selects a payload schema. Core kinds: `interrupted`, `restarted`, `source-changed`, `job-finished`, `job-lost`, `permission-denied`, `clock`. Plugin kinds are `<pluginId>#<name>` with a payload schema registered by the plugin. No information is passed by encoding JSON into strings.
+- `kind` selects a payload schema. Core kinds: `interrupted`, `restarted`, `job-finished`, `job-lost`, and later `source-changed` and `clock`. Plugin kinds are `<pluginId>#<name>` with a payload schema registered by the plugin. No information is passed by encoding JSON into strings.
 - `content` holds optional model-facing text or images, for example a background job's output preview.
 - A versioned Core renderer turns notices into model input wrapped in `<system-reminder>…</system-reminder>`, carried in a user-role message. Changing the renderer is prompt-affecting and is recorded in the epoch.
 - The frontend decides display from `kind` and `origin`. Records carry no display flags.
@@ -151,7 +155,7 @@ interface ContextSource {
 
 The tool set is a source with target `tools`, so the same mechanism can later carry tool-schema changes between compactions. Dynamic tools are not designed or implemented yet; this section only keeps the source mechanism general enough to host them.
 
-Revocation is immediate regardless of the cache: a disabled tool fails its call with a `permission-denied` notice even if it is still declared.
+Revocation is immediate regardless of the cache: a disabled tool fails its call with an error result even if it is still declared.
 
 ## 8. Compaction
 
@@ -179,46 +183,85 @@ The switch is recorded as `epoch.started { reason: 'model-switch' }`, and the co
 
 ## 9. Tools
 
-### 9.1 Declarations
+### 9.1 Definitions
+
+Tools are registered by plugins through `context.tools.register(definition)`; Core registers only the job tools (`JobOutput`, `JobStop`). First-party plugins provide `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep` (`@whimkit/plugin-workspace`) and local `WebSearch`/`WebFetch` (`@whimkit/plugin-web`). An MCP bridge would be one more plugin registering tools; nothing in Core is MCP-specific.
 
 ```ts
-interface ToolDeclaration {
-    name: string;
+interface ToolDefinition {
+    name: string; // model-facing, unique across plugins
     description: string;
-    inputSchema: JsonSchema;
+    inputSchema: JsonSchema; // Core validates input before anything else
     readOnly: boolean;
     concurrencySafe: boolean;
+    needsWorkspace: boolean; // offered only to sessions with a workspace
+    standard?: 'web_search' | 'web_fetch'; // local implementation of a standard id (design.md §7.6)
+    access(input, env): Access[]; // what the call touches, for permissions
+    backgroundAfterMs?(input): number | undefined; // foreground limit; 0 = start in background
+    execute(input, context: ToolContext): Promise<ToolOutput>;
+}
+type Access =
+    | { kind: 'read' | 'write'; path: string } // absolute
+    | { kind: 'execute'; command: string }
+    | { kind: 'network'; url: string };
+interface ToolContext {
+    signal: AbortSignal; // Stop for foreground calls, JobStop for background ones
+    sessionId: string;
+    callId: string;
+    workspace?: string;
+    output(chunk: string): void; // progressive output, readable through JobOutput
+}
+interface ToolOutput {
+    content: string;
+    isError?: boolean;
 }
 ```
 
-Built-in Core tools: `Bash`, `Grep` (ripgrep), `Glob`, `Read`, `Edit`, `Write`, `JobOutput`, `JobStop`. `WebSearch` and `WebFetch` resolve per [design.md §7.6](design.md#76-native-and-local-tools). Model plugins do not provide these tools; they only translate native tools.
+The tool set is frozen into the epoch (`tools`: name, description, input schema, in registration order) together with `nativeTools`, the native tool ids the adapter will execute. Sessions created before tools existed have empty sets. A tool whose plugin is disabled later stays declared until compaction but fails its calls immediately (§7.2).
 
-### 9.2 Scheduling
+### 9.2 Calls and results
 
-Tool calls from one step run in order of appearance, grouped: consecutive `concurrencySafe` calls run in parallel up to a bound; any other call is a barrier that runs alone. Results are appended in the original call order. Mutating tools coordinate on workspace paths across sessions.
+A completed attempt may end with `tool_call` blocks `{ callId, name, arguments }`, where `arguments` is the provider's exact JSON text, kept for replay. Calls of an interrupted attempt are dropped and never executed. Each call then goes through:
 
-### 9.3 Jobs and background execution
+1. **Validate.** Unknown tool, unparsable arguments, or schema errors produce an error result without running anything.
+2. **Permit** (§10). An ask commits `permission.requested`, and the run waits for `permission.decided`.
+3. **Start.** `tool.started { callId, jobId }` is committed before execution.
+4. **Finish.** `tool.finished { callId, result }` appends a `tool_result` context item: `status` (`success`, `error`, `denied`, `cancelled`, `background`, `lost`), text `content`, and optional `jobId` and `offload`.
 
-Core's Job service owns execution, not the agent loop. The agent submits a call and waits up to the tool's foreground limit.
+Every call gets exactly one result. When a run ends or recovery finds an unfinished call, the missing results are written as `cancelled` (not started) or `lost` (started, outcome unknown), so provider history stays valid. After the results, the step loop continues: a history that ends with tool results needs a response.
 
-- Completes in time: the result is the tool result.
-- Exceeds the limit: the job moves to background and the tool result is a handle `{ jobId, status, outputPreview }`. Later completion delivers a `job-finished` notice with a bounded preview. `JobOutput` reads output by offset; `JobStop` cancels.
-- One handle per original call; background handoff never relaunches work.
-- Jobs are not promised to survive restart; jobs running at shutdown become `job-lost` notices.
-- `Bash` runs a child process group; file tools use async I/O. No dedicated thread is needed.
+Provider-executed calls (web search on DashScope) arrive as `native_tool_call` blocks with the adapter id, the standard tool id, the query or URLs, and the opaque provider item for replay. Core never executes them.
 
-### 9.4 Truncation and offload
+### 9.3 Scheduling
 
-A tool result above its byte or token limit is stored as an artifact file; the context gets a head/tail preview, total size, and a reference that `Read` accepts with offsets. Nothing is silently dropped. The same applies to large fetched pages and extracted documents.
+Calls run in order of appearance, grouped: consecutive `concurrencySafe` calls run in parallel (at most 4); any other call is a barrier that runs alone. Non-concurrency-safe calls also take a per-workspace lock, so two sessions never mutate one workspace at the same time. Results are committed as they complete; the request renderer places them in the original call order after their assistant message.
+
+### 9.4 Jobs and background execution
+
+Core's Job service owns every execution; the agent only waits. A call runs as a job and the step waits up to `backgroundAfterMs`:
+
+- Completes in time: its output is the tool result.
+- Exceeds the limit, or the limit is 0: the result is `background` with the job id and the output so far, and the job keeps running. `JobOutput { jobId, offset? }` reads accumulated output, `JobStop { jobId }` cancels it.
+- When a background job ends, `job.ended` and a `job-finished` notice (status and output tail) are committed together, and an idle session starts a run to react to it.
+- Stop cancels foreground jobs only. Jobs do not survive a restart: recovery commits `job.ended { lost }` and a `job-lost` notice.
+- One job per call; a handoff never re-runs anything.
+
+### 9.5 Truncation and offload
+
+A result above 32 KiB of text is written to `<userData>/artifacts/<callId>.txt`; the context gets the first and last 8 KiB, the total size, and the file path, which `Read` accepts with offsets and which is readable without a permission prompt. Background job output is bounded the same way. Nothing is silently dropped.
 
 ## 10. Permissions
 
-Rules are `{ tool, pattern?, behavior: 'allow' | 'deny' | 'ask' }`. `pattern` is tool-specific: a command prefix for `Bash`, a path glob for file tools. Deny always wins.
+Core decides each call from its `access` list:
 
-- **Manual mode:** `ask` prompts the user.
-- **Auto mode:** `ask` goes to a reviewer. Two implementations share one contract: a Chat model with structured output (the `reviewer` slot with a chat card) or a Decision model (the `reviewer` slot with a decision card). A reviewer failure falls back to asking the user. Reviewer attempts are recorded with usage.
+| Access                                                          | Default (manual mode) |
+| --------------------------------------------------------------- | --------------------- |
+| none, or `read` inside the workspace or the artifacts directory | allow                 |
+| `read` elsewhere, `write`, `execute`, `network`                 | ask                   |
 
-Decisions are recorded as `permission.requested` and `permission.decided` with the deciding party. A denied call produces a tool result explaining the denial.
+The user answers an ask with **Allow once**, **Allow for this session**, or **Deny**. A session grant becomes a rule for that tool: a path prefix for files (the workspace), the first word of the command for `execute`, the host for `network`. A denial produces a `denied` result telling the model the user declined. Stop while an ask is open cancels the call.
+
+Records: `permission.requested { callId, name, access }` and `permission.decided { callId, decision, scope }`. Persistent rules in Settings and **auto mode** (a reviewer model deciding asks: a Chat model with structured output or a Decision model behind one contract, falling back to the user on failure, with its attempts recorded) follow in a later change.
 
 ## 11. Skills and memory
 
