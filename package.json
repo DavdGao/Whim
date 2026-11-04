@@ -8,7 +8,10 @@
         "node": ">=24"
     },
     "scripts": {
-        "check": "pnpm format:check && pnpm lint",
+        "check": "pnpm format:check && pnpm lint && pnpm build && pnpm typecheck && pnpm test",
+        "build": "pnpm -r build",
+        "typecheck": "pnpm -r typecheck",
+        "test": "pnpm -r test",
         "format": "prettier --write . && eslint . --fix",
         "format:check": "prettier --check .",
         "lint": "eslint .",

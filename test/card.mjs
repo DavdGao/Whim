@@ -1,0 +1,25 @@
+export const card = {
+    kind: 'chat',
+    id: 'fixture-chat',
+    revision: 1,
+    provider: 'fixture',
+    adapterId: 'fixture',
+    modelId: 'fixture-chat',
+    label: 'Deterministic text fixture',
+    inputMedia: {
+        'text/plain': { support: 'supported', routes: [{ delivery: 'text', maxBytes: 100000 }] },
+    },
+    outputMedia: { 'text/plain': 'supported' },
+    contextTokens: 16000,
+    maxOutputTokens: 2000,
+    capabilities: {
+        streaming: 'supported',
+        tools: 'unsupported',
+        structuredOutput: 'unsupported',
+        thinking: 'unsupported',
+        webSearch: 'unsupported',
+        webFetch: 'unsupported',
+    },
+    requestLimits: { maxAttachments: null, maxAttachmentBytes: null, maxRequestBytes: 100000 },
+    evidence: { source: 'local-test-fixture', checkedAt: '2026-11-04T00:00:00Z' },
+};

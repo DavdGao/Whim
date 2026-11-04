@@ -4,9 +4,10 @@ These rules apply to developers and coding agents working in this repository. `C
 
 ## Project and design authority
 
-Whim is a macOS Electron workspace built with TypeScript, React, and pnpm workspaces. [docs/design.md](docs/design.md) defines its architecture, interface semantics, persistence boundaries, and implementation sequence. Read the relevant design sections before working on a task, then verify the actual code.
+Whim is a macOS Electron workspace built with TypeScript, React, and pnpm workspaces. [docs/design.md](docs/design.md) defines the application architecture; [docs/agent.md](docs/agent.md) defines agent execution and context; [docs/roadmap.md](docs/roadmap.md) orders implementation. Read the relevant design sections before working on a task, then verify the actual code.
 
 - The design document defines the architecture; this file defines how to develop it. When changing an invariant, update the design and explain the reason in the same change before implementing it.
+- Before adding or changing functionality, update the affected application/agent design and acceptance criteria first, then implement the change. Keep implementation and design synchronized in the same change; do not add behavior only to code or this rules file.
 - When the user explicitly changes a requirement, update the affected documentation. Do not use an old design to reject a new requirement or treat implementation convenience as a new requirement.
 - The repository is being established. Planned packages, interfaces, and checks may not exist yet. Type sketches, placeholders, and commands that succeed without doing any work are not completion evidence.
 - The first release supports DashScope Chat through the Responses protocol and Decision through the TypeSafe System One protocol. Add TTS, vector storage, other providers, and later product capabilities only as their tasks require.
@@ -66,7 +67,7 @@ Keep the foundational packages `@whimkit/core`, `@whimkit/models`, `@whimkit/age
 - Declare capability dependencies and publish registrations only after initialization succeeds. Roll back resources on initialization failure so the plugin is not partially available.
 - Every registration, subscription, and connection has a disposer and belongs to an application, plugin, session, run, or UI subscription scope.
 - Stop admitting calls before bounded draining or cancellation, then clean up in reverse dependency order. Disabling or uninstalling code must not implicitly delete business history.
-- Bind in-flight calls to a configuration revision and adapter generation. New configuration applies to later calls. Package upgrades take effect after restart; the first release does not hot-swap production code.
+- Bind in-flight calls to a configuration revision and adapter generation. Non-prompt configuration applies to later calls; prompt-affecting changes wait for compaction. Package upgrades take effect after restart; the first release does not hot-swap production code.
 - Use the application's commands, queries, and model services. Do not bypass them to write SQL directly or omit model usage accounting. Keep atomic work completion inside Core rather than exposing arbitrary plugin transactions.
 - Process isolation is not a permission sandbox. Trusted plugins share Backend's failure domain. An uncooperative host task may require restarting Backend.
 
@@ -91,6 +92,7 @@ Keep the foundational packages `@whimkit/core`, `@whimkit/models`, `@whimkit/age
 ## Models
 
 - Every model has a ModelCard. Distinguish provider, adapter, model card, and connection. Cards contain capabilities and limits, never pricing or fee fields.
+- Declare native input/output capabilities with concrete media types and implemented delivery methods. Derive attachment admission from those capabilities and enabled processors; never present extraction or transcoding as native model support. UI hints do not replace backend content and limit validation. Preserve original and prepared content references for replay.
 - Give Chat and Decision separate call interfaces. Chat-generated JSON is not a substitute for a dedicated Decision model.
 - Keep unknown capabilities distinct from unsupported ones. A provider feature not implemented by the adapter is not available to callers. Distinguish native web search/fetch from application tools.
 - Verify the actual endpoint, region, model, and protocol. SDK parameter availability does not prove compatible-service support. Maintain evidence sources and verification dates with cards.
@@ -98,6 +100,24 @@ Keep the foundational packages `@whimkit/core`, `@whimkit/models`, `@whimkit/age
 - Give every actual request its own attempt and record reported usage. Missing token fields remain unknown. Do not double-count cached or reasoning subsets, or mix estimates with reported consumption.
 - Let the runtime own retries so hidden SDK retries cannot bypass attempt and token accounting. Do not fabricate complete usage after a failure, interrupted stream, or crash.
 - Build main-chat context from local facts without requiring remote conversation IDs for recovery. Preserve protocol continuation fields, not just visible text.
+
+## Agent execution and prompt cache
+
+- Implement the agent as an async generator continuously consumed by Backend. UI subscriptions observe it; navigation or slow UI consumers must not own or stall the runner. Commit durable effects before announcing committed events.
+- All injected context enters a durable inbox. Immediately before reasoning, atomically commit exact context inclusion, per-delivery consumption, and the frozen call plan. Consumption is not successful model dispatch or task completion. Use finite selection watermarks without skipping acknowledgment gaps.
+- User interruption fences the targeted run and holds automatic continuation before cancellation signals are sent. Pending messages survive Stop. Already-backgrounded jobs have independent executor ownership and separate cancellation; late results cannot revive the stopped agent.
+- Persist user-visible model/tool output in bounded chunks before publication. Preserve interrupted answers verbatim under a stable message identity; incomplete is not disposable. Seal the Stop cutoff, retain partial tool results, and insert causal interruption observations before resumed input. Never execute incomplete tool-call arguments or turn partial output into successful completion.
+- For every operation, define whether and how its committed outcome enters agent context. Agent-relevant interruptions, effect outcomes, and source/policy changes require durable, deduplicated observations; UI events alone are insufficient. Keep diagnostic noise out of the prompt.
+- Core owns tool jobs independently of the agent's wait. Background handoff never relaunches work or releases live resource locks. Return one handle for the original tool call; later completion is a new inbox notification. Keep bounded output/query/cancellation services and do not promise arbitrary process survival across restart.
+- Between successful compactions, freeze the system prefix, tool definitions/order, model route, prompt-affecting options, and serialized historical items. Only append context. Initialization creates the first epoch; only successful compaction may replace an existing prefix.
+- Skill, memory, task, and clock changes become persisted appended reminders/notifications with source revisions and observation timestamps. Never rebuild the system prompt from current files on each call. Reconcile watched sources and deduplicate each session's revision delivery transactionally.
+- Preserve consumed original and prepared context content in SQLite; retain unread offload originals through Core-managed files. File watchers are wakeups, hashes establish revisions, and filesystem timestamps are only hints. At compaction refresh a consistent skill catalog and MEMORY.md snapshot; changes after that snapshot remain pending notifications.
+- A model/tool-schema change waits for compaction. Revocation still blocks execution immediately; cache preservation never authorizes a disabled tool. Do not promise provider cache hits merely because the application preserves its prefix.
+- Local tools belong to Core services, native tool declarations to model adapters. Do not execute provider-native tools a second time or claim per-action approval when the provider exposes no pre-execution boundary.
+- Execute ordered tool groups with bounded concurrency and serial mutation barriers, including cross-session resource coordination. Persist completion as it occurs and insert results into context in original call order.
+- Automatic review supports separate Decision and structured-Chat implementations behind one reviewer contract. Tool-aware rules may skip repeat model reviews, but never schema checks, denials, revocations, or changed-target checks. Validate model-selected rule candidates before installing them.
+- Middleware and file-memory plugins contribute append-only context through scoped services; they cannot rewrite old messages, bypass approval, hide terminal state, or make unaccounted model calls.
+- Enforce PDF byte, page, encoded-request, extraction, and context limits before dispatch. Parse in a bounded isolated helper; a failed attachment must not corrupt the session. Conflicting provider documentation is not verified native capability.
 
 ## Frontend
 
@@ -112,7 +132,7 @@ Keep the foundational packages `@whimkit/core`, `@whimkit/models`, `@whimkit/age
 
 ## Files and observability
 
-- Keep managed artifact bytes and immutable metadata in the same SQLite database initially. Enforce explicit size limits. Exports and caches are derived copies, not sole authoritative content.
+- Keep consumed context snapshots and immutable artifact metadata in SQLite. Unread offload bytes live in Core-managed immutable files with explicit size limits, publication-before-reference, reconciliation, and coordinated backup.
 - User-selected workspaces remain external mutable files. Persist the exact content consumed into durable context, and use a Core-owned file service with root/path validation and explicit write intent. Filesystem writes follow external-effect recovery rules.
 - Instrument agent turns, model attempts, tool calls, compaction, and commits with OpenTelemetry. The application owns SDK/exporter setup; libraries use the API and remain functional with no SDK or exporter.
 - Preserve tracing context across async streams and explicitly propagate it across IPC/worker boundaries. End spans on every terminal path. Trace IDs are correlation fields, not business IDs or recovery state.
@@ -128,18 +148,19 @@ Keep the foundational packages `@whimkit/core`, `@whimkit/models`, `@whimkit/age
 - Give each new functional package the typecheck/build/test scripts it needs. Do not expose successful no-op recursive checks; verify what actually ran.
 - Validate native modules, Electron process changes, and plugin loading in the actual Electron runtime. Passing under system Node does not establish desktop compatibility.
 
-The baseline has no executable application packages. Install the pinned workspace tooling with `pnpm install --frozen-lockfile`, then run the existing checks:
+The headless `core`, `models`, and `agent` packages have executable builds and tests; Electron and live provider adapters remain planned. See [docs/runtime.md](docs/runtime.md) for current coverage. Install the pinned workspace tooling with `pnpm install --frozen-lockfile`, then run the existing checks:
 
 ```sh
 pnpm check
 ```
 
-Introduce real typecheck, test, and build commands with the first functional packages and run them for affected code before committing or pushing. Use `pnpm --filter <package-name> <script>` to narrow the scope, but validate consumers of shared contracts too. Documentation-only changes require formatting and link/reference checks. Format only changed files; root `pnpm format` mutates the whole repository.
+Run the real typecheck, test, and build commands for affected packages before committing or pushing; add equivalent checks to each new functional package. Use `pnpm --filter <package-name> <script>` to narrow the scope, but validate consumers of shared contracts too. Documentation-only changes require formatting and link/reference checks. Format only changed files; root `pnpm format` mutates the whole repository.
 
 Report missing checks, commands that ran no tests, and pre-existing failures explicitly. Fix failures introduced by the task; do not delete tests, bypass hooks, or modify unrelated code to manufacture a green result.
 
 ## Git, releases, and handoff
 
+- Develop on a dedicated branch, push that branch, open a GitHub PR, and merge through the PR workflow. Never force-push or directly push the default branch.
 - Inspect the branch and diff before working. Use a branch/worktree when isolation is needed, without requiring an environment for documentation or read-only tasks.
 - Preserve staged and unstaged changes and include only task-related changes in commits. Do not commit, push, publish, or rewrite history without authorization.
 - Every commit contains only one English scoped Conventional Commit title: `type(scope): description`, for example `feat(agent): support task records`. The scope is required; the title is at most 100 characters and has no trailing period. The body and footer must be empty. Put rationale in the relevant design document or PR, not the commit body. Follow `commitlint.config.cjs`; do not add AI signatures or tool attribution.
@@ -147,3 +168,15 @@ Report missing checks, commands that ran no tests, and pre-existing failures exp
 - Release all Whim-owned applications, packages, and plugins at one shared version, including unchanged packages. Pin internal published dependencies to that version. Third-party dependencies keep their own versions.
 - Publish and verify the complete package set before releasing its manifest and desktop application. npm multi-package publication is not atomic.
 - Handoffs state the outcome, checks actually performed, and remaining limitations. Plans, placeholders, mock demonstrations, and unexecuted acceptance criteria are not completed implementations.
+
+## Memory retrieval and offload invariants
+
+- Implement automatic asynchronous memory retrieval as well as explicit agent retrieval. Persist its lifecycle and deliver results through the inbox at reasoning boundaries; never mutate an in-flight request or frozen prefix.
+- Declare tool filesystem/process/network effects and route environment-dependent operations through Core. Initial execution is desktop-native, without a sandbox; declarations are not isolation guarantees.
+- Core owns offload artifacts and materialized files. SQLite retains authoritative context; unread offload originals may live only on disk. Snapshot exact content when Read or model preparation consumes it. Publish bounded previews and retrievable references only after durable retention, and distinguish offloaded bytes from discarded bytes.
+
+## Application errors and frontend execution state
+
+- Normalize provider failures into Core's application error contract at adapter boundaries. Separate cause, retry policy, and external outcome certainty; HTTP 429 alone does not prove automatic retry is appropriate.
+- Runtime owns bounded retries, cancellation, new attempt identities, and usage accounting. Persist retry scheduling and terminal failures; frontend state derives from committed facts and stable translation keys, never raw provider text.
+- Follow [docs/errors.md](docs/errors.md) for the planned taxonomy and event semantics. Existing generic failures are not evidence that normalization or retries have been implemented.

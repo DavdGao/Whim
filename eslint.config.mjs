@@ -17,6 +17,7 @@ export default [
             '**/out/**',
             '**/coverage/**',
             '.idea/**',
+            '.pnpm-store/**',
             '.husky/_/**',
         ],
     },

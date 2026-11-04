@@ -1,8 +1,10 @@
 # Whim Application Design
 
-Status: implementation specification, not a statement of completed functionality. Last updated: 2026-11-04.
+Status: implementation specification; the headless text-agent increment is implemented. This document also describes functionality that remains planned. Last updated: 2026-11-04.
 
 This document defines Whim's architecture, module boundaries, interface semantics, and data invariants. A change to these decisions must update this document and explain the reason in the same change. Interface examples describe the intended contracts; exact types will be refined during implementation. Features marked as later work are outside the first release.
+
+[agent.md](agent.md) specifies the main agent's async generator, interruption, pre-reasoning inbox, background jobs, context epochs, compaction, tool batches, automatic approval, skills, memory, and middleware. [roadmap.md](roadmap.md) orders implementation, starting with the agent and durable context rather than the desktop interface. [runtime.md](runtime.md) describes the currently executable subset.
 
 ## 1. Goals and initial scope
 
@@ -15,6 +17,9 @@ The first release delivers a minimal, recoverable end-to-end system:
 - DashScope Chat through the OpenAI Responses-compatible protocol.
 - DashScope Decision through the TypeSafe System One-compatible protocol.
 - Main chat, model and plugin settings, and per-call token accounting.
+- Bounded PDF attachments and page-based reading, with explicit native-versus-processed routing.
+- Local coding tools, automatic model-backed approval, skills, and file memory with cache-preserving incremental context updates.
+- User interruption, durable message insertion before reasoning, and bounded background jobs with status/output/cancellation tools.
 - One SQLite database with a complete append-only agent journal: messages, state, tasks, compaction, execution facts, and durable deliveries.
 - Stable record IDs and ordered session positions that preserve the option of future forks.
 - OpenTelemetry tracing for agent runs and model calls, independent of durable execution.
@@ -51,6 +56,7 @@ Use a pnpm workspace with four foundational packages and plugins for concrete ex
 | `packages/agent` / `@whimkit/agent`   | Main-chat loop, context construction, and tool scheduling through injected ports                             |
 | `packages/ui` / `@whimkit/ui`         | Shared shadcn components, themes, UI slots, data hooks, and presentation components                          |
 | `packages/plugin-dashscope`           | One provider plugin with independent Chat and Decision adapters and model cards                              |
+| `packages/plugin-memory`              | Bundled file-memory strategy and agentic middleware using Core services; no private database                 |
 
 These are target packages, not a claim that the current repository already implements them. Use `models` for model contracts and adapters; do not maintain parallel `llm` and `models` abstractions.
 
@@ -75,7 +81,7 @@ Public schemas define the types and runtime IPC validation. A receipt confirms a
 
 ## 4. Processes, threads, and asynchronous execution
 
-The first release has three application-level processes: Electron Main, Renderer, and one Backend utility process. Backend hosts Core, the agent runner, and trusted backend plugin entries. One DB worker thread inside Backend runs SQLite. Electron and Node manage additional internal execution units; these are ownership boundaries rather than an exact OS thread count.
+The first release has three long-lived application-level processes: Electron Main, Renderer, and one Backend utility process. Backend hosts Core, the agent runner, and trusted backend plugin entries. One DB worker thread inside Backend runs SQLite. PDF parsing uses a bounded on-demand helper process so malformed files and expensive decoding do not run on the Backend event loop. Electron and Node manage additional internal execution units; these are ownership boundaries rather than an exact OS thread count.
 
 The topology keeps presentation independent of business execution without a separate plugin RPC layer.
 
@@ -84,22 +90,24 @@ flowchart TB
     Main["Electron Main: windows, system integration, supervision"]
     UI["Renderer: React pages and plugin client entries"]
     subgraph Backend["Backend utility process"]
-        Runtime["Core, agent runner, scheduler, plugin host entries"]
+        Runtime["Core, agent runner, job executor, plugin host entries"]
         DBWorker["Dedicated DB worker thread"]
         Runtime <-->|Async storage operations| DBWorker
     end
     DB[("One SQLite database")]
+    PDF["On-demand bounded PDF helper"]
     Remote["DashScope and later external services"]
     Main --> UI
     Main --> Runtime
     UI <-->|Preload and typed IPC| Runtime
     DBWorker --> DB
+    Runtime <-->|Bounded parsing requests/results| PDF
     Runtime <-->|Native async I/O| Remote
 ```
 
 Main owns windows, menus, Keychain access, updates, and Backend supervision. Renderer uses context isolation with Node integration disabled. Preload exposes validated application operations rather than arbitrary IPC, SQL, or Node access.
 
-Backend services and trusted plugin host entries use ordinary typed calls. Model requests are concurrent async tasks, not one thread per call. A session has at most one context-advancing runner. Different sessions, plugin workloads, and model connections have bounded concurrency; work waiting for capacity remains durable.
+Backend services and trusted plugin host entries use ordinary typed calls. Model requests are concurrent async tasks, not one thread per call. A session has at most one context-advancing runner. Core's job executor owns tool lifetimes independently of that runner's wait. Backgrounding changes durable ownership/wait state, not process placement, and does not relaunch the operation. Different sessions, jobs, plugin workloads, and model connections have bounded concurrency; work waiting for capacity remains durable.
 
 Network calls use native async I/O, files use `fs/promises`, and external programs use asynchronous spawn. Operations propagate AbortSignal and have owned cleanup. Streams use AsyncIterable with bounded buffers, explicit terminal/error events, and cancellation. Navigation releases subscriptions without canceling business work. A subscriber does not change an in-flight request's streaming mode.
 
@@ -107,9 +115,9 @@ The synchronous SQLite driver, initially `better-sqlite3`, runs only in the DB w
 
 A trusted plugin can block or crash Backend. This failure domain is accepted for the first bundled adapters; it is not a permission sandbox. Main can restart Backend and recover committed state. A DB worker failure stops new work until storage is reconciled. A native crash may terminate the whole Backend. External requests already sent remain subject to unknown-outcome handling.
 
-Add bounded CPU workers or a dedicated plugin process only when measured workloads or failure isolation require them. Host-managed subprocesses belong to a plugin/run scope. Do not allocate a process merely because another package, plugin, or session exists.
+Add bounded CPU workers or a dedicated plugin process only when measured workloads or failure isolation require them. Native async tools stay in Backend, Bash/ripgrep use owned child processes, and PDF uses its helper. Subprocesses belong to an explicit job/plugin scope; foreground jobs are tied to run cancellation until a committed background handoff. Do not allocate a process merely because another package, plugin, session, or background job exists.
 
-Shutdown stops admission, drains or cancels tasks, disposes plugins, and closes storage last. Closing the window hides it while work continues; explicit application exit stops execution.
+Shutdown stops admission, drains or cancels foreground and background jobs, disposes plugins, and closes storage last. Closing the window hides it while work continues; explicit application exit stops execution. User Stop fences the active agent run and holds automatic continuation; already-backgrounded jobs remain visible and separately cancellable. A Stop-and-cancel-jobs command covers both. The initial design does not promise process survival across application exit or Backend crashes.
 
 Implementation references: [Electron utilityProcess](https://www.electronjs.org/docs/latest/api/utility-process), [Node workers](https://nodejs.org/api/worker_threads.html), [better-sqlite3](https://github.com/WiseLibs/better-sqlite3).
 
@@ -145,7 +153,7 @@ Initially plugins ship with the application. Keep manifest validation and loadin
 
 ### 5.2 Registration and ownership
 
-The initial host API exposes model registration, scoped command/query registration, and owned task/disposal facilities. Core owns persistence and model invocation accounting. The initial provider plugin does not need a general-purpose plugin database API or public message bus.
+The host API exposes model/tool registration, scoped commands/queries, and owned task/disposal facilities. The file-memory plugin additionally uses the agent's typed middleware and context-source contracts. Core owns persistence and model invocation accounting. Plugins do not need a general-purpose database API or public message bus to implement these features.
 
 Plugin dependencies name capabilities, not implementation imports. Validate versions, configuration, dependencies, and cycles. Await activation and publish registrations only after success; dispose partial resources on failure.
 
@@ -155,7 +163,7 @@ A plugin's installed code, desired enabled state, and actual availability are di
 
 ### 5.3 Configuration and upgrades
 
-A running attempt retains its prepared configuration snapshot and adapter generation. Settings changes affect subsequent preparation. Package upgrades activate after restart, not production hot swapping.
+A running attempt retains its prepared configuration snapshot and adapter generation. Non-prompt settings changes affect subsequent preparation. System instructions, model route, prompt-affecting options, and tool definitions remain frozen until successful compaction starts a new context epoch. Revocations stop affected execution immediately without rewriting old prompts. Package upgrades activate after restart, not production hot swapping; an incompatible context renderer requires explicit epoch migration through compaction.
 
 Recovery never silently executes an old plan against incompatible code. An incompatible pending plan is blocked; an explicit replan appends a new plan with its new version and reason. Interrupted attempts retain their terminal/unknown facts. No live request or unreconciled external effect is blindly replayed after an upgrade.
 
@@ -180,11 +188,27 @@ A model ID alone does not establish identical capability across regions, APIs, o
 
 Every model, including Decision, has a card. Cards contain identity, capabilities, limits, and evidence. They contain no prices, currencies, rates, cost estimates, or billing rules. The first release has Chat and Decision variants only.
 
-The draft below retains unknown capabilities explicitly.
+Cards describe content formats with concrete media types, such as `text/plain`, `image/png`, `image/jpeg`, and `application/pdf`. Broad categories such as `image` cannot establish attachment compatibility. Media types follow the [IANA registry](https://www.iana.org/assignments/media-types/); normalize the type/subtype to lowercase, keep parameters separate, and do not use wildcard declarations such as `image/*` as evidence of format support.
+
+The card describes native content accepted or produced through the selected model API and implemented adapter. Application-side extraction, OCR, or transcoding does not expand the model's native capabilities. The draft retains unknown capabilities and distinguishes content type from delivery method.
 
 ```ts
 type Support = 'supported' | 'unsupported' | 'unknown';
-type Modality = 'text' | 'image' | 'audio' | 'video';
+type MediaType = `${string}/${string}`;
+type InputDelivery = 'text' | 'structured-value' | 'inline-bytes' | 'file-id' | 'url';
+
+interface InputMediaRoute {
+    delivery: InputDelivery;
+    maxBytes: number | null;
+    maxPages?: number | null;
+}
+
+type InputMediaSupport =
+    | {
+          support: 'supported';
+          routes: readonly [InputMediaRoute, ...InputMediaRoute[]];
+      }
+    | { support: 'unsupported' | 'unknown' };
 
 interface ModelCardBase {
     id: string;
@@ -194,8 +218,8 @@ interface ModelCardBase {
     modelId: string;
     label: string;
     status: 'active' | 'deprecated' | 'unknown';
-    inputModalities: readonly Modality[];
-    outputModalities: readonly Modality[];
+    inputMedia: Readonly<Partial<Record<MediaType, InputMediaSupport>>>;
+    outputMedia: Readonly<Partial<Record<MediaType, Support>>>;
     contextTokens: number | null;
     evidence: { source: string; checkedAt: string };
 }
@@ -203,6 +227,11 @@ interface ModelCardBase {
 interface ChatModelCard extends ModelCardBase {
     kind: 'chat';
     maxOutputTokens: number | null;
+    requestLimits: {
+        maxAttachments: number | null;
+        maxAttachmentBytes: number | null;
+        maxRequestBytes: number | null;
+    };
     capabilities: {
         streaming: Support;
         tools: Support;
@@ -224,11 +253,113 @@ interface DecisionModelCard extends ModelCardBase {
 type ModelCard = ChatModelCard | DecisionModelCard;
 ```
 
-Decision returns structured decisions rather than generated prose. Its output modalities may be empty; `kind` and `questionTypes` define the result shape. Do not invent a generative output-token limit. Initial inputs are text or JSON state, and Chat initially implements the text path. Other modality names in the type do not imply implemented transport support.
+`MediaType` is a readable type sketch, not sufficient validation: public schemas validate concrete type/subtype values and reject wildcards and embedded parameters. An absent entry means unknown, not unsupported, and neither state enables submission. A supported entry requires at least one implemented route. Per-route `maxBytes` bounds the original file; `maxPages` applies to paginated documents and is omitted only when inapplicable. A null limit means unknown, not unlimited. `requestLimits` separately bounds file count, aggregate original bytes, and the encoded request body. The application still enforces its own bounds. Adapter preparation checks task-dependent limits, dimensions, codecs, and other known restrictions without inventing a generic constraint language. MIME type alone does not establish that every file with that type is valid.
+
+Delivery describes how content reaches the API: `text` and `structured-value` are logical input values; `inline-bytes` includes protocol encodings such as base64; `file-id` requires an implemented upload route; `url` requires a resource the provider can actually access. A local path is not a provider-accessible URL. Encoding or uploading original bytes is transport preparation, not content conversion. Support for a text value does not imply support for uploading a text file.
+
+Decision returns structured decisions represented as `application/json`; `kind` and `questionTypes` define their schema. Its accepted state representations are declared separately in `inputMedia`. Do not invent a generative output-token limit. Chat initially implements `text/plain`, plus the PDF attachment paths below. Native `application/pdf` is enabled only on an implemented, verified route; processed PDF support never changes that native flag. These media types describe logical content, not the HTTP JSON envelope or SSE stream used to carry it. A JSON response envelope alone does not establish structured-output capability.
 
 `webSearch` and `webFetch` describe native API capabilities. Installing an application search tool does not mark every model as supporting native search. Cards reflect what the adapter actually exposes, not merely what an upstream service could support.
 
-Later additions may include MIME restrictions, thinking effort/budget, mandatory thinking, structured-output/thinking exclusions, and required or forbidden streaming. The first release does not build a generic constraint DSL. Adapters must still reject known invalid combinations and expose only verified parameter combinations. Unsupported configuration produces an explicit error instead of silently changing request semantics.
+Later additions may include thinking effort/budget, mandatory thinking, structured-output/thinking exclusions, and required or forbidden streaming. The first release does not build a generic constraint DSL. Adapters must still reject known invalid combinations and expose only verified parameter combinations. Unsupported configuration produces an explicit error instead of silently changing request semantics.
+
+#### Attachment admission and preparation
+
+Core derives attachment availability from the effective model card, implemented delivery paths, enabled application processors, and file limits. The frontend consumes this shared result; it does not maintain a separate MIME allowlist or infer support from filename extensions. Picker hints list candidate formats; actual admission checks the selected file and current connection before preparing a call.
+
+Each available route identifies a concrete source media type and how it will be handled. This is an application capability derived from the card, not a native model capability stored back into it.
+
+```ts
+type AttachmentRoute =
+    | { kind: 'native'; mediaType: MediaType; delivery: InputDelivery }
+    | {
+          kind: 'processed';
+          mediaType: MediaType;
+          processorId: string;
+          processorRevision: string;
+          outputMediaTypes: readonly [MediaType, ...MediaType[]];
+          noticeKey: string;
+      }
+    | { kind: 'unavailable'; mediaType: MediaType; reasonKey: string };
+```
+
+For a native route, the API receives the original content in a supported representation and performs its own interpretation. For a processed route, an installed processor extracts, renders, or converts content, and every resulting part must pass native input validation. Processor declarations name concrete input/output types, bounds, and possible information loss. Start with explicit single-step processors when required; do not build an automatic conversion graph. Decoding a text attachment into a text input is also an explicit preparation route.
+
+These examples illustrate routing decisions, not claims about the initial DashScope model set:
+
+| Source                      | Effective capability                                                      | Application behavior                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `image/png` or `image/jpeg` | That exact type and a usable byte/upload route are supported              | Send original content through the adapter                                                                                  |
+| `application/pdf`           | Native PDF input and its delivery route are supported                     | Send the PDF for API-side interpretation                                                                                   |
+| `application/pdf`           | No native PDF route; an enabled extractor produces supported `text/plain` | Offer text extraction, with a notice that layout/images may be lost; scanned pages require a separate implemented OCR path |
+| Any other type              | No verified native route or enabled processor with supported output       | Reject with a reason; do not upload speculatively                                                                          |
+
+The frontend shows direct, processed, or unavailable status and explains conversion effects in both languages. Prefer a usable native route; do not silently fall back to lossy extraction after an API failure. Record the user's selected processing route. File-picker `accept` values are hints, not validation; filename extensions and client-reported MIME values must be checked against the actual content where applicable. [HTML file input specification](https://html.spec.whatwg.org/multipage/input.html#attr-input-accept).
+
+Preparation revalidates source bytes, processor output, delivery support, and final context/request limits. A model or connection change invalidates the prior admission result. Persist the original artifact reference, detected media type, selected processor/version/options, derived content references, and final model input references in the durable plan. Preserve exact derived content for replay rather than rerunning a possibly changed processor. Remote file IDs are transport references, not the sole copy of an attachment.
+
+#### PDF capability and limits
+
+PDF attachment support is required, but its native route is model/protocol-specific. The documentation checked on 2026-11-04 contains the following distinctions and a conflict; these are documented limits, not live integration results.
+
+| Route                                                               | Documented limits                                                                                                                                                    | Whim decision                                                                                                                                                           |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| General Chat PDF understanding through Chat Completions / DashScope | 150 MB per file, 256 pages, URL or Base64; selected Qwen3.8 models and regions                                                                                       | A separate explicitly selected Chat adapter/card may provide native PDF analysis; it is not an automatic fallback for the main Responses conversation                   |
+| General Chat through Responses                                      | Responses reference lists `input_file` for Qwen3.8 Max/Flash with a 100 MB URL input; the PDF guide explicitly says Responses does not deliver PDFs despite HTTP 200 | Keep native PDF capability `unknown` and disabled until model/region-specific ingestion is proven; do not copy either limit into an enabled card on documentation alone |
+| `qwen3.5-ocr` through Responses                                     | 100 MB; 50 pages with `document_parsing`, otherwise 10 pages                                                                                                         | A distinct document-processing operation, not proof that a general Chat model accepts PDFs; optional after its adapter is implemented                                   |
+
+Sources: [PDF understanding](https://help.aliyun.com/zh/model-studio/pdf-understanding), [Responses parameters](https://help.aliyun.com/en/model-studio/qwen-api-via-openai-responses), [OCR PDF parsing](https://help.aliyun.com/zh/model-studio/qwen-vl-ocr). Provider documentation uses MB; store conservative decimal byte ceilings unless the vendor clarifies another unit. Do not transfer page/file limits between routes or treat a single-file limit as a total-request limit.
+
+The first dependable Responses-chat path is bounded local PDF text extraction and `ReadPDF` page selection. Scanned/image-only pages require a configured OCR/native-analysis path or a visible unsupported result; do not report an empty extraction as a fully read document. Native PDF analysis, when configured, is an explicit child Chat invocation with its own card, usage, and trace. Its findings enter the main chat as bounded, page-referenced tool content; the main conversation's model and cached prefix do not change. PDF bytes are not inserted into a function result if that protocol only accepts text/images there.
+
+Configure application attachment policy separately from provider cards. These are conservative initial application defaults, to be validated in the packaged macOS runtime, not provider maxima.
+
+```ts
+interface AttachmentPolicy {
+    revision: number;
+    maxFilesPerMessage: number;
+    maxTotalBytesPerMessage: number;
+    maxEncodedRequestBytes: number;
+    pdf: {
+        maxFileBytes: number;
+        maxPages: number;
+        maxExtractedTextBytes: number;
+        maxToolResultTokens: number;
+        parseTimeoutMs: number;
+        maxConcurrentParsers: number;
+    };
+}
+
+const initialAttachmentPolicy: AttachmentPolicy = {
+    revision: 1,
+    maxFilesPerMessage: 4,
+    maxTotalBytesPerMessage: 32 * 1024 * 1024,
+    maxEncodedRequestBytes: 48 * 1024 * 1024,
+    pdf: {
+        maxFileBytes: 20 * 1024 * 1024,
+        maxPages: 100,
+        maxExtractedTextBytes: 1024 * 1024,
+        maxToolResultTokens: 4000,
+        parseTimeoutMs: 30_000,
+        maxConcurrentParsers: 1,
+    },
+};
+```
+
+Core stores policy revisions and exposes effective limits to the frontend. For every dimension, use the strictest applicable application, adapter, provider, and remaining request/context limit. Unknown provider limits remain unknown; an application cap does not prove upstream acceptance. A lower verified provider page limit wins over the 100-page local default. UI configuration may lower limits; raising them requires remaining within the build's tested resource envelope and known provider bounds. Processor resource ceilings are implementation constraints, not permission to raise a model's limit. Never silently relax a limit after an error.
+
+Check all retained attachments in the complete request, not just newly attached files. For Base64, account for `4 * ceil(bytes / 3)` plus data-URI, JSON, history, and tool-schema overhead before allocation. For URL inputs, a small request body does not exempt the underlying PDF from file/page limits; obtain and snapshot bounded bytes before admission. Do not make local files public solely to satisfy a URL-only API. Any upload route needs explicit implementation and authorization.
+
+The ingestion path must contain failures rather than treating an attachment as an unbounded chat message:
+
+1. Renderer sends a selected-file handle/reference and metadata, never a full Base64 document over IPC. Backend checks file size before reading, then enforces a byte cap while reading the opened file and computing its hash. Revalidate changed sources.
+2. Check file format, parseability, page count, encryption, and output bounds in an on-demand document helper process. Reject encrypted or malformed documents with a localized reason. Never execute embedded PDF scripts or follow embedded references automatically.
+3. Limit parser concurrency and queue size. Initially allow one active parser and four queued jobs, with a 256 MiB V8 heap bound, a 512 MiB RSS watchdog threshold, a bounded output channel, and the configured timeout; terminate/reap it on violation. These are application defaults requiring packaged-runtime tests, not hard OS memory guarantees: heap limits exclude native allocations and RSS sampling can overshoot. The helper process is a justified addition for untrusted document parsing; it does not own the database.
+4. Retain admitted original bytes as immutable Core-managed files and commit their verified references after durable publication. Store exact page content consumed by the agent in SQLite. Pass only IDs and bounded chunks to UI/model preparation. Temporary ingestion files are not authoritative until committed and are cleaned up on recovery.
+5. Track preparation as pending/ready/rejected/failed independently from the running conversation. Commit a submitted input only with valid prepared references. A parser failure or oversized attachment leaves the draft and other sessions usable; previously committed conversation state is unaffected.
+6. Select bounded pages/snippets for context. The extracted-text cap is a processing cap, not permission to inject 1 MiB into the prompt. Respect the smaller tool-result token budget and remaining context allowance; return page ranges and continuation references instead of silent truncation. Rendered image output needs additional pixel/byte limits before enabling that path.
+
+Separate local parse timeout from remote model timeout. The native PDF guide allows a long first-response wait of up to 300 seconds; a native document operation therefore needs a configured cancellable request timeout, visible progress, and no assumption that cancellation stopped remote processing. Oversize input and provider errors produce typed attachment/tool failures, never an automatic replay loop or mutation of old context.
 
 ### 6.3 Asynchronous invocation
 
@@ -273,7 +404,7 @@ Main chat constructs input from local records on every request and uses `store: 
 
 ### 6.5 Token accounting
 
-Every actual model request has its own attempt ID and associated usage. This includes main chat, Decision, retries, and compaction calls. Preserve reported usage even when a request fails.
+Every actual model request has its own attempt ID and associated usage. This includes main chat, Decision, approval, memory, document analysis, retries, and compaction calls. Preserve reported usage even when a request fails.
 
 - Store reported input, output, total, reasoning, and cached-input tokens. Missing fields remain unknown rather than becoming zero.
 - Reasoning and cached-input counts are breakdowns of their respective totals where the protocol defines them that way; do not add them again.
@@ -293,15 +424,17 @@ The agent journal must preserve messages, execution state, tasks, context compac
 
 The initial storage uses typed tables and explicit transaction methods. It does not require a general event-sourcing engine for every application feature.
 
-| Data                        | Content and authority                                                                                                                                   |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Agent records               | Immutable message content, context references, state transitions, task revisions, compaction, plans, attempt/effect outcomes, usage, and delivery facts |
-| Session metadata            | Immutable creation and future fork origin; current state/head/task views are rebuildable projections                                                    |
-| Pending input and work      | References to accepted input and scheduled work; consumption and completion derive from committed facts                                                 |
-| Configuration revisions     | Immutable versions referenced by calls; a current-version pointer may change                                                                            |
-| Activity                    | Atomic operation type, timestamp, actor, correlation ID, and optional immutable target reference; no payload                                            |
-| Blobs and artifact metadata | Immutable imported/generated content and references, in the same SQLite database                                                                        |
-| Schema migrations           | Applied storage versions, independent of application releases                                                                                           |
+| Data                        | Content and authority                                                                                                                                                                                     |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent records               | Immutable message content, context references, state transitions, task revisions, compaction, plans, attempt/effect outcomes, usage, and delivery facts                                                   |
+| Session metadata            | Immutable creation and future fork origin; current state/head/task views are rebuildable projections                                                                                                      |
+| Pending input and work      | References to accepted input and scheduled work; consumption and completion derive from committed facts                                                                                                   |
+| Tool jobs and output        | Stable execution/effect identity, foreground/background ownership, executor generation, cancellation and terminal facts, bounded output chunks, and completion deliveries; current status is a projection |
+| Configuration revisions     | Immutable versions referenced by calls; a current-version pointer may change                                                                                                                              |
+| Context sources and rules   | Immutable source snapshots/tombstones, per-session delivery facts, and versioned permission-rule installation/revocation                                                                                  |
+| Activity                    | Atomic operation type, timestamp, actor, correlation ID, and optional immutable target reference; no payload                                                                                              |
+| Blobs and artifact metadata | Artifact identities and references; consumed context snapshots in SQLite, unread offload bytes in managed files                                                                                           |
+| Schema migrations           | Applied storage versions, independent of application releases                                                                                                                                             |
 
 Diagnostic traces are not authoritative state. Query indexes and usage totals are rebuildable. Credentials live in Keychain; database records contain references, not secrets.
 
@@ -349,7 +482,7 @@ The journal includes these record families from the agent implementation stage:
 
 A deterministic fold produces the context View, task view, and state. Mutable projections never become their sole source. Compaction changes the model context only; it does not remove original history, tasks, state, or usage. Subsequent summaries specify the prior summary and additional context they replace. Never split a tool-call/result pair or drop required protocol continuation data.
 
-Compaction is a model call with its own attempt, usage, and trace. Commit its summary and resulting context selection atomically. If it fails or is interrupted, the previous context remains authoritative. If no legal request fits, block with a clear reason rather than silently truncate.
+Compaction is a model call with its own attempt, usage, and trace. Commit its summary, resulting context selection, and refreshed context epoch atomically. Between compactions, system/tool prefixes remain frozen and source changes enter through appended notifications. If compaction fails or is interrupted, the previous context remains authoritative. If no legal request fits, block with a clear reason rather than silently truncate. [Agent context rules](agent.md#5-prompt-cache-contract) define the full contract.
 
 A checkpoint is an optional versioned cache of a fold at a known sequence. It is not a summary or a replacement for the journal. First implement full replay; add checkpoints only when measured replay time requires them.
 
@@ -375,7 +508,9 @@ Unsent drafts, pointer/keyboard traces, and scroll positions are not captured. A
 
 Input acceptance atomically stores its immutable content, queue intent, activity reference, and necessary projections before returning a receipt. Repeating an operation ID with identical input returns the receipt; different input under the same ID is a conflict.
 
-Each session has one context-advancing runner. New user input queues FIFO for the next turn; it does not modify an already prepared turn. Explicit cancellation is a separate operation. Future mid-turn steering requires its own contract.
+Each session has one context-advancing runner. New user input defaults to the next reasoning boundary, with an explicit next-run placement when needed. It never modifies a prepared/in-flight request. User input, source changes, job completions, and middleware contributions enter a durable inbox. `prepareReasoning` atomically appends selected context, marks exactly those deliveries consumed, and records the frozen call plan. Consumption means inclusion in that plan, not successful dispatch or response. [Inbox semantics](agent.md#41-durable-inbox-and-the-consumption-boundary) define watermarks, ordering, and recovery.
+
+Interruption targets a run/generation and atomically revokes its authority, holds automatic continuation, and records foreground cancellation requests. Late model results cannot advance the stopped run. Already-backgrounded jobs use their own execution generation and may still record actual results; their completion does not bypass the held gate. New user input or explicit resume releases that gate. [Interruption semantics](agent.md#21-user-interruption) distinguish Stop from cancelling background jobs.
 
 Separate three concepts:
 
@@ -385,21 +520,21 @@ Separate three concepts:
 
 New input can advance the journal without invalidating the active attempt. Completion validates the run/generation and deduplicates its attempt, then appends at the current head. A local head conflict must not trigger another model request. Settings/task edits use their own object revisions where needed.
 
-Core owns a narrow `completeWork` transaction: validate ownership, append output and relevant business facts, acknowledge the deliveries belonging to that work, create successor work, and update projections. Plugins return validated results; they cannot claim atomicity by separately calling data-write and message-ack APIs.
+Core owns a narrow `completeWork` transaction: validate ownership, append output and relevant business facts, acknowledge execution work, create successor work or completion notifications, and update projections. Context-inbox consumption belongs to `prepareReasoning`, not this later execution completion. Plugins return validated results; they cannot claim atomicity by separately calling data-write and message-ack APIs.
 
 Actual reported usage remains a fact even if cancellation makes an answer ineligible to advance the conversation. Late results must not start tools or successor work after losing execution ownership.
 
 ### 8.2 Model and tool boundaries
 
-Persist a call plan and attempt start before invoking the model outside the transaction. A complete response commits its output, usage, outcome, and tool intents. Only committed tool intents may execute; tool results commit before the next model request.
+Persist a call plan and attempt start before invoking the model outside the transaction. A complete response commits its output, usage, outcome, and tool intents. Only committed tool intents may execute. A tool call must have a committed result or background-job handle before the next model request; the handle closes that protocol call, not the ongoing effect. Background completion atomically records its outcome and an inbox delivery, never a second result for the same call ID.
 
-A complete response is the initial persistence unit. Live deltas may be lost on crash and must be presented as uncommitted. Reconnection can use Backend's partial buffer while it survives; after a crash, preserve the interrupted attempt and distinguish a retry as a new attempt.
+User-visible model output is persisted as ordered, bounded chunks before publication. Chunks share a stable message/attempt identity; finalization appends completion, interruption, or failure status and references those chunks instead of duplicating their content. Unpublished in-memory buffers may be lost, but text already shown must remain reconstructable. This replaces complete-response-only storage because continuation after interruption must retain what the assistant already said.
 
-A message's final content, state, tasks, and compaction are durable facts even though individual stream deltas are not. Durable partial output would require an explicit additional protocol.
+Stop seals the committed publication cutoff and queues an agent-visible interruption observation. The next context includes the exact interrupted assistant text or a clearly labelled transcript representation, necessary tool outcomes, and the interruption reason before new user input. Partial output is durable but not a successful answer; incomplete tool-call arguments never authorize execution. Late outcomes/usage are new facts, not edits of the sealed draft. [Interrupted output and continuation](agent.md#22-partial-output-and-continuation-after-interruption) defines presentation cursors, causal ordering, and compaction retention.
 
 ### 8.3 Deliveries and external effects
 
-Internal inbox delivery is at least once with idempotent completion. Persist the body once and reference it from deliveries. Advance a contiguous consumption cursor only over acknowledged work; use per-delivery acknowledgment if consumption becomes non-contiguous. Startup and reconciliation scan durable pending work; notifications are wakeups.
+Internal inbox delivery uses idempotent inclusion into prepared context. Persist the body once and reference it from deliveries. Track consumption per delivery from the start because next-run placement and context bounds can create gaps; a high-water mark limits selection but is not an acknowledgment of all earlier entries. Execution-work acknowledgment separately tracks completed effects. Startup and reconciliation scan pending deliveries/jobs while respecting the continuation gate; notifications are wakeups.
 
 Persist an external effect's intent and stable ID before dispatch. Outcomes are succeeded, failed, cancelled-before-dispatch, or unknown. A timeout or cancellation after dispatch does not establish remote rollback. Reconcile by remote query or a supported idempotency key; otherwise block unknown side effects rather than automatically repeat them.
 
@@ -482,17 +617,17 @@ Use Electron's application userData directory for `whim.sqlite`, including its W
 
 Distinguish managed content from external working files:
 
-- **Managed artifacts:** imported attachments, generated documents, and file snapshots referenced by agent history have immutable content hashes, media types, sizes, and logical names. Initially store bounded artifact bytes as BLOBs in the same SQLite database, committing the blob and reference together. This keeps the database sufficient to reconstruct owned content without a disk/database dual-write protocol.
+- **Managed artifacts:** imported attachments, generated documents, and file snapshots referenced by agent history have immutable content hashes, media types, sizes, and logical names. Store unread offload content in immutable managed files. SQLite preserves context previews, references, and exact consumed content. Publish durable files before committing references and reconcile orphan or missing files; disk and database writes are not one atomic transaction.
 - **External workspaces:** user-selected project directories remain ordinary mutable files. The database stores the selected root and operation records; it is not a second copy of the entire repository. A historical path alone cannot reproduce old content. If a file's content enters durable context, persist the exact consumed content or a managed snapshot and reference that version.
 - **Materialized files:** exports and temporary files are copies of managed artifacts. Create them with asynchronous I/O and atomic replacement where applicable. Their removal must not destroy the sole copy of an agent artifact.
 
-Start with text and small artifacts, with an explicit configurable import-size limit validated before loading bytes. Large media and external blob storage are deferred pending a commit/reconciliation/backup design; do not silently fall back to untracked disk storage.
+Start with text and bounded PDF artifacts, using the explicit attachment policy in Section 6.2 before loading bytes. Managed artifacts include skill/memory snapshots and the prepared content consumed by a call. Use the managed offload publication and reconciliation protocol for large local sources; remote blob storage remains deferred.
 
 A Core-owned file service provides import, export, read, and supported workspace writes through the same command boundary used by UI and tools. Resolve relative paths against an explicitly selected root, reject traversal, check resolved symlink destinations, and account for filesystem race conditions. Trusted-plugin execution is not an OS filesystem sandbox.
 
 Workspace changes are external effects: persist intent, check any expected content hash before modifying a file, and record outcome or uncertainty. A user or other application may change files concurrently. Do not infer rollback from cancellation or automatically retry an unknown destructive write. Destructive operations require explicit user intent or an applicable persisted grant.
 
-Back up SQLite using a consistent backup mechanism. Since managed bytes are in SQLite, the database backup includes them. It does not include external workspaces, Keychain secrets, or optional remote trace storage. Restoring credentials may require reauthentication.
+Back up SQLite using a consistent backup mechanism. Capture a database snapshot and a manifest of all referenced immutable offload files; retain those files against garbage collection until backup completes. A database-only backup preserves consumed context but is not a complete artifact backup. It does not include external workspaces, Keychain secrets, or optional remote trace storage. Restoring credentials may require reauthentication.
 
 ## 14. OpenTelemetry tracing
 
@@ -522,3 +657,9 @@ The ordered implementation and acceptance gates are maintained in [roadmap.md](r
 The minimum completed agent path includes input acceptance, append-only state/tasks/compaction, model invocation, token accounting, tracing, result commit, and restart recovery. First prove these with real temporary SQLite, deterministic model fixtures, and actual process termination. Add live DashScope verification and the bilingual desktop shell before calling the application usable.
 
 Fork UI, dynamic npm installation, large-file storage, ACP, information sources, and music follow their explicit roadmap stages. Do not create empty packages or claim unimplemented acceptance criteria have passed.
+
+## Implementation addendum: memory retrieval and offload
+
+Core owns the filesystem/execution environment boundary and managed offload artifacts. Desktop execution is the initial implementation, without sandboxing; tool descriptors declare filesystem, process, and network effects for approval and future routing. SQLite owns consumed context snapshots and references; unread offload bytes live in retained immutable files, while user workspace and memory files remain external mutable sources. Artifact references, bounded previews, and range retrieval connect these layers without making paths durable identities.
+
+The memory plugin supports both agent-requested retrieval and session-owned asynchronous retrieval. Results enter the durable inbox and become context only at a reasoning boundary. See [agent.md](agent.md#13-asynchronous-memory-retrieval) for lifecycle and stale-result policy, and its following sections for tool effects and offload rules. These additions remain pending implementation beyond the existing text-only runtime.
