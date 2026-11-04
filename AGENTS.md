@@ -24,10 +24,10 @@ Whim is a macOS Electron workspace built with TypeScript, React, and pnpm worksp
 
 ## Package and module boundaries
 
-Keep the foundational packages `@whimkit/core`, `@whimkit/models`, `@whimkit/agent`, and `@whimkit/ui`, assembled by `apps/desktop`. External capabilities belong in plugin packages; application pages initially belong in feature directories.
+Keep the foundational packages `@whimkit/core` and `@whimkit/agent`, plus protocol libraries such as `@whimkit/openai-protocol`, assembled by `apps/desktop`. Everything outside Core is a plugin: providers, credential types, processors, tools, and context sources. Application pages belong in feature directories of `apps/desktop`.
 
 - Keep contracts in core. Use public subpath exports for browser-safe types, clients, plugin interfaces, and the Node runtime. Do not create a package for every internal module.
-- Models must not depend on Electron or the core runtime. Agent accesses persistence and capabilities through ports; core must not import agent. Desktop selects and injects implementations.
+- Model contracts live in `@whimkit/core/contracts` and must not depend on Electron or the core runtime. Agent accesses persistence and capabilities through ports; core must not import agent. Desktop selects and injects implementations.
 - Plugins depend on public interfaces. Do not import another package's `src`, unexported files, or another plugin's implementation.
 - Implement each business operation once. UI actions and agent tools call the same command service instead of maintaining separate database or external-operation logic.
 - Introduce interfaces where implementations need to be replaceable. Do not wrap ordinary functions in unnecessary factories, managers, services, or base classes.
@@ -69,6 +69,9 @@ Keep the foundational packages `@whimkit/core`, `@whimkit/models`, `@whimkit/age
 - Stop admitting calls before bounded draining or cancellation, then clean up in reverse dependency order. Disabling or uninstalling code must not implicitly delete business history.
 - Bind in-flight calls to a configuration revision and adapter generation. Non-prompt configuration applies to later calls; prompt-affecting changes wait for compaction. Package upgrades take effect after restart; the first release does not hot-swap production code.
 - Use the application's commands, queries, and model services. Do not bypass them to write SQL directly or omit model usage accounting. Keep atomic work completion inside Core rather than exposing arbitrary plugin transactions.
+- Describe credentials, plugin settings, and card options with JSON Schema 2020-12. Mark secrets with `writeOnly` and `format: "password"`; Core stores them in Keychain. Add `x-whim-` keywords only when documented in design.md.
+- Plugins register credential types; adapters declare which credential types they accept. Do not duplicate credential fields per model kind.
+- Do not put provider protocol compatibility layers or vendor heuristics in Core. Shared protocol code is a library plugins import; vendor differences are stated in each plugin's code, never inferred from URLs.
 - Process isolation is not a permission sandbox. Trusted plugins share Backend's failure domain. An uncooperative host task may require restarting Backend.
 
 ## Database and recovery invariants
@@ -91,11 +94,13 @@ Keep the foundational packages `@whimkit/core`, `@whimkit/models`, `@whimkit/age
 
 ## Models
 
-- Every model has a ModelCard. Distinguish provider, adapter, model card, and connection. Cards contain capabilities and limits, never pricing or fee fields.
+- Every model has a ModelCard. Distinguish plugin, adapter, model card, and credential. Cards contain capabilities and limits, never pricing, evidence, or protocol fields Core would interpret; adapter-specific settings go in `options`.
+- Cards load from layers: plugin seeds (and later remote catalogs) as read-only upstream, user files as JSON Merge Patch overrides or new cards. An invalid card is reported and skipped; it never blocks other cards or startup.
+- Sessions store a frozen copy of the card fields they use under a record-owned schema, never the live card schema.
 - Declare native input/output capabilities with concrete media types and implemented delivery methods. Derive attachment admission from those capabilities and enabled processors; never present extraction or transcoding as native model support. UI hints do not replace backend content and limit validation. Preserve original and prepared content references for replay.
 - Give Chat and Decision separate call interfaces. Chat-generated JSON is not a substitute for a dedicated Decision model.
-- Keep unknown capabilities distinct from unsupported ones. A provider feature not implemented by the adapter is not available to callers. Distinguish native web search/fetch from application tools.
-- Verify the actual endpoint, region, model, and protocol. SDK parameter availability does not prove compatible-service support. Maintain evidence sources and verification dates with cards.
+- Input media types are an allowlist; outputs are a list of media types. Thinking is one object using the fixed level vocabulary `off|low|medium|high|max`, or `fixed` when not adjustable. A provider feature not implemented by the adapter is not available to callers. Distinguish native web search/fetch from application tools.
+- Verify the actual endpoint, region, model, and protocol. SDK parameter availability does not prove compatible-service support. Keep sources and verification dates in `docs/providers/`, not in cards.
 - Add conditional parameter rules incrementally, but reject known invalid combinations from the first release. Do not silently switch thinking modes or protocols, or truncate context.
 - Give every actual request its own attempt and record reported usage. Missing token fields remain unknown. Do not double-count cached or reasoning subsets, or mix estimates with reported consumption.
 - Let the runtime own retries so hidden SDK retries cannot bypass attempt and token accounting. Do not fabricate complete usage after a failure, interrupted stream, or crash.
@@ -123,7 +128,9 @@ Keep the foundational packages `@whimkit/core`, `@whimkit/models`, `@whimkit/age
 
 - The project is English-first, including documentation, identifiers, comments, and commit titles. The frontend must offer English and Simplified Chinese from the initial shell, with a persistent language selector.
 - Put application and plugin UI strings in typed en/zh-CN catalogs, including accessibility labels, errors, and loading states. Verify key parity and English fallback. Never implicitly translate user content or model output.
-- Use shadcn/ui, Tailwind CSS, and lucide-react. Keep shared components and tokens in `@whimkit/ui`; reuse them instead of adding a parallel design system.
+- Use official shadcn/ui components and AI Elements installed with the official CLI into `apps/desktop/src/components/ui`, with Tailwind CSS and lucide-react. Do not hand-write lookalikes or override component internals with broad selectors. Introduce a shared UI package only when plugin client entries need it.
+- The shell has a navigation rail with Chat, Models, Plugins, and Settings pages. Add a page when its feature exists, not as an empty placeholder.
+- Deliver session updates incrementally by sequence number after commit; never re-send full snapshots per streamed token.
 - Keep data access in typed clients and hooks. Components render props and hook state and submit commands; they do not implement backend business operations.
 - Give each component a focused purpose and organize business code by feature. Core owns persistent business state; React state manages presentation and transient interaction.
 - Show loading, empty, error, unavailable, and running states explicitly. Do not show acceptance and completion as the same success state.
@@ -148,7 +155,7 @@ Keep the foundational packages `@whimkit/core`, `@whimkit/models`, `@whimkit/age
 - Give each new functional package the typecheck/build/test scripts it needs. Do not expose successful no-op recursive checks; verify what actually ran.
 - Validate native modules, Electron process changes, and plugin loading in the actual Electron runtime. Passing under system Node does not establish desktop compatibility.
 
-The headless `core`, `models`, and `agent` packages have executable builds and tests; Electron and live provider adapters remain planned. See [docs/runtime.md](docs/runtime.md) for current coverage. Install the pinned workspace tooling with `pnpm install --frozen-lockfile`, then run the existing checks:
+Implementation status is tracked in [docs/roadmap.md](docs/roadmap.md); a design section is not evidence of implemented behavior. Install the pinned workspace tooling with `pnpm install --frozen-lockfile`, then run the existing checks:
 
 ```sh
 pnpm check
@@ -178,5 +185,5 @@ Report missing checks, commands that ran no tests, and pre-existing failures exp
 ## Application errors and frontend execution state
 
 - Normalize provider failures into Core's application error contract at adapter boundaries. Separate cause, retry policy, and external outcome certainty; HTTP 429 alone does not prove automatic retry is appropriate.
-- Runtime owns bounded retries, cancellation, new attempt identities, and usage accounting. Persist retry scheduling and terminal failures; frontend state derives from committed facts and stable translation keys, never raw provider text.
-- Follow [docs/errors.md](docs/errors.md) for the planned taxonomy and event semantics. Existing generic failures are not evidence that normalization or retries have been implemented.
+- Runtime owns bounded retries, cancellation, new attempt identities, and usage accounting. Persist retry scheduling and terminal failures; frontend state derives from committed facts. Show a translated message per failure category together with the provider's bounded detail (status, code, message, request id); never replace it with a generic message.
+- Follow [design.md §10](docs/design.md#10-errors) and [agent.md §6](docs/agent.md#6-errors-and-retries) for the failure contract and retry semantics.
