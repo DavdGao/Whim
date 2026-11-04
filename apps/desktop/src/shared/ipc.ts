@@ -110,8 +110,12 @@ export interface SessionInfo {
     readonly running: boolean;
 }
 
+/** One-time startup events the user should know about. */
+export type StartupNotice = { readonly kind: 'database-moved'; readonly path: string };
+
 export interface AppState {
     readonly locale: Locale;
+    readonly notices: readonly StartupNotice[];
     readonly resumeAfterRestart: boolean;
     readonly chatSlot?: ChatSlot;
     readonly userCardsDir: string;

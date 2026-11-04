@@ -238,4 +238,45 @@ describe('Store', () => {
         assert.equal((await reopened.sessions()).length, 2);
         await reopened.close();
     });
+
+    it("moves a database that is not Whim's aside without modifying it", async () => {
+        const path = join(dir, 'foreign.sqlite');
+        const raw = new DatabaseSync(path);
+        raw.exec('CREATE TABLE journal (body TEXT); PRAGMA user_version = 3;');
+        raw.prepare('INSERT INTO journal VALUES (?)').run('old');
+        raw.close();
+        const store = await Store.open(path);
+        assert.ok(store.movedAside);
+        assert.deepEqual(await store.sessions(), []);
+        await createSession(store);
+        await store.close();
+        const moved = new DatabaseSync(store.movedAside);
+        assert.deepEqual(
+            moved
+                .prepare('SELECT body FROM journal')
+                .all()
+                .map(row => ({ ...row })),
+            [{ body: 'old' }]
+        );
+        assert.deepEqual({ ...moved.prepare('PRAGMA user_version').get() }, { user_version: 3 });
+        moved.close();
+        const reopened = await Store.open(path);
+        assert.equal(reopened.movedAside, undefined);
+        assert.equal((await reopened.sessions()).length, 1);
+        await reopened.close();
+    });
+
+    it('adopts a schema 1 database created before the application marker', async () => {
+        const path = join(dir, 'unmarked.sqlite');
+        const store = await Store.open(path);
+        const sessionId = await createSession(store);
+        await store.close();
+        const raw = new DatabaseSync(path);
+        raw.exec('PRAGMA application_id = 0');
+        raw.close();
+        const reopened = await Store.open(path);
+        assert.equal(reopened.movedAside, undefined);
+        assert.equal((await reopened.view(sessionId)).sessionId, sessionId);
+        await reopened.close();
+    });
 });

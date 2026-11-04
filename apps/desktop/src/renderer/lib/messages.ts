@@ -105,6 +105,8 @@ export const en = {
     'settings.resumeDescription':
         'Continue an interrupted response automatically when Whim starts.',
     'error.generic': 'Something went wrong.',
+    'notice.databaseMoved':
+        'An existing data file was not created by this version of Whim. It was kept at {path} and a new one was created.',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -212,6 +214,8 @@ export const zhCN: Record<MessageKey, string> = {
     'settings.resume': '重启后继续',
     'settings.resumeDescription': 'Whim 启动时自动继续被中断的回复。',
     'error.generic': '出了点问题。',
+    'notice.databaseMoved':
+        '已有的数据文件不是由当前版本的 Whim 创建的。原文件已保留在 {path}，并新建了数据文件。',
 };
 
 export const catalogs: Record<Locale, Record<MessageKey, string>> = { en, 'zh-CN': zhCN };
