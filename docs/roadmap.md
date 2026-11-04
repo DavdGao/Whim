@@ -35,6 +35,7 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [ ] core: plugin host, credential store (Keychain + DB), model slots, JSON Schema validation
 - [ ] core: journal, inbox, atomic consumption, attempts, chunk batching, seq-based incremental subscription
 - [ ] agent: streaming chat run, Stop and continue with interrupt notice, retries with durable scheduling, admission before acceptance
+- [ ] agent: `restarted` notice and the `agent.resumeAfterRestart` setting; immediate model switch with history re-rendering
 - [ ] plugin-dashscope: credential type, seed cards, chat adapter with error normalization and usage
 - [ ] desktop: Main/Backend/Renderer, single-instance lock, Backend supervision, typed preload
 - [ ] desktop: app shell and four pages, JSON Schema forms for credentials/settings, en/zh-CN
@@ -58,5 +59,5 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 ## Later
 
 - [ ] Remote card catalog refresh
-- [ ] Dynamic tools / tool search via the context-source mechanism
+- [ ] Dynamic tools / tool search (design not started; the context-source mechanism stays general enough to host it)
 - [ ] TTS/ASR/embedding slots, forks, other product capabilities

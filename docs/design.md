@@ -150,28 +150,20 @@ A plugin registers a credential type with an id (`<pluginId>#<name>`) and a sche
     "$id": "@whimkit/plugin-dashscope#api-key",
     "type": "object",
     "title": "DashScope API key",
-    "required": ["apiKey", "region"],
+    "required": ["apiKey"],
     "properties": {
         "apiKey": { "type": "string", "title": "API key", "writeOnly": true, "format": "password" },
-        "region": {
+        "baseUrl": {
             "type": "string",
-            "title": "Region",
-            "enum": [
-                "cn-beijing",
-                "ap-southeast-1",
-                "us-east-1",
-                "eu-central-1",
-                "cn-hongkong",
-                "ap-northeast-1"
-            ],
-            "default": "cn-beijing"
-        },
-        "workspaceId": { "type": "string", "title": "Workspace ID" }
+            "format": "uri",
+            "title": "Base URL",
+            "description": "Full compatible-mode base URL. Leave empty to use the default endpoint."
+        }
     }
 }
 ```
 
-Each adapter reads the fields it needs: a Chat adapter derives its HTTP endpoint from `region` and `workspaceId`; a future realtime adapter derives a WebSocket endpoint from the same credential. The credential type does not know which adapters exist. A third-party plugin can accept this credential type by listing `@whimkit/plugin-dashscope` in `requires`.
+Each adapter reads the fields it needs: the Chat adapter appends its path to `baseUrl`; a future realtime adapter may add its own optional field (for example a WebSocket URL) to the same credential type. The credential type does not know which adapters exist. A third-party plugin can accept this credential type by listing `@whimkit/plugin-dashscope` in `requires`.
 
 A credential type may provide `verify(credential, signal)` for the Models page "Test" action.
 
@@ -185,7 +177,7 @@ Changing a credential is not prompt-affecting: it applies to the next attempt of
 
 A slot is a role in the application that needs a model: `chat` (default for new sessions), `compaction`, `reviewer`, later `tts`, `asr`, `embedding`. A slot value is `{ credentialId, cardId, thinking? }`. The Models page lists, per slot, the credentials whose type an adapter of the slot's kind accepts, then the cards of that adapter.
 
-A session copies the `chat` slot when it is created. Changing the model inside a session is prompt-affecting and takes effect at the next compaction ([agent.md §8](agent.md#8-compaction)); the UI offers to compact immediately.
+A session copies the `chat` slot when it is created. The user can switch the session's model at any time; it applies from the next reasoning step ([agent.md §8.1](agent.md#81-model-switch)).
 
 ## 7. Model cards
 

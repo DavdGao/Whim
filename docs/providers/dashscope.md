@@ -11,7 +11,7 @@ Verified facts used by `@whimkit/plugin-dashscope`. Re-verify before changing th
 
 ## Endpoint
 
-- Base URL `https://{WorkspaceId}.{region}.maas.aliyuncs.com/compatible-mode/v1`, request path `/responses`. Regions: `ap-southeast-1`, `cn-beijing`, `us-east-1`, `eu-central-1`, `cn-hongkong`, `ap-northeast-1`. The credential therefore needs `region` and `workspaceId`.
+- Base URL `https://{WorkspaceId}.{region}.maas.aliyuncs.com/compatible-mode/v1`, request path `/responses`. Regions: `ap-southeast-1`, `cn-beijing`, `us-east-1`, `eu-central-1`, `cn-hongkong`, `ap-northeast-1`. The credential takes one optional full `baseUrl`; the default used when it is empty is verified in PR 2.
 - The legacy path `/api/v2/apps/protocols/compatible-mode/v1/responses` is no longer maintained.
 - Unlisted OpenAI parameters are ignored, not rejected. `background` is unsupported.
 

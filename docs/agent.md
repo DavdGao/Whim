@@ -33,7 +33,7 @@ Each record has `id`, `sessionId`, `seq`, `type`, `version`, `createdAt`, `opera
 | Record                            | Written when                                            | Key fields                                                                                                       |
 | --------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `session.created`                 | Session creation                                        | slot binding copied from settings                                                                                |
-| `epoch.started`                   | Creation and each successful compaction                 | `epochId`, `reason`, system sections, tool declarations, frozen card, source snapshots                           |
+| `epoch.started`                   | Creation, successful compaction, model switch           | `epochId`, `reason`, system sections, tool declarations, frozen card, source snapshots                           |
 | `delivery.accepted`               | Input admitted to the inbox                             | `deliveryId`, `placement`, item (message or notice)                                                              |
 | `delivery.withdrawn`              | User removes a pending item                             | `deliveryId`                                                                                                     |
 | `run.started`                     | Scheduler begins a run                                  | `runId`, trigger                                                                                                 |
@@ -43,8 +43,8 @@ Each record has `id`, `sessionId`, `seq`, `type`, `version`, `createdAt`, `opera
 | `output.item`                     | A complete output item                                  | function call, provider-executed tool call, continuation                                                         |
 | `attempt.finished`                | Attempt terminal                                        | `{ status: 'completed', usage }` / `{ status: 'failed', failure, usage? }` / `{ status: 'interrupted', usage? }` |
 | `retry.scheduled`                 | Runtime decides to retry                                | `stepId`, next attempt number, `at`, failure that caused it                                                      |
-| `message.finalized`               | Assistant message enters history                        | `messageId`, `state: 'complete'                                                                                  | 'interrupted' | 'failed'` |
-| `interrupt.requested`             | Stop or shutdown                                        | `runId`, `reason: 'user'                                                                                         | 'shutdown'`   |
+| `message.finalized`               | Assistant message enters history                        | `messageId`, `state`: complete, interrupted, or failed                                                           |
+| `interrupt.requested`             | Stop or shutdown                                        | `runId`, `reason`: user or shutdown                                                                              |
 | `run.ended`                       | Run terminal                                            | `{ outcome: 'completed' }` / `{ outcome: 'interrupted', reason }` / `{ outcome: 'failed', failure }`             |
 | `compaction.started`              | Compaction begins                                       | `compactionId`, trigger                                                                                          |
 | `compaction.finished`             | Compaction terminal                                     | `{ status: 'succeeded', epochId, coveredSeq }` / `{ status: 'failed', failure }`                                 |
@@ -103,7 +103,7 @@ run:
 - An `interrupted` notice is delivered so the next step sees `<system-reminder>The user interrupted you.</system-reminder>` after the partial answer and before the next user input.
 - Pending deliveries survive. The run ends `interrupted`; the next user message starts a new run normally.
 
-**Shutdown.** Uses `reason: 'shutdown'`. No user-interrupt notice is written; on the next start a `restarted` notice tells the agent its previous response was cut off by an application restart. Sessions do not auto-resume after restart; they resume when the user sends input or presses Continue.
+**Shutdown.** Uses `reason: 'shutdown'`. No user-interrupt notice is written; on the next start a `restarted` notice tells the agent its previous response was cut off by an application restart. Whether an interrupted run resumes automatically after restart is a user setting (`agent.resumeAfterRestart`, default off). When off, the session resumes when the user sends input or presses Continue; when on, the scheduler starts a run that sees the `restarted` notice.
 
 **Crash.** On start, Core finds runs without `run.ended`, closes their open attempts as `interrupted` with unknown usage, and proceeds as for shutdown.
 
@@ -145,13 +145,13 @@ interface ContextSource {
 
 ### 7.2 Tools as a source
 
-The tool set is a source with target `tools`. Tool additions and removals between compactions arrive as notices and the declared tool list stays frozen. For providers without native deferred tool loading, a fixed dispatcher tool (`CallTool { name, arguments }`) is part of the frozen tool list so the model can call tools announced after the epoch; arguments are validated against the announced schema. Providers with native tool search can use it through their adapter instead. This mechanism is designed now and implemented with dynamic tools.
+The tool set is a source with target `tools`, so the same mechanism can later carry tool-schema changes between compactions. Dynamic tools are not designed or implemented yet; this section only keeps the source mechanism general enough to host them.
 
 Revocation is immediate regardless of the cache: a disabled tool fails its call with a `permission-denied` notice even if it is still declared.
 
 ## 8. Compaction
 
-Triggers: the estimated next request exceeds a threshold of the adapter's `inputBudget`, a `context-limit` failure, an explicit user request, or a pending prompt-affecting change (model switch).
+Triggers: the estimated next request exceeds a threshold of the adapter's `inputBudget`, a `context-limit` failure, or an explicit user request.
 
 1. Commit `compaction.started`. The UI shows progress.
 2. Run a summary attempt with the `compaction` slot model over the current history. Its usage is recorded.
@@ -159,6 +159,19 @@ Triggers: the estimated next request exceeds a threshold of the adapter's `input
 4. Commit atomically: `epoch.started` (new prefix with snapshots and timestamps, summary as the first history item) and `compaction.finished { succeeded }`.
 
 On failure or cancellation, `compaction.finished { failed }` is committed and the old epoch stays. Deliveries accepted during compaction remain pending. Original records are never deleted; the UI shows a divider with the summary expandable, and older history stays readable.
+
+### 8.1 Model switch
+
+Switching the model starts a new epoch at the next reasoning step without summarizing. The provider cache is lost anyway when the model changes, so the switch also refreshes all source snapshots.
+
+The new epoch re-renders the existing history for the new card:
+
+- Continuation items from a different adapter are dropped; the visible text and reasoning summaries remain.
+- Blocks with media types the new card cannot accept become short text placeholders naming the attachment; the originals stay in storage.
+- Provider-executed tool calls from the previous provider are kept as text records of what was called and returned.
+- If the history does not fit the new adapter's `inputBudget`, the switch runs compaction with the new model first.
+
+The switch is recorded as `epoch.started { reason: 'model-switch' }`, and the conversation shows where it happened.
 
 ## 9. Tools
 
