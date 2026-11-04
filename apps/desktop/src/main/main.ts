@@ -102,6 +102,10 @@ function createWindow(): void {
         minHeight: 480,
         title: 'Whim',
         show: false,
+        // Immersive chrome: no native title bar; traffic lights sit inside the app's top bar.
+        titleBarStyle: 'hiddenInset',
+        trafficLightPosition: { x: 16, y: 14 },
+        backgroundColor: '#fafafa',
         webPreferences: {
             preload: join(here, 'preload.cjs'),
             sandbox: true,

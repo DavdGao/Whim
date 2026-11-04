@@ -1,3 +1,4 @@
+import { rename } from 'node:fs/promises';
 import { Worker } from 'node:worker_threads';
 
 import { z } from 'zod';
@@ -14,6 +15,7 @@ import type { CredentialRow, PluginRow, RequestInput, SessionSummary } from './d
 
 const responseSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal('ready') }),
+    z.object({ type: z.literal('foreign') }),
     z.object({ type: z.literal('result'), id: z.number(), value: z.unknown() }),
     z.object({
         type: z.literal('error'),
@@ -53,20 +55,51 @@ export class Store {
         });
     }
 
+    /** Where a file that was not a Whim database was moved, when that happened on open. */
+    movedAside: string | undefined;
+
     /**
-     * Open the database, running migrations before resolving.
+     * Open the database, running migrations before resolving. A file at `path` that is not a
+     * Whim database is renamed, never modified, and a new database is created.
      * @param path Database file path, or `:memory:`.
      * @returns The ready store.
      */
     static async open(path: string): Promise<Store> {
+        const first = await Store.#start(path);
+        if (first.kind === 'ready') return new Store(first.worker);
+        await first.worker.terminate();
+        const target = `${path}.foreign-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+        for (const suffix of ['', '-wal', '-shm']) {
+            try {
+                await rename(`${path}${suffix}`, `${target}${suffix}`);
+            } catch (error) {
+                if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT'))
+                    throw error;
+            }
+        }
+        const second = await Store.#start(path);
+        if (second.kind !== 'ready')
+            throw new StoreError('internal', 'A new database could not be created.');
+        const store = new Store(second.worker);
+        store.movedAside = target;
+        return store;
+    }
+
+    /**
+     * Start a worker and wait until it is ready or reports a foreign file.
+     * @param path Database file path.
+     * @returns The worker and its state.
+     */
+    static async #start(path: string): Promise<{ kind: 'ready' | 'foreign'; worker: Worker }> {
         const worker = new Worker(new URL('./db/worker.js', import.meta.url), {
             workerData: { path },
         });
-        await new Promise<void>((resolve, reject) => {
+        const kind = await new Promise<'ready' | 'foreign'>((resolve, reject) => {
             const onMessage = (message: unknown) => {
-                if (responseSchema.safeParse(message).data?.type === 'ready') {
+                const type = responseSchema.safeParse(message).data?.type;
+                if (type === 'ready' || type === 'foreign') {
                     cleanup();
-                    resolve();
+                    resolve(type);
                 }
             };
             const onError = (error: Error) => {
@@ -80,7 +113,7 @@ export class Store {
             worker.on('message', onMessage);
             worker.on('error', onError);
         });
-        return new Store(worker);
+        return { kind, worker };
     }
 
     /**
@@ -89,7 +122,7 @@ export class Store {
      */
     #receive(message: unknown): void {
         const parsed = responseSchema.parse(message);
-        if (parsed.type === 'ready') return;
+        if (parsed.type === 'ready' || parsed.type === 'foreign') return;
         const pending = this.#pending.get(parsed.id);
         if (!pending) return;
         this.#pending.delete(parsed.id);

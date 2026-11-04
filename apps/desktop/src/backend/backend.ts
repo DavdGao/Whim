@@ -314,6 +314,9 @@ class Backend {
         const slot = chatSlotSchema.safeParse(await this.store.getSetting('slot.chat'));
         return {
             locale: locale.success ? locale.data : 'en',
+            notices: this.store.movedAside
+                ? [{ kind: 'database-moved', path: this.store.movedAside }]
+                : [],
             resumeAfterRestart: (await this.store.getSetting('agent.resumeAfterRestart')) === true,
             ...(slot.success ? { chatSlot: slot.data } : {}),
             userCardsDir: this.catalog.userDir,

@@ -21,11 +21,53 @@ const port = parentPort;
 if (!port) throw new Error('The database must run in a worker thread.');
 const { path } = z.strictObject({ path: z.string().min(1) }).parse(workerData);
 
+/** `PRAGMA application_id` marking a Whim database ("WHIM"). */
+const applicationId = 0x5748494d;
+
 const existed = path !== ':memory:' && existsSync(path);
 const db = new DatabaseSync(path);
-db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;');
-db.exec('PRAGMA busy_timeout = 5000;');
-migrate();
+// Never change a database that is not Whim's; the store moves it aside instead.
+const owned = claim();
+if (owned) {
+    db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;');
+    db.exec('PRAGMA busy_timeout = 5000;');
+    migrate();
+} else {
+    db.close();
+    port.postMessage({ type: 'foreign' });
+}
+
+/**
+ * Decide whether the file is a Whim database, marking new and pre-marker ones.
+ * @returns True when the database belongs to Whim.
+ */
+function claim(): boolean {
+    const pragma = (name: string) =>
+        z.record(z.string(), z.number()).parse(db.prepare(`PRAGMA ${name}`).get())[name];
+    const id = pragma('application_id');
+    if (id === applicationId) return true;
+    if (id !== 0) return false;
+    const version = pragma('user_version');
+    const tables = z
+        .object({ count: z.number() })
+        .parse(
+            db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'table'").get()
+        ).count;
+    const columns = (table: string) =>
+        db
+            .prepare(`PRAGMA table_info(${table})`)
+            .all()
+            .map(row => z.object({ name: z.string() }).parse(row).name);
+    const fresh = version === 0 && tables === 0;
+    // Databases created by schema 1 before the marker existed.
+    const unmarked =
+        version === 1 &&
+        columns('journal').includes('type') &&
+        columns('sessions').includes('needs_recovery');
+    if (!fresh && !unmarked) return false;
+    db.exec(`PRAGMA application_id = ${applicationId}`);
+    return true;
+}
 
 /** Apply pending migrations after backing up an existing database. */
 function migrate(): void {
@@ -404,33 +446,34 @@ function handle(request: Request): unknown {
     }
 }
 
-port.on('message', (input: unknown) => {
-    const parsed = requestSchema.safeParse(input);
-    if (!parsed.success) {
-        const id = z.object({ id: z.number() }).safeParse(input);
-        port.postMessage({
-            type: 'error',
-            id: id.success ? id.data.id : -1,
-            code: 'invalid',
-            message: parsed.error.message,
-        });
-        return;
-    }
-    const request = parsed.data;
-    try {
-        port.postMessage({ type: 'result', id: request.id, value: handle(request) });
-        if (request.op === 'close') port.close();
-    } catch (error) {
-        const known = error instanceof StoreError;
-        port.postMessage({
-            type: 'error',
-            id: request.id,
-            code: known ? error.code : error instanceof z.ZodError ? 'invalid' : 'internal',
-            message: describe(error),
-        });
-    }
-});
-port.postMessage({ type: 'ready' });
+if (owned)
+    port.on('message', (input: unknown) => {
+        const parsed = requestSchema.safeParse(input);
+        if (!parsed.success) {
+            const id = z.object({ id: z.number() }).safeParse(input);
+            port.postMessage({
+                type: 'error',
+                id: id.success ? id.data.id : -1,
+                code: 'invalid',
+                message: parsed.error.message,
+            });
+            return;
+        }
+        const request = parsed.data;
+        try {
+            port.postMessage({ type: 'result', id: request.id, value: handle(request) });
+            if (request.op === 'close') port.close();
+        } catch (error) {
+            const known = error instanceof StoreError;
+            port.postMessage({
+                type: 'error',
+                id: request.id,
+                code: known ? error.code : error instanceof z.ZodError ? 'invalid' : 'internal',
+                message: describe(error),
+            });
+        }
+    });
+if (owned) port.postMessage({ type: 'ready' });
 
 /**
  * Describe an error with its cause chain for diagnostics.

@@ -328,6 +328,7 @@ One SQLite database at `<userData>/whim.sqlite`, opened only by the DB worker (W
 - **Records are versioned.** Each record has `type` and `version`. Decoders accept every released version and upcast to the current shape; released versions are never removed. A record that cannot be decoded marks its session `unreadable` with the cause; other sessions are unaffected.
 - **Records reference, they do not embed foreign schemas.** An epoch stores a frozen copy of the card fields it uses, validated by a record-owned schema, not by the live card schema.
 - **Commands are idempotent.** The same operation id and canonical input returns the original receipt; a different input conflicts. Canonical encoding sorts keys by code point, independent of locale.
+- **Ownership is marked.** Whim sets `PRAGMA application_id` to `0x5748494d` ("WHIM"). A file at the database path that is not marked (and is not an empty or pre-marker schema 1 Whim database) is never modified: Core renames it to `whim.sqlite.foreign-<time>` with its WAL files, creates a new database, and the UI reports where the old file was kept. A marked database with a newer schema still refuses to open.
 - **Migrations are append-only.** Before migrating, Core writes a backup with `VACUUM INTO`. A failed migration leaves the original file untouched and reports the failure.
 - **Short transactions.** No network I/O or awaits inside a transaction; each command is one DB-worker request.
 - Secrets are stored only as `safeStorage` ciphertext, never in plain text or logs.
@@ -377,7 +378,7 @@ type Failure = {
 
 ### 11.1 Shell
 
-A left navigation rail (shadcn `Sidebar`, collapsible to icons) with four pages:
+The window has no native title bar (`titleBarStyle: 'hiddenInset'`). A draggable top bar in the sidebar color holds the macOS traffic lights, the app name, the current page, and the connection status. Below it, a navigation rail (shadcn `Sidebar`, `inset` variant, collapsible to icons) sits on the same background, and the active page is an inset panel. Four pages:
 
 | Page     | Content                                                                                                         |
 | -------- | --------------------------------------------------------------------------------------------------------------- |
