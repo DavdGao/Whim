@@ -73,6 +73,8 @@ A plugin is an npm package with a `whim` field in `package.json`:
         "host": "./dist/host.js",
         "cards": "./cards",
         "locales": "./locales",
+        "icon": "./icons/bailian.svg",
+        "icons": { "qwen": "./icons/qwen.svg" },
         "requires": []
     },
     "peerDependencies": { "@whimkit/core": "0.1.0" }
@@ -84,6 +86,7 @@ A plugin is an npm package with a `whim` field in `package.json`:
 - `cards` is a directory of seed model cards (§7.3).
 - `requires` lists plugin ids whose registrations this plugin uses, e.g. another plugin's credential type.
 - Display strings come from the plugin's `locales/en.json` and `locales/zh-CN.json`.
+- `icon` is the plugin's logo; `icons` names further images that its cards reference by key (§7.1). Paths stay inside the package, files are SVG or PNG of at most 64 KiB, and Backend sends them to Renderer as `data:` URLs rendered with `<img>`, so SVG scripts never run. A missing or invalid icon is reported and ignored. Remote icon URLs are not fetched; they arrive with remote catalogs.
 
 ### 5.2 Lifecycle
 
@@ -237,6 +240,7 @@ Numeric values in this example are illustrative; seed card values are verified a
 | `thinking`    | Absent: no thinking. `{ "fixed": true }`: always on, not adjustable. `{ "levels", "default" }`: user-selectable levels                                                          |
 | `nativeTools` | Core tool ids the provider executes server-side (§7.6)                                                                                                                          |
 | `options`     | Adapter-specific settings, validated by the adapter's JSON Schema                                                                                                               |
+| `icon`        | Optional key into the `icons` of the adapter's plugin (§5.1). Without it the UI shows the plugin's `icon`                                                                       |
 
 Thinking levels use a fixed vocabulary of at most five values: `off`, `low`, `medium`, `high`, `max`. A card lists the subset it supports. Mapping a level to provider parameters is the adapter's job; an adapter may accept a mapping override in `options` for models that deviate.
 
@@ -378,7 +382,7 @@ type Failure = {
 
 ### 11.1 Shell
 
-The window has no native title bar (`titleBarStyle: 'hiddenInset'`). A draggable top bar in the sidebar color holds the macOS traffic lights, the app name, the current page, and the connection status. Below it, a navigation rail (shadcn `Sidebar`, `inset` variant, collapsible to icons) sits on the same background, and the active page is an inset panel. Four pages:
+The window has no native title bar (`titleBarStyle: 'hiddenInset'`). A draggable top strip in the sidebar color holds the macOS traffic lights and, when Backend is not connected, the connection status. Below it, a navigation rail (shadcn `Sidebar`, `inset` variant, collapsible to icons) sits on the same background: the Whim logo and name at the top, Chat, Models, and Plugins in the middle, Settings at the bottom. The active page is an inset panel. Four pages:
 
 | Page     | Content                                                                                                         |
 | -------- | --------------------------------------------------------------------------------------------------------------- |
@@ -398,7 +402,17 @@ The rail has room for later pages; a page is added when its feature exists, not 
 
 ### 11.3 Components and style
 
-Use official shadcn/ui components and AI Elements (conversation, message, prompt input, reasoning) from the official registry, installed with the CLI into `apps/desktop/src/components/ui`. Compose and theme them through tokens; do not restyle internals with broad selectors. The visual direction is minimal and flat with clear hierarchy, restrained accents, and responsive feedback. Keyboard and focus behavior are part of acceptance.
+Use official shadcn/ui components and AI Elements (conversation, message, prompt input, reasoning) from the official registry, installed with the CLI into `apps/desktop/src/components/ui`. Compose and theme them through tokens; do not restyle internals with broad selectors. Keyboard and focus behavior are part of acceptance.
+
+Whim is a consumer application. The visual direction is friendly and soft rather than dense and formal:
+
+- **Rounded.** Every surface, control, and image uses generous rounding. The theme radius is large (`--radius: 1rem`), and hand-written containers use `rounded-xl` or larger; avatars and status dots are round.
+- **Buttons.** Every button has an icon, with a visible label unless it is an icon-only button with an `aria-label`. The confirming action of a group uses the default (primary) variant; Cancel, Close, and similar dismissals use `ghost` (or `link`), never `outline` or primary. Destructive actions use `destructive`.
+- **Busy state.** A button or control that runs business logic shows a spinner in place of its icon and is disabled until the command settles, so the interface never appears frozen. Errors from it are reported, not swallowed. Pure dismissals (Cancel, Close) need no busy state. `ActionButton` and `useAction` in `src/renderer/components` implement this.
+- **Dialogs.** Header and footer stay fixed; only the body scrolls, and the dialog never exceeds the viewport.
+- **Choices.** Single-choice pickers (model, thinking level, language, credential type, enum fields) are `DropdownMenu` radio menus behind a button trigger (`ChoiceMenu`). The shadcn `Select` component is not used; lint forbids importing it outside vendored code.
+- **Vocabulary.** The UI speaks in user terms. Internal design concepts such as cards, layers, adapters, or slots do not appear in visible text: a card is a "model", a slot is a "default model".
+- **Icons.** Models and plugins show their plugin-provided icon (§5.1), falling back to a generic glyph.
 
 ## 12. Observability
 

@@ -329,6 +329,8 @@ class Backend {
                 availability: status.availability,
                 ...(status.error ? { error: status.error } : {}),
                 locales: status.locales,
+                ...(status.icon ? { icon: status.icon } : {}),
+                icons: status.icons,
             })),
             credentialTypes: [...this.host.credentialTypes.values()].map(entry => ({
                 id: entry.type.id,

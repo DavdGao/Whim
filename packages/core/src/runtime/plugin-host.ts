@@ -23,6 +23,8 @@ const manifestSchema = z.object({
         host: z.string().min(1),
         cards: z.string().min(1).optional(),
         locales: z.string().min(1).optional(),
+        icon: z.string().min(1).optional(),
+        icons: z.record(z.string().min(1), z.string().min(1)).default({}),
         requires: z.array(z.string().min(1)).default([]),
     }),
 });
@@ -48,6 +50,55 @@ export interface PluginStatus {
     readonly cardsDir?: string;
     /** Display strings by locale (`en`, `zh-CN`), from the plugin's locale catalogs. */
     readonly locales: Readonly<Record<string, Readonly<Record<string, string>>>>;
+    /** The plugin's logo as a `data:` URL. */
+    readonly icon?: string;
+    /** Named images that cards reference through their `icon` field, as `data:` URLs. */
+    readonly icons: Readonly<Record<string, string>>;
+}
+
+const iconTypes: Readonly<Record<string, string>> = { svg: 'image/svg+xml', png: 'image/png' };
+const maxIconBytes = 64 * 1024;
+
+/**
+ * Read one package image into a `data:` URL; an invalid image is reported and skipped.
+ * @param dir The package root.
+ * @param path The manifest path, relative to the root.
+ * @returns The data URL, or undefined.
+ */
+async function readIcon(dir: string, path: string): Promise<string | undefined> {
+    const file = resolve(dir, path);
+    const type = iconTypes[file.slice(file.lastIndexOf('.') + 1).toLowerCase()];
+    try {
+        if (!file.startsWith(dir + sep)) throw new Error('The path leaves the package.');
+        if (!type) throw new Error('Only SVG and PNG icons are supported.');
+        const bytes = await readFile(file);
+        if (bytes.byteLength > maxIconBytes) throw new Error('The icon exceeds 64 KiB.');
+        return `data:${type};base64,${bytes.toString('base64')}`;
+    } catch (error) {
+        console.error(`Invalid plugin icon ${path} in ${dir}:`, describeError(error));
+        return undefined;
+    }
+}
+
+/**
+ * Read a plugin's logo and named icons.
+ * @param dir The package root.
+ * @param manifest The manifest's `whim` field.
+ * @param manifest.icon The logo path.
+ * @param manifest.icons Named icon paths.
+ * @returns The images as data URLs.
+ */
+async function readIcons(
+    dir: string,
+    manifest: { icon?: string | undefined; icons: Record<string, string> }
+): Promise<Pick<PluginStatus, 'icon' | 'icons'>> {
+    const icons: Record<string, string> = {};
+    for (const [name, path] of Object.entries(manifest.icons)) {
+        const url = await readIcon(dir, path);
+        if (url) icons[name] = url;
+    }
+    const icon = manifest.icon ? await readIcon(dir, manifest.icon) : undefined;
+    return { ...(icon ? { icon } : {}), icons };
 }
 
 const localeSchema = z.record(z.string(), z.string());
@@ -189,6 +240,7 @@ export class PluginHost {
                     availability: 'failed',
                     error: `Invalid plugin manifest: ${describeError(error)}`,
                     locales: {},
+                    icons: {},
                 });
                 continue;
             }
@@ -220,6 +272,7 @@ export class PluginHost {
                 locales: await readLocales(
                     manifest.whim.locales ? join(dir, manifest.whim.locales) : undefined
                 ),
+                ...(await readIcons(dir, manifest.whim)),
             };
             this.#statuses.set(row.id, status);
             loaded.push({ manifest, dir, status });

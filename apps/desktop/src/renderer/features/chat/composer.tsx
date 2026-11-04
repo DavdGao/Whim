@@ -1,7 +1,11 @@
 import { selectableLevels } from '@whimkit/core/contracts';
+import { BoxIcon, BrainIcon } from 'lucide-react';
 import { useState } from 'react';
 
+import { ChoiceMenu } from '../../components/choice-menu';
+import { EntityIcon } from '../../components/entity-icon';
 import { useT } from '../../lib/i18n';
+import { modelIcon } from '../../lib/icons';
 
 import { modelChoices } from './model-choices';
 
@@ -11,11 +15,6 @@ import {
     PromptInput,
     PromptInputBody,
     PromptInputFooter,
-    PromptInputSelect,
-    PromptInputSelectContent,
-    PromptInputSelectItem,
-    PromptInputSelectTrigger,
-    PromptInputSelectValue,
     PromptInputSubmit,
     PromptInputTextarea,
     PromptInputTools,
@@ -27,7 +26,7 @@ export interface ComposerProps {
     readonly slot: ChatSlot | undefined;
     readonly running: boolean;
     readonly modelLocked: boolean;
-    readonly onSlotChange: (slot: ChatSlot) => void;
+    readonly onSlotChange: (slot: ChatSlot) => Promise<void>;
     readonly onSend: (text: string) => Promise<void>;
     readonly onStop: () => void;
 }
@@ -95,51 +94,51 @@ export function Composer({
             </PromptInputBody>
             <PromptInputFooter>
                 <PromptInputTools>
-                    <PromptInputSelect
-                        value={current?.card.id ?? ''}
+                    <ChoiceMenu
+                        value={current?.card.id}
+                        choices={choices.map(choice => ({
+                            value: choice.card.id,
+                            label: choice.card.name,
+                            icon: (
+                                <EntityIcon
+                                    src={modelIcon(state, choice.card)}
+                                    fallback={BoxIcon}
+                                />
+                            ),
+                        }))}
+                        icon={<BoxIcon />}
+                        placeholder={t('chat.model')}
+                        aria-label={t('chat.model')}
                         disabled={modelLocked}
-                        onValueChange={cardId => {
+                        {...(modelLocked ? { title: t('chat.modelLocked') } : {})}
+                        variant="ghost"
+                        size="sm"
+                        onChange={cardId => {
                             const choice = choices.find(item => item.card.id === cardId);
-                            if (choice) onSlotChange({ cardId, credentialId: choice.credentialId });
+                            return choice
+                                ? onSlotChange({ cardId, credentialId: choice.credentialId })
+                                : undefined;
                         }}
-                    >
-                        <PromptInputSelectTrigger
-                            aria-label={t('chat.model')}
-                            title={modelLocked ? t('chat.modelLocked') : undefined}
-                        >
-                            <PromptInputSelectValue placeholder={t('chat.model')} />
-                        </PromptInputSelectTrigger>
-                        <PromptInputSelectContent>
-                            {choices.map(choice => (
-                                <PromptInputSelectItem key={choice.card.id} value={choice.card.id}>
-                                    {choice.card.name}
-                                </PromptInputSelectItem>
-                            ))}
-                        </PromptInputSelectContent>
-                    </PromptInputSelect>
+                    />
                     {fixed ? (
-                        <span className="text-muted-foreground px-2 text-xs">
+                        <span className="text-muted-foreground flex items-center gap-1.5 px-2 text-xs">
+                            <BrainIcon className="size-3.5" />
                             {t('chat.thinking.fixed')}
                         </span>
                     ) : levels.length > 0 && slot ? (
-                        <PromptInputSelect
-                            value={level ?? ''}
-                            onValueChange={value => {
-                                const thinking = levels.find(item => item === value);
-                                if (thinking) onSlotChange({ ...slot, thinking });
-                            }}
-                        >
-                            <PromptInputSelectTrigger aria-label={t('chat.thinking')}>
-                                <PromptInputSelectValue placeholder={t('chat.thinking')} />
-                            </PromptInputSelectTrigger>
-                            <PromptInputSelectContent>
-                                {levels.map(item => (
-                                    <PromptInputSelectItem key={item} value={item}>
-                                        {t('chat.thinking')}: {t(`level.${item}`)}
-                                    </PromptInputSelectItem>
-                                ))}
-                            </PromptInputSelectContent>
-                        </PromptInputSelect>
+                        <ChoiceMenu
+                            value={level}
+                            choices={levels.map(item => ({
+                                value: item,
+                                label: `${t('chat.thinking')}: ${t(`level.${item}`)}`,
+                            }))}
+                            icon={<BrainIcon />}
+                            placeholder={t('chat.thinking')}
+                            aria-label={t('chat.thinking')}
+                            variant="ghost"
+                            size="sm"
+                            onChange={thinking => onSlotChange({ ...slot, thinking })}
+                        />
                     ) : null}
                 </PromptInputTools>
                 <PromptInputSubmit

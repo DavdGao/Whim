@@ -1,3 +1,6 @@
+import { ListIcon } from 'lucide-react';
+
+import { ChoiceMenu } from '../../components/choice-menu';
 import { useT } from '../../lib/i18n';
 import { pluginText } from '../../lib/messages';
 
@@ -7,13 +10,6 @@ import type { FormValue } from './schema';
 
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 
 export interface SchemaFormProps {
@@ -81,21 +77,18 @@ export function SchemaForm({
                                 onCheckedChange={checked => onChange(property.name, checked)}
                             />
                         ) : property.options ? (
-                            <Select
-                                value={typeof value === 'string' ? value : ''}
-                                onValueChange={next => onChange(property.name, next)}
-                            >
-                                <SelectTrigger id={id}>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {property.options.map(option => (
-                                        <SelectItem key={option} value={option}>
-                                            {option}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <ChoiceMenu
+                                id={id}
+                                value={typeof value === 'string' ? value : undefined}
+                                choices={property.options.map(option => ({
+                                    value: option,
+                                    label: option,
+                                }))}
+                                icon={<ListIcon />}
+                                placeholder={label}
+                                className="w-full"
+                                onChange={next => onChange(property.name, next)}
+                            />
                         ) : (
                             <Input
                                 id={id}

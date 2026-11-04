@@ -36,9 +36,14 @@ const seed = {
  * Write a minimal plugin package to disk.
  * @param root Parent directory.
  * @param hostSource Source of the host entry.
+ * @param extra Additional `whim` manifest fields.
  * @returns The package directory.
  */
-async function writePlugin(root: string, hostSource: string): Promise<string> {
+async function writePlugin(
+    root: string,
+    hostSource: string,
+    extra: Record<string, unknown> = {}
+): Promise<string> {
     const pkg = join(root, 'fixture-plugin');
     await mkdir(join(pkg, 'cards'), { recursive: true });
     await writeFile(
@@ -47,7 +52,7 @@ async function writePlugin(root: string, hostSource: string): Promise<string> {
             name: 'fixture-plugin',
             version: '1.0.0',
             type: 'module',
-            whim: { host: './host.js', cards: './cards' },
+            whim: { host: './host.js', cards: './cards', ...extra },
         })
     );
     await writeFile(join(pkg, 'host.js'), hostSource);
@@ -204,6 +209,31 @@ describe('PluginHost, Catalog, and CredentialService', () => {
             [['failed', 'boom']]
         );
         assert.equal(host.credentialTypes.size, 0);
+        await store.close();
+    });
+
+    it('loads plugin icons as data URLs and skips invalid ones', async () => {
+        const root = join(dir, 'icons');
+        const pkg = await writePlugin(root, hostSource, {
+            icon: './logo.svg',
+            icons: {
+                model: './model.png',
+                outside: '../outside.svg',
+                script: './host.js',
+                large: './large.svg',
+            },
+        });
+        await writeFile(join(pkg, 'logo.svg'), '<svg/>');
+        await writeFile(join(pkg, 'model.png'), Buffer.from([1, 2, 3]));
+        await writeFile(join(root, 'outside.svg'), '<svg/>');
+        await writeFile(join(pkg, 'large.svg'), 'x'.repeat(64 * 1024 + 1));
+        const store = await Store.open(join(root, 'db.sqlite'));
+        const host = new PluginHost(store, [{ dir: pkg, source: 'bundled' }]);
+        await host.start();
+        const [status] = host.statuses();
+        assert.equal(status?.icon, `data:image/svg+xml;base64,${btoa('<svg/>')}`);
+        assert.deepEqual(status?.icons, { model: 'data:image/png;base64,AQID' });
+        await host.stop();
         await store.close();
     });
 });

@@ -2,6 +2,7 @@ import { BoxesIcon, MessageSquareIcon, PuzzleIcon, SettingsIcon } from 'lucide-r
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
+import logo from './assets/whim.svg';
 import { ChatPage } from './features/chat/chat-page';
 import { ModelsPage } from './features/models/models-page';
 import { PluginsPage } from './features/plugins/plugins-page';
@@ -17,13 +18,16 @@ import type { StartupNotice } from '../shared/ipc';
 import {
     Sidebar,
     SidebarContent,
+    SidebarFooter,
     SidebarGroup,
     SidebarGroupContent,
+    SidebarHeader,
     SidebarInset,
     SidebarMenu,
     SidebarMenuButton,
     SidebarMenuItem,
     SidebarProvider,
+    SidebarTrigger,
 } from '@/components/ui/sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Toaster } from '@/components/ui/sonner';
@@ -61,27 +65,57 @@ function StartupNotices({ notices }: { notices: readonly StartupNotice[] }) {
 }
 
 /**
- * The application shell: an immersive title bar, a navigation rail, and the active page.
+ * One navigation entry.
+ * @param props The entry.
+ * @param props.item The page.
+ * @param props.active Whether it is the current page.
+ * @param props.onSelect Navigate to the page.
+ * @returns The menu item.
+ */
+function NavItem({
+    item,
+    active,
+    onSelect,
+}: {
+    item: (typeof pages)[number];
+    active: boolean;
+    onSelect: () => void;
+}) {
+    const { t } = useT();
+    return (
+        <SidebarMenuItem>
+            <SidebarMenuButton isActive={active} tooltip={t(item.label)} onClick={onSelect}>
+                <item.icon />
+                <span>{t(item.label)}</span>
+            </SidebarMenuButton>
+        </SidebarMenuItem>
+    );
+}
+
+/**
+ * The application shell: a draggable title strip, a navigation rail, and the active page.
  * @returns The shell.
  */
 function Shell() {
     const { state, status } = useAppState();
     const { t } = useT();
     const [page, setPage] = useState<Page>('chat');
-    const current = pages.find(item => item.id === page) ?? pages[0];
     const banner =
         status === 'restarting'
             ? t('backend.restarting')
             : status === 'failed'
               ? t('backend.failed')
               : undefined;
+    const main = pages.filter(item => item.id !== 'settings');
+    const settings = pages.find(item => item.id === 'settings');
     return (
-        <div className="bg-sidebar text-sidebar-foreground flex h-svh flex-col">
-            {/* Draggable title bar; the left inset leaves room for the macOS traffic lights. */}
+        <SidebarProvider className="bg-sidebar text-sidebar-foreground h-svh min-h-0 flex-col">
+            {/* Draggable title strip; the left inset leaves room for the macOS traffic lights. */}
             <header className="flex h-11 shrink-0 items-center gap-2 pr-4 pl-21 select-none [-webkit-app-region:drag]">
-                <span className="text-sm font-semibold tracking-tight">{t('app.name')}</span>
-                <span className="text-muted-foreground text-sm">/</span>
-                <span className="text-muted-foreground text-sm">{t(current.label)}</span>
+                <SidebarTrigger
+                    className="[-webkit-app-region:no-drag]"
+                    aria-label={t('nav.toggle')}
+                />
                 <span className="flex-1" />
                 {status !== 'connected' && (
                     <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
@@ -100,34 +134,57 @@ function Shell() {
                     </span>
                 )}
             </header>
-            <SidebarProvider defaultOpen={false} className="min-h-0 flex-1">
+            <div className="flex min-h-0 flex-1">
                 <Sidebar
                     collapsible="icon"
                     variant="inset"
                     className="top-11 h-[calc(100svh-2.75rem)] pt-0"
                 >
+                    <SidebarHeader>
+                        <SidebarMenu>
+                            <SidebarMenuItem>
+                                <SidebarMenuButton
+                                    size="lg"
+                                    tooltip={t('app.name')}
+                                    onClick={() => setPage('chat')}
+                                >
+                                    <img src={logo} alt="" className="size-8 shrink-0 rounded-xl" />
+                                    <span className="text-base font-semibold tracking-tight">
+                                        {t('app.name')}
+                                    </span>
+                                </SidebarMenuButton>
+                            </SidebarMenuItem>
+                        </SidebarMenu>
+                    </SidebarHeader>
                     <SidebarContent>
-                        <SidebarGroup className="pt-0">
+                        <SidebarGroup>
                             <SidebarGroupContent>
                                 <SidebarMenu>
-                                    {pages.map(item => (
-                                        <SidebarMenuItem key={item.id}>
-                                            <SidebarMenuButton
-                                                isActive={page === item.id}
-                                                tooltip={t(item.label)}
-                                                onClick={() => setPage(item.id)}
-                                            >
-                                                <item.icon />
-                                                <span>{t(item.label)}</span>
-                                            </SidebarMenuButton>
-                                        </SidebarMenuItem>
+                                    {main.map(item => (
+                                        <NavItem
+                                            key={item.id}
+                                            item={item}
+                                            active={page === item.id}
+                                            onSelect={() => setPage(item.id)}
+                                        />
                                     ))}
                                 </SidebarMenu>
                             </SidebarGroupContent>
                         </SidebarGroup>
                     </SidebarContent>
+                    {settings && (
+                        <SidebarFooter>
+                            <SidebarMenu>
+                                <NavItem
+                                    item={settings}
+                                    active={page === 'settings'}
+                                    onSelect={() => setPage('settings')}
+                                />
+                            </SidebarMenu>
+                        </SidebarFooter>
+                    )}
                 </Sidebar>
-                <SidebarInset className="min-h-0 overflow-hidden md:peer-data-[variant=inset]:mt-0">
+                <SidebarInset className="min-h-0 overflow-hidden md:peer-data-[variant=inset]:mt-0 md:peer-data-[variant=inset]:rounded-2xl">
                     {banner && (
                         <div className="bg-destructive/10 text-destructive px-4 py-2 text-sm">
                             {banner}
@@ -139,7 +196,7 @@ function Shell() {
                             <Skeleton className="h-24 w-2/3" />
                         </div>
                     ) : (
-                        <main className="min-h-0 flex-1 overflow-auto">
+                        <div className="min-h-0 flex-1 overflow-auto">
                             <StartupNotices notices={state.notices} />
                             {page === 'chat' && (
                                 <ChatPage state={state} onOpenModels={() => setPage('models')} />
@@ -147,11 +204,11 @@ function Shell() {
                             {page === 'models' && <ModelsPage state={state} />}
                             {page === 'plugins' && <PluginsPage state={state} />}
                             {page === 'settings' && <SettingsPage state={state} />}
-                        </main>
+                        </div>
                     )}
                 </SidebarInset>
-            </SidebarProvider>
-        </div>
+            </div>
+        </SidebarProvider>
     );
 }
 
