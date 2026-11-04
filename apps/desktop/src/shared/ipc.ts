@@ -20,12 +20,26 @@ export const chatSlotSchema = z.strictObject({
 });
 export type ChatSlot = z.infer<typeof chatSlotSchema>;
 
+/** The agent's identity; applies to epochs started after a change. */
+export const agentProfileSchema = z.strictObject({
+    name: z.string().trim().min(1).max(60),
+    systemPrompt: z.string().trim().min(1).max(20_000),
+    /** A small image as a `data:` URL; absent for the default icon. */
+    icon: z
+        .string()
+        .max(300_000)
+        .regex(/^data:image\/(png|jpeg|webp|svg\+xml);base64,/)
+        .optional(),
+});
+export type AgentProfile = z.infer<typeof agentProfileSchema>;
+
 /** Parameters of every Renderer → Backend method; validated in Backend. */
 export const methodSchemas = {
     'app.state': z.strictObject({}),
     'settings.locale': z.strictObject({ locale: localeSchema }),
     'settings.resumeAfterRestart': z.strictObject({ enabled: z.boolean() }),
     'settings.chatSlot': z.strictObject({ slot: chatSlotSchema }),
+    'settings.agent': z.strictObject({ profile: agentProfileSchema.nullable() }),
     'credentials.save': z.strictObject({
         id: idSchema.optional(),
         typeId: idSchema,
@@ -51,6 +65,8 @@ export const methodSchemas = {
         text: z.string().trim().min(1).max(200_000),
     }),
     'session.stop': z.strictObject({ sessionId: idSchema }),
+    'session.pin': z.strictObject({ sessionId: idSchema, pinned: z.boolean() }),
+    'session.delete': z.strictObject({ sessionId: idSchema }),
     'session.continue': z.strictObject({ sessionId: idSchema }),
     'session.withdraw': z.strictObject({ sessionId: idSchema, deliveryId: idSchema }),
     'session.setThinking': z.strictObject({ sessionId: idSchema, thinking: thinkingLevelSchema }),
@@ -80,6 +96,11 @@ export interface PluginInfo {
     readonly icon?: string;
     /** Named card icons as `data:` URLs. */
     readonly icons: Readonly<Record<string, string>>;
+    readonly category: 'models' | 'tools' | 'other';
+    /** What the plugin registered: model adapters, credential types, and tool names. */
+    readonly adapters: number;
+    readonly credentialTypes: number;
+    readonly tools: readonly string[];
 }
 
 export interface CredentialTypeInfo {
@@ -121,6 +142,7 @@ export interface SessionInfo {
     readonly createdAt: string;
     readonly updatedAt: string;
     readonly running: boolean;
+    readonly pinned: boolean;
 }
 
 /** One-time startup events the user should know about. */
@@ -130,6 +152,8 @@ export interface AppState {
     readonly locale: Locale;
     readonly notices: readonly StartupNotice[];
     readonly resumeAfterRestart: boolean;
+    /** The effective profile, and whether it is the default. */
+    readonly agent: AgentProfile & { readonly isDefault: boolean };
     readonly chatSlot?: ChatSlot;
     readonly userCardsDir: string;
     readonly plugins: readonly PluginInfo[];
@@ -150,6 +174,7 @@ export interface Results {
     'settings.locale': null;
     'settings.resumeAfterRestart': null;
     'settings.chatSlot': null;
+    'settings.agent': null;
     'credentials.save': { id: string };
     'credentials.remove': null;
     'catalog.reload': null;
@@ -159,6 +184,8 @@ export interface Results {
     'session.decide': null;
     'session.send': { deliveryId: string };
     'session.stop': null;
+    'session.pin': null;
+    'session.delete': null;
     'session.continue': null;
     'session.withdraw': null;
     'session.setThinking': null;

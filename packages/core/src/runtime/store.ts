@@ -217,6 +217,15 @@ export class Store {
     }
 
     /**
+     * Permanently delete a session's journal and projection, at the user's request. Refused
+     * while it has an active run or background jobs.
+     * @param sessionId The session.
+     */
+    async deleteSession(sessionId: string): Promise<void> {
+        await this.#request({ op: 'session.delete', sessionId });
+    }
+
+    /**
      * Read a JSON setting.
      * @param key Setting key.
      * @returns The stored value, or undefined.

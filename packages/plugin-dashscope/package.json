@@ -4,6 +4,7 @@
     "type": "module",
     "whim": {
         "host": "./dist/host.js",
+        "category": "models",
         "cards": "./cards",
         "locales": "./locales",
         "icon": "./icons/bailian.svg",

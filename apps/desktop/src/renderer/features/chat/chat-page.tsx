@@ -1,13 +1,15 @@
-import { BoxesIcon, MessageSquareIcon, PlayIcon, PlusIcon } from 'lucide-react';
+import { BoxesIcon, PlayIcon, PlusIcon } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { ActionButton } from '../../components/action-button';
+import { AgentAvatar } from '../../components/agent-avatar';
 import { call, ClientError } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 
 import { Composer } from './composer';
 import { modelChoices } from './model-choices';
+import { SessionList } from './session-list';
 import { Transcript } from './transcript';
 import { useSession } from './use-session';
 
@@ -23,7 +25,6 @@ import {
 } from '@/components/ui/empty';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
-import { cn } from '@/lib/utils';
 
 /**
  * Report a failed command as a toast.
@@ -107,35 +108,17 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                     </Button>
                 </div>
                 <ScrollArea className="min-h-0 flex-1">
-                    <nav
-                        className="flex flex-col gap-0.5 px-2 pb-3"
-                        aria-label={t('chat.sessions')}
-                    >
-                        {state.sessions.length === 0 && (
-                            <p className="text-muted-foreground px-2 py-1 text-xs">
-                                {t('chat.noSessions')}
-                            </p>
-                        )}
-                        {state.sessions.map(item => (
-                            <button
-                                key={item.sessionId}
-                                type="button"
-                                onClick={() => setSelected(item.sessionId)}
-                                aria-current={item.sessionId === selected ? 'page' : undefined}
-                                className={cn(
-                                    'hover:bg-accent focus-visible:ring-ring flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm outline-none focus-visible:ring-2',
-                                    item.sessionId === selected && 'bg-accent font-medium'
-                                )}
-                            >
-                                <MessageSquareIcon className="text-muted-foreground size-4 shrink-0" />
-                                <span className="min-w-0 flex-1 truncate">
-                                    {item.title || t('chat.untitled')}
-                                </span>
-                                {item.running && (
-                                    <span className="bg-primary size-1.5 shrink-0 animate-pulse rounded-full" />
-                                )}
-                            </button>
-                        ))}
+                    <nav className="flex flex-col px-2 pb-3" aria-label={t('chat.sessions')}>
+                        <SessionList
+                            sessions={state.sessions}
+                            selected={selected}
+                            onSelect={setSelected}
+                            onDeleted={sessionId =>
+                                setSelected(current =>
+                                    current === sessionId ? undefined : current
+                                )
+                            }
+                        />
                     </nav>
                 </ScrollArea>
             </aside>
@@ -171,9 +154,13 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                             />
                         ) : (
                             <div className="flex flex-1 items-center justify-center">
-                                <div className="text-center">
+                                <div className="flex flex-col items-center text-center">
+                                    <AgentAvatar
+                                        icon={state.agent.icon}
+                                        className="mb-4 size-14 rounded-2xl"
+                                    />
                                     <h1 className="text-2xl font-semibold tracking-tight">
-                                        {t('chat.empty.title')}
+                                        {t('chat.empty.title', { name: state.agent.name })}
                                     </h1>
                                     <p className="text-muted-foreground mt-1 text-sm">
                                         {t('chat.empty.description')}
@@ -208,6 +195,8 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                                 onSlotChange={changeSlot}
                                 onSend={send}
                                 workspace={view ? view.workspace : workspace}
+                                usage={view?.lastUsage}
+                                agentName={state.agent.name}
                                 {...(selected ? {} : { onWorkspaceChange: setWorkspace })}
                                 onStop={() =>
                                     view &&

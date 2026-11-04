@@ -263,7 +263,7 @@ export function Transcript({
                 {empty ? (
                     <ConversationEmptyState
                         icon={<MessageSquareIcon className="size-8" />}
-                        title={t('chat.empty.title')}
+                        title={t('chat.empty.start')}
                         description={t('chat.empty.description')}
                     />
                 ) : null}

@@ -322,6 +322,21 @@ function handle(request: Request): unknown {
                         running: value.running === 1,
                     };
                 });
+        case 'session.delete': {
+            const view = sessionView(request.sessionId);
+            if (view?.run || view?.jobs.length)
+                throw new StoreError('conflict', 'Stop the chat before deleting it.');
+            transaction(() => {
+                for (const sql of [
+                    'DELETE FROM journal WHERE session_id = ?',
+                    'DELETE FROM receipts WHERE session_id = ?',
+                    'DELETE FROM sessions WHERE id = ?',
+                ])
+                    db.prepare(sql).run(request.sessionId);
+            });
+            views.delete(request.sessionId);
+            return null;
+        }
         case 'setting.get': {
             const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(request.key);
             return row ? JSON.parse(z.object({ value: z.string() }).parse(row).value) : undefined;

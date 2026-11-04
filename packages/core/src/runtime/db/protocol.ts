@@ -47,6 +47,7 @@ export const requestSchema = z.discriminatedUnion('op', [
     z.strictObject({ id, op: z.literal('view'), sessionId: idSchema }),
     z.strictObject({ id, op: z.literal('sessions') }),
     z.strictObject({ id, op: z.literal('recovery-sessions') }),
+    z.strictObject({ id, op: z.literal('session.delete'), sessionId: idSchema }),
     z.strictObject({ id, op: z.literal('setting.get'), key: z.string().min(1) }),
     z.strictObject({
         id,

@@ -1,6 +1,7 @@
 import {
     BoxIcon,
     CheckIcon,
+    ChevronRightIcon,
     KeyRoundIcon,
     PencilIcon,
     PlusIcon,
@@ -20,6 +21,7 @@ import { pluginText } from '../../lib/messages';
 import { useAction } from '../../lib/use-action';
 import { modelChoices } from '../chat/model-choices';
 
+import { ModelDetail } from './model-detail';
 import { SchemaForm } from './schema-form';
 
 import type { FormValue } from './schema';
@@ -213,6 +215,12 @@ export function ModelSettings({ state }: { state: AppState }) {
     const choices = modelChoices(state, state.chatSlot?.credentialId);
     const defaultCard = state.chatSlot?.cardId ?? choices[0]?.card.id;
     const formatter = new Intl.NumberFormat(locale, { notation: 'compact' });
+    const [detail, setDetail] = useState<string | undefined>();
+    const detailEntry = state.catalog.find(entry => entry.id === detail);
+    if (detailEntry)
+        return (
+            <ModelDetail state={state} entry={detailEntry} onBack={() => setDetail(undefined)} />
+        );
 
     return (
         <div className="flex flex-col gap-6">
@@ -327,47 +335,46 @@ export function ModelSettings({ state }: { state: AppState }) {
                 </CardHeader>
                 <CardContent className="flex flex-col gap-2">
                     {state.catalog.map(entry => (
-                        <div key={entry.id} className="rounded-2xl border px-4 py-3">
-                            <div className="flex flex-wrap items-center gap-2">
+                        <button
+                            key={entry.id}
+                            type="button"
+                            onClick={() => setDetail(entry.id)}
+                            className="hover:bg-muted/60 focus-visible:ring-ring flex items-center gap-3 rounded-2xl border px-4 py-3 text-left outline-none focus-visible:ring-2"
+                        >
+                            <span className="bg-muted flex size-10 shrink-0 items-center justify-center rounded-xl">
                                 <EntityIcon
                                     src={entry.card ? modelIcon(state, entry.card) : undefined}
                                     fallback={BoxIcon}
-                                    className="size-5"
+                                    className="size-6"
                                 />
-                                <p className="text-sm font-medium">
-                                    {entry.card?.name ?? entry.id}
-                                </p>
-                                {entry.card && (
-                                    <code className="text-muted-foreground text-xs">
-                                        {entry.card.model}
-                                    </code>
-                                )}
-                                <span className="flex-1" />
-                                {entry.card && (
-                                    <span className="text-muted-foreground text-xs">
-                                        {t('models.context', {
-                                            tokens: formatter.format(entry.card.contextWindow),
-                                        })}
+                            </span>
+                            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                                <span className="flex items-center gap-2">
+                                    <span className="truncate text-sm font-medium">
+                                        {entry.card?.name ?? entry.id}
                                     </span>
-                                )}
-                                <Badge variant="secondary">
-                                    {t(`models.layer.${entry.layer}`)}
-                                </Badge>
-                                {entry.hidden && (
-                                    <Badge variant="outline">{t('models.hidden')}</Badge>
-                                )}
-                                {entry.issues.length > 0 && (
-                                    <Badge variant="destructive">{t('models.invalid')}</Badge>
-                                )}
-                            </div>
-                            {entry.issues.length > 0 && (
-                                <ul className="text-destructive mt-1 list-disc pl-5 text-xs">
-                                    {entry.issues.map(issue => (
-                                        <li key={issue}>{issue}</li>
-                                    ))}
-                                </ul>
-                            )}
-                        </div>
+                                    {entry.issues.length > 0 && (
+                                        <Badge variant="destructive">{t('models.invalid')}</Badge>
+                                    )}
+                                    {entry.hidden && (
+                                        <Badge variant="outline">{t('models.hidden')}</Badge>
+                                    )}
+                                </span>
+                                <span className="text-muted-foreground truncate text-xs">
+                                    {[
+                                        entry.card?.model,
+                                        entry.card &&
+                                            t('models.context', {
+                                                tokens: formatter.format(entry.card.contextWindow),
+                                            }),
+                                        t(`models.layer.${entry.layer}`),
+                                    ]
+                                        .filter(Boolean)
+                                        .join(' · ')}
+                                </span>
+                            </span>
+                            <ChevronRightIcon className="text-muted-foreground size-4 shrink-0" />
+                        </button>
                     ))}
                 </CardContent>
             </Card>

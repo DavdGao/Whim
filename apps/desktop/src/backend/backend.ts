@@ -19,6 +19,7 @@ import {
 import { z } from 'zod';
 
 import {
+    agentProfileSchema,
     chatSlotSchema,
     localeSchema,
     methodSchemas,
@@ -26,6 +27,7 @@ import {
 } from '../shared/ipc.js';
 
 import type {
+    AgentProfile,
     AppState,
     BackendEvent,
     ChatSlot,
@@ -40,19 +42,27 @@ import type { MessagePortMain } from 'electron';
 
 const parentPort = process.parentPort;
 const maxConcurrentRuns = 4;
-const basePrompt = 'You are Whim, a helpful assistant. Answer clearly and concisely.';
+const defaultProfile: AgentProfile = {
+    name: 'Whim',
+    systemPrompt: 'You are {name}, a helpful assistant. Answer clearly and concisely.',
+};
 
 /**
- * The system prompt of a new epoch: base instructions plus the environment as observed now.
- * Frozen with the epoch; it changes only at compaction or a model switch.
+ * The system prompt of a new epoch: the profile's instructions plus the environment as
+ * observed now. Frozen with the epoch; it changes only at compaction or a model switch.
+ * @param profile The agent profile; `{name}` in its prompt becomes the agent's name.
  * @param workspace The session's workspace.
  * @param tools Whether any tools are offered.
  * @returns The prompt.
  */
-function systemPrompt(workspace: string | undefined, tools: boolean): string {
+function systemPrompt(
+    profile: AgentProfile,
+    workspace: string | undefined,
+    tools: boolean
+): string {
     const now = new Date();
     const lines = [
-        basePrompt,
+        profile.systemPrompt.replaceAll('{name}', profile.name),
         '',
         `<environment observed-at="${now.toISOString()}">`,
         `Date: ${now.toISOString().slice(0, 10)}`,
@@ -283,6 +293,12 @@ class Backend {
                 );
                 this.#emit({ type: 'state' });
                 return null;
+            case 'settings.agent': {
+                const { profile } = methodSchemas[method].parse(raw);
+                await this.store.setSetting('agent.profile', profile);
+                this.#emit({ type: 'state' });
+                return null;
+            }
             case 'settings.chatSlot':
                 await this.store.setSetting('slot.chat', methodSchemas[method].parse(raw).slot);
                 this.#emit({ type: 'state' });
@@ -329,6 +345,26 @@ class Backend {
             case 'session.stop':
                 await this.stop(methodSchemas[method].parse(raw).sessionId, 'user');
                 return null;
+            case 'session.pin': {
+                const params = methodSchemas[method].parse(raw);
+                const pinned = (await this.#pinned()).filter(id => id !== params.sessionId);
+                await this.store.setSetting(
+                    'sessions.pinned',
+                    params.pinned ? [params.sessionId, ...pinned] : pinned
+                );
+                this.#emit({ type: 'state' });
+                return null;
+            }
+            case 'session.delete': {
+                const { sessionId } = methodSchemas[method].parse(raw);
+                await this.store.deleteSession(sessionId);
+                await this.store.setSetting(
+                    'sessions.pinned',
+                    (await this.#pinned()).filter(id => id !== sessionId)
+                );
+                this.#emit({ type: 'state' });
+                return null;
+            }
             case 'session.continue':
                 this.schedule(methodSchemas[method].parse(raw).sessionId, 'continue');
                 return null;
@@ -366,6 +402,11 @@ class Backend {
     async state(): Promise<AppState> {
         const locale = localeSchema.safeParse(await this.store.getSetting('locale'));
         const slot = chatSlotSchema.safeParse(await this.store.getSetting('slot.chat'));
+        const savedProfile = agentProfileSchema.safeParse(
+            await this.store.getSetting('agent.profile')
+        ).success;
+        const profile = await this.#profile();
+        const pinned = await this.#pinned();
         return {
             locale: locale.success ? locale.data : 'en',
             notices: this.store.movedAside
@@ -385,6 +426,16 @@ class Backend {
                 locales: status.locales,
                 ...(status.icon ? { icon: status.icon } : {}),
                 icons: status.icons,
+                category: status.category,
+                adapters: [...this.host.chatAdapters.values()].filter(
+                    entry => entry.pluginId === status.id
+                ).length,
+                credentialTypes: [...this.host.credentialTypes.values()].filter(
+                    entry => entry.pluginId === status.id
+                ).length,
+                tools: [...this.host.tools.values()]
+                    .filter(entry => entry.pluginId === status.id)
+                    .map(entry => entry.tool.name),
             })),
             credentialTypes: [...this.host.credentialTypes.values()].map(entry => ({
                 id: entry.type.id,
@@ -398,6 +449,7 @@ class Backend {
             })),
             catalog: this.catalog.entries(),
             credentials: await this.credentials.list(),
+            agent: { ...profile, isDefault: !savedProfile },
             sessions: (await this.store.sessions()).map(session => ({
                 sessionId: session.sessionId,
                 title: session.title,
@@ -405,6 +457,7 @@ class Backend {
                 createdAt: session.createdAt,
                 updatedAt: session.updatedAt,
                 running: session.running,
+                pinned: pinned.includes(session.sessionId),
             })),
         };
     }
@@ -436,16 +489,35 @@ class Backend {
     }
 
     /**
+     * The saved agent profile, or the default.
+     * @returns The profile.
+     */
+    async #profile(): Promise<AgentProfile> {
+        const saved = agentProfileSchema.safeParse(await this.store.getSetting('agent.profile'));
+        return saved.success ? saved.data : defaultProfile;
+    }
+
+    /**
+     * Pinned session ids, most recently pinned first.
+     * @returns The ids.
+     */
+    async #pinned(): Promise<string[]> {
+        const saved = z.array(z.string()).safeParse(await this.store.getSetting('sessions.pinned'));
+        return saved.success ? saved.data : [];
+    }
+
+    /**
      * The tool set and prompt of a new epoch.
      * @param card The card the epoch uses.
      * @param workspace The session's workspace.
      * @returns Epoch fields.
      */
-    #epoch(card: ChatCard, workspace: string | undefined) {
+    async #epoch(card: ChatCard, workspace: string | undefined) {
         const tools = this.tools.declarations(workspace, card.nativeTools);
+        const profile = await this.#profile();
         return {
             epochId: randomUUID(),
-            system: systemPrompt(workspace, tools.length + card.nativeTools.length > 0),
+            system: systemPrompt(profile, workspace, tools.length + card.nativeTools.length > 0),
             card: freeze(card),
             renderer: rendererVersion,
             tools,
@@ -475,7 +547,7 @@ class Backend {
             credentialId: slot.credentialId,
             ...(slot.thinking ? { thinking: slot.thinking } : {}),
             ...(workspace ? { workspace } : {}),
-            epoch: this.#epoch(card, workspace),
+            epoch: await this.#epoch(card, workspace),
         });
         await this.store.setSetting('slot.chat', slot);
         return sessionId;
@@ -497,7 +569,7 @@ class Backend {
             sessionId,
             operationId: randomUUID(),
             // The prefix changes with the model anyway, so the tool set and environment refresh.
-            epoch: this.#epoch(card, view.workspace),
+            epoch: await this.#epoch(card, view.workspace),
         });
         if (credentialId !== view.credentialId)
             await this.store.execute({

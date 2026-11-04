@@ -24,7 +24,7 @@ A session's state is the fold of its journal:
 - **Runs** — one active run at most. A run is a sequence of steps; each step makes one or more model attempts.
 - **Jobs** — tool executions owned by Core's Job service, referenced from history.
 
-A session may have a **workspace**: a directory the user picks when creating it, fixed for the session's life. Workspace tools are offered only with a workspace, and the epoch's system prompt states the workspace path, platform, and date as of the epoch's start.
+A session may have a **workspace**: a directory the user picks when creating it, fixed for the session's life. Workspace tools are offered only with a workspace, and the epoch's system prompt is the user's agent profile (name and instructions from Settings) followed by the workspace path, platform, and date as of the epoch's start. Profile edits therefore reach a session only at its next epoch.
 
 The journal head (latest seq), the epoch, and the run generation are separate values. New input advances the head without invalidating an in-flight step.
 
