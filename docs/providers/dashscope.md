@@ -8,6 +8,7 @@ Verified facts used by `@whimkit/plugin-dashscope`. Re-verify before changing th
 | ------------------------------------------------------------------------------------------------ | ------------ | ---------- |
 | [Responses API](https://www.alibabacloud.com/help/zh/model-studio/qwen-api-via-openai-responses) | 2026-10-29   | 2026-11-04 |
 | [Error codes](https://www.alibabacloud.com/help/zh/model-studio/error-code)                      | 2026-11-04   | 2026-11-04 |
+| [Web extractor](https://help.aliyun.com/zh/model-studio/web-extractor)                           | —            | 2026-11-05 |
 
 ## Endpoint
 
@@ -36,7 +37,7 @@ Listed with full Responses support (built-in tools): `qwen3.8-max`, `qwen3.8-fla
 
 Whim mapping: `web_search → web_search`, `web_fetch → web_extractor`. `code_interpreter` is a plugin-namespaced native tool.
 
-- The documentation states only that `web_extractor` requires `web_search`. The live service also rejects it in non-thinking mode: with `reasoning.effort: none`, `qwen3.8-max` returned `400 InternalError.Algo.InvalidParameter: Normal mode does not support web_extractor. Please set enable_thinking to true.` (observed 2026-11-05). The adapter omits `web_extractor` from requests whose thinking level maps to `none`; web search stays available.
+- `web_extractor` requires `web_search` and thinking mode (Web extractor page: "必须开启思考模式"). With `reasoning.effort: none`, `qwen3.8-max` returns `400 InternalError.Algo.InvalidParameter: Normal mode does not support web_extractor. Please set enable_thinking to true.` (observed 2026-11-05). The adapter omits `web_extractor` from requests whose thinking level maps to `none`; web search stays available.
 - The documentation requires thinking mode for `code_interpreter` on `qwen3.8-max`, `qwen3.8-flash`, and `qwen3.7-max` variants.
 
 ## Streaming and state
