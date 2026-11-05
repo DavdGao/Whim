@@ -1,4 +1,4 @@
-import { CheckIcon, CopyIcon, MessageSquareIcon, XIcon } from 'lucide-react';
+import { ArchiveIcon, CheckIcon, CopyIcon, MessageSquareIcon, XIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -15,6 +15,7 @@ import { NativeToolView, ToolCallView } from './tool-call';
 import type { Draft } from './use-session';
 import type {
     Block,
+    Compaction,
     Failure,
     MediaBlock,
     Notice,
@@ -41,6 +42,7 @@ import {
     TraceCollapsible,
     TraceCollapsibleContent,
     TraceCollapsibleTrigger,
+    TraceIcon,
     TraceLine,
     TraceTitle,
 } from '@/components/ui/trace';
@@ -230,7 +232,7 @@ function Bubble({
                     {!text ? null : role === 'assistant' ? (
                         <Markdown plugins={{ math: mathPlugin }}>{normalizeMath(text)}</Markdown>
                     ) : (
-                        <p className="whitespace-pre-wrap">{text}</p>
+                        <p className="wrap-anywhere whitespace-pre-wrap">{text}</p>
                     )}
                     {hasContent(children) ? <Trace>{children}</Trace> : null}
                     {assistant && !streaming && text && <CopyAction text={text} />}
@@ -252,6 +254,48 @@ function Bubble({
                 </MessageContent>
             </Message>
         </>
+    );
+}
+
+/**
+ * Where the conversation was compacted: running, the summary to expand, or a failure.
+ * @param props Line props.
+ * @param props.compaction The compaction.
+ * @returns The line.
+ */
+function CompactionLine({ compaction }: { compaction: Compaction }) {
+    const { t } = useT();
+    if (compaction.state !== 'succeeded')
+        return (
+            <Trace>
+                <TraceLine status={compaction.state === 'running' ? 'running' : 'error'}>
+                    <TraceIcon>
+                        <ArchiveIcon />
+                    </TraceIcon>
+                    <TraceTitle>
+                        {compaction.state === 'running'
+                            ? t('chat.compacting')
+                            : t('chat.compactFailed')}
+                    </TraceTitle>
+                </TraceLine>
+            </Trace>
+        );
+    return (
+        <Trace>
+            <TraceCollapsible>
+                <TraceCollapsibleTrigger>
+                    <TraceLine>
+                        <TraceIcon>
+                            <ArchiveIcon />
+                        </TraceIcon>
+                        <TraceTitle>{t('chat.compacted')}</TraceTitle>
+                    </TraceLine>
+                </TraceCollapsibleTrigger>
+                <TraceCollapsibleContent>
+                    <Markdown className="text-sm">{compaction.summary ?? ''}</Markdown>
+                </TraceCollapsibleContent>
+            </TraceCollapsible>
+        </Trace>
     );
 }
 
@@ -348,7 +392,13 @@ export function Transcript({
                         description={t('chat.empty.description')}
                     />
                 ) : null}
-                {view.history.map(entry =>
+                {view.history.map(entry => [
+                    // A succeeded compaction sits where the history it summarized ends.
+                    ...view.compactions
+                        .filter(compaction => compaction.from === entry.seq)
+                        .map(compaction => (
+                            <CompactionLine key={compaction.compactionId} compaction={compaction} />
+                        )),
                     entry.item.type === 'message' ? (
                         <Bubble
                             key={entry.item.id}
@@ -389,8 +439,13 @@ export function Transcript({
                         </Bubble>
                     ) : entry.item.type === 'notice' ? (
                         <NoticeLine key={entry.item.id} notice={entry.item} />
-                    ) : null
-                )}
+                    ) : null,
+                ])}
+                {view.compactions
+                    .filter(compaction => compaction.state !== 'succeeded')
+                    .map(compaction => (
+                        <CompactionLine key={compaction.compactionId} compaction={compaction} />
+                    ))}
                 {pending.map(item =>
                     item.item.type === 'notice' ? (
                         <NoticeLine key={item.deliveryId} notice={item.item} />

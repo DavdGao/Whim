@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { CompiledSchema, PluginHost, Store, ToolRuntime } from '@whimkit/core';
 import { ApplicationError } from '@whimkit/core/contracts';
@@ -323,6 +323,71 @@ describe('Agent', () => {
         assert.equal(requests.length, 0);
         const result = (await store.view(sessionId)).lastRun?.result;
         assert.equal(result?.outcome === 'failed' && result.failure.category, 'context-limit');
+    });
+
+    it('compacts the history before the latest input once the threshold is passed', async () => {
+        const long = (letter: string) => letter.repeat(600);
+        const { models, requests } = scripted(async function* (request) {
+            yield {
+                type: 'text-delta',
+                text: request.system.startsWith('You compact') ? 'SUMMARY' : long('a'),
+            };
+            yield { type: 'completed', usage: { inputTokens: 5, outputTokens: 1 } };
+        }, 400);
+        const transcripts = join(dir, 'transcripts');
+        const agent = new Agent(store, models, noTools, {
+            sleep: noSleep,
+            compaction: {
+                transcriptPath: (sessionId, compactionId) =>
+                    join(transcripts, sessionId, `${compactionId}.md`),
+                epoch: async view => ({
+                    epochId: randomUUID(),
+                    system: view.epoch.system,
+                    card: view.epoch.card,
+                    renderer: view.epoch.renderer,
+                    tools: [...view.epoch.tools],
+                    nativeTools: [...view.epoch.nativeTools],
+                    providerTools: [...view.epoch.providerTools],
+                }),
+            },
+        });
+        const sessionId = await sessionWith(long('u'));
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        await say(sessionId, long('v'));
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+
+        const view = await store.view(sessionId);
+        const latest = view.history.findLast(
+            entry => entry.item.type === 'message' && entry.item.role === 'user'
+        );
+        assert.equal(view.epoch.reason, 'compaction');
+        assert.deepEqual(
+            view.compactions.map(item => [item.state, item.summary]),
+            [['succeeded', 'SUMMARY']]
+        );
+        assert.equal(view.epoch.context?.from, latest?.seq);
+        const transcript = await readFile(
+            fileURLToPath(view.epoch.context?.transcript ?? 'file:///missing'),
+            'utf8'
+        );
+        assert.equal(transcript, `### User\n${long('u')}\n\n### Assistant\n${long('a')}\n`);
+        // The summary call sees the transcript; the answer after it sees the summary and the input.
+        assert.deepEqual(
+            requests.map(request => request.messages.length),
+            [1, 1, 2]
+        );
+        const last = requests.at(-1);
+        assert.match(
+            last?.messages[0]?.role === 'user' && last.messages[0].blocks[0]?.type === 'text'
+                ? last.messages[0].blocks[0].text
+                : '',
+            /^<system-reminder>The earlier part of this conversation was compacted[\s\S]*SUMMARY<\/system-reminder>$/
+        );
+        assert.deepEqual(last?.messages[1], {
+            role: 'user',
+            blocks: [{ type: 'text', text: long('v') }],
+        });
+        assert.deepEqual(view.usage, { inputTokens: 15, outputTokens: 3 });
     });
 
     describe('tools', () => {

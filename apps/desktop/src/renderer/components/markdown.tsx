@@ -165,15 +165,18 @@ const linkSafety = {
  * links, math); everything with its own chrome is a shadcn component instead of Streamdown's:
  * code blocks, tables, and the link confirmation. Streamdown's controls are off.
  * @param props Streamdown props.
+ * @param props.className Extra classes.
  * @returns The rendered Markdown.
  */
-export function Markdown(props: ComponentProps<typeof MessageResponse>) {
+export function Markdown({ className, ...props }: ComponentProps<typeof MessageResponse>) {
     return (
         <MessageResponse
             components={components}
             controls={false}
             linkSafety={linkSafety}
             {...props}
+            // Long unbroken strings (hashes, URLs) wrap instead of widening the message.
+            className={cn('wrap-anywhere', className)}
         />
     );
 }

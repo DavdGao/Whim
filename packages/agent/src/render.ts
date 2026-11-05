@@ -1,4 +1,11 @@
-import type { HistoryEntry, MediaBlock, Notice, ToolResult } from '@whimkit/core/contracts';
+import type {
+    EpochContext,
+    HistoryEntry,
+    MediaBlock,
+    Notice,
+    SessionView,
+    ToolResult,
+} from '@whimkit/core/contracts';
 import type { ChatRequestMessage, InlineMedia, RequestBlock } from '@whimkit/core/plugin';
 
 /** Version of the notice renderer; recorded in each epoch because it shapes the prompt. */
@@ -199,4 +206,84 @@ export function estimateTokens(
     }
     // UTF-8 bytes / 3 overestimates English and roughly matches CJK (3 bytes per character).
     return Math.ceil(bytes / 3);
+}
+
+/**
+ * The request messages of the current epoch: after a compaction, a reminder carrying the summary
+ * and the transcript's `file:` URI, then the history the summary does not cover.
+ * @param view The session view.
+ * @param media Media policy of the session's model.
+ * @returns Messages in order.
+ */
+export async function epochMessages(
+    view: SessionView,
+    media: MediaPolicy
+): Promise<ChatRequestMessage[]> {
+    const context = view.epoch.context;
+    if (!context) return toRequestMessages(view.history, media);
+    const messages = await toRequestMessages(
+        view.history.filter(entry => entry.seq >= context.from),
+        media
+    );
+    return [
+        { role: 'user', blocks: [{ type: 'text', text: summaryReminder(context) }] },
+        ...messages,
+    ];
+}
+
+/**
+ * How a compacted epoch opens.
+ * @param context The epoch's compaction context.
+ * @returns The reminder text.
+ */
+export function summaryReminder(context: EpochContext): string {
+    return `<system-reminder>The earlier part of this conversation was compacted to save context. Its full transcript is at ${context.transcript}; Read it when you need exact earlier details.\n\nSummary of the earlier conversation:\n${context.summary}</system-reminder>`;
+}
+
+/**
+ * Plain-text transcript of history entries, written to the session folder before a compaction
+ * and given to the summary call. Media appear as references or, for text files, their content.
+ * Reasoning and opaque provider state are left out.
+ * @param history The entries to transcribe.
+ * @returns Markdown text.
+ */
+export function transcriptText(history: readonly HistoryEntry[]): string {
+    const parts: string[] = [];
+    for (const { item } of history) {
+        if (item.type === 'notice') {
+            parts.push(`### Notice\n${renderNotice(item)}`);
+            continue;
+        }
+        if (item.type === 'tool_result') {
+            parts.push(
+                [
+                    `### Tool result (${item.name}, ${item.status})`,
+                    item.content,
+                    ...(item.media ?? []).map(mediaReference),
+                ]
+                    .filter(Boolean)
+                    .join('\n')
+            );
+            continue;
+        }
+        const lines: string[] = [];
+        for (const block of item.blocks) {
+            if (block.type === 'text') lines.push(block.text);
+            else if (block.type === 'media')
+                lines.push(
+                    block.text !== undefined
+                        ? textFile({ ...block, text: block.text })
+                        : mediaReference(block)
+                );
+            else if (block.type === 'tool_call')
+                lines.push(`[Called ${block.name} with ${block.arguments}]`);
+            else if (block.type === 'native_tool_call')
+                lines.push(
+                    `[Provider ${block.tool}${block.query ? `: ${block.query}` : ''}${block.urls?.length ? ` (${block.urls.join(', ')})` : ''}]`
+                );
+        }
+        if (lines.length)
+            parts.push(`### ${item.role === 'user' ? 'User' : 'Assistant'}\n${lines.join('\n')}`);
+    }
+    return parts.join('\n\n');
 }

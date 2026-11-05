@@ -8,6 +8,7 @@ import {
     accessSchema,
     attemptResultSchema,
     contextItemSchema,
+    epochContextSchema,
     placementSchema,
     runResultSchema,
     toolDeclarationSchema,
@@ -47,6 +48,7 @@ const epochInput = {
     tools: z.array(toolDeclarationSchema),
     nativeTools: z.array(z.string()),
     providerTools: z.array(z.string()).default([]),
+    context: epochContextSchema.optional(),
 };
 
 export const commandSchema = z.discriminatedUnion('type', [
@@ -75,6 +77,25 @@ export const commandSchema = z.discriminatedUnion('type', [
         thinking: thinkingLevelSchema.nullable().optional(),
     }),
     z.strictObject({ ...base, type: z.literal('switch-model'), epoch: z.strictObject(epochInput) }),
+    z.strictObject({
+        ...base,
+        type: z.literal('start-compaction'),
+        runId: idSchema,
+        compactionId: idSchema,
+    }),
+    z.strictObject({
+        ...base,
+        type: z.literal('finish-compaction'),
+        compactionId: idSchema,
+        usage: usageSchema,
+        result: z.discriminatedUnion('status', [
+            z.strictObject({
+                status: z.literal('succeeded'),
+                epoch: z.strictObject({ ...epochInput, context: epochContextSchema }),
+            }),
+            z.strictObject({ status: z.literal('failed'), failure: failureSchema }),
+        ]),
+    }),
     z.strictObject({
         ...base,
         type: z.literal('set-workspace'),
@@ -246,6 +267,35 @@ export function decide(view: SessionView | null, command: Command): Body[] {
                     },
                 },
             ];
+        }
+        case 'start-compaction':
+            requireActive(view, command.runId);
+            if (view.compactions.some(item => item.state === 'running'))
+                throw new StoreError('conflict', 'A compaction is already running.');
+            return [
+                {
+                    type: 'compaction.started',
+                    compactionId: command.compactionId,
+                    runId: command.runId,
+                },
+            ];
+        case 'finish-compaction': {
+            const running = view.compactions.find(
+                item => item.compactionId === command.compactionId && item.state === 'running'
+            );
+            if (!running) throw new StoreError('conflict', 'The compaction is not running.');
+            const finished = {
+                type: 'compaction.finished' as const,
+                compactionId: command.compactionId,
+                usage: command.usage,
+            };
+            // The new prefix and the outcome commit together, so a crash leaves either both or neither.
+            return command.result.status === 'succeeded'
+                ? [
+                      { type: 'epoch.started', reason: 'compaction', ...command.result.epoch },
+                      { ...finished, outcome: 'succeeded' },
+                  ]
+                : [{ ...finished, outcome: 'failed', failure: command.result.failure }];
         }
         case 'switch-model':
             if (run) throw new StoreError('conflict', 'The model cannot change during a run.');

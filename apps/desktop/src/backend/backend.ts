@@ -248,7 +248,28 @@ class Backend {
             join(userData, 'artifacts'),
             sessionId => this.schedule(sessionId, 'job')
         );
-        this.agent = new Agent(store, models, this.tools);
+        this.agent = new Agent(store, models, this.tools, {
+            compaction: {
+                transcriptPath: (sessionId, compactionId) =>
+                    join(this.tools.sessionDir(sessionId), 'history', `${compactionId}.md`),
+                // A compaction refreshes the prefix like a model switch: current profile, tools,
+                // and card revision; a card that is no longer available keeps the frozen one.
+                epoch: async view => {
+                    const card = this.catalog.card(view.epoch.card.id);
+                    return card
+                        ? this.#epoch(card, view.sessionId, view.workspace)
+                        : {
+                              epochId: randomUUID(),
+                              system: view.epoch.system,
+                              card: view.epoch.card,
+                              renderer: view.epoch.renderer,
+                              tools: [...view.epoch.tools],
+                              nativeTools: [...view.epoch.nativeTools],
+                              providerTools: [...view.epoch.providerTools],
+                          };
+                },
+            },
+        });
         store.onCommit(records => {
             const sessionId = records[0]?.sessionId;
             if (sessionId) this.#emit({ type: 'records', sessionId, records });
@@ -681,7 +702,11 @@ class Backend {
             sessionId,
             operationId: randomUUID(),
             // The prefix changes with the model anyway, so the tool set and environment refresh.
-            epoch: await this.#epoch(card, sessionId, view.workspace),
+            // A summarized history stays summarized under the new model.
+            epoch: {
+                ...(await this.#epoch(card, sessionId, view.workspace)),
+                ...(view.epoch.context ? { context: view.epoch.context } : {}),
+            },
         });
         if (credentialId !== view.credentialId)
             await this.store.execute({

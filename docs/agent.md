@@ -161,14 +161,15 @@ Revocation is immediate regardless of the cache: a disabled tool fails its call 
 
 ## 8. Compaction
 
-Triggers: the estimated next request exceeds the threshold (80% of the card's context window, the point the composer's context ring fills toward), a `context-limit` failure, or an explicit user request.
+Compaction is automatic; there is no manual trigger. Before a step sends its request, the agent estimates its size; above the threshold (the smaller of the adapter's `inputBudget` and 80% of the card's context window, the point the composer's context ring fills toward) it compacts first, at most once per step.
 
-1. Commit `compaction.started`. The UI shows progress.
-2. Run a summary attempt with the `compaction` slot model over the current history. Its usage is recorded.
-3. Take fresh snapshots of all sources and the current tool set and session model.
-4. Commit atomically: `epoch.started` (new prefix with snapshots and timestamps, summary as the first history item) and `compaction.finished { succeeded }`.
+1. Cut at the latest input (user message or notice) after the epoch's start: that input and everything after it stay verbatim; the history before it, back to the previous cut, is compacted. With nothing before the input, there is nothing to compact.
+2. Offload: write that history as a plain-text transcript to `sessions/<id>/history/<compactionId>.md` before anything refers to it. Media appear as `<data id uri media_type/>` references and text files with their content, so multimodal history stays retrievable; the file names the previous transcript when there is one.
+3. Commit `compaction.started`; the UI shows progress.
+4. Summarize with the session's own model in a separate call: a fixed compaction prompt, the previous summary, and the transcript (its newest part when it would not fit). Its usage is committed with `compaction.finished` and counts toward the session's usage, not its context.
+5. Commit atomically: `epoch.started { reason: 'compaction', context: { summary, from, transcript } }` with a fresh prefix (current profile, tools, and card revision) and `compaction.finished { succeeded }`. Compaction is the only epoch change allowed during a run.
 
-On failure or cancellation, `compaction.finished { failed }` is committed and the old epoch stays. Deliveries accepted during compaction remain pending. Original records are never deleted; the UI shows a divider with the summary expandable, and older history stays readable.
+Requests of a compacted epoch start with a reminder carrying the summary and the transcript's `file:` URI (the model can `Read` it), followed by history from `from` on. A model switch carries the context forward. On failure or cancellation, `compaction.finished { failed }` is committed and the old epoch stays; the step then proceeds or fails on the budget. Original records are never deleted: the UI keeps older history readable and shows a line where the summarized part ends, which expands to the summary.
 
 ### 8.1 Model switch
 
