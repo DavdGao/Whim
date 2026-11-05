@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 import { ApplicationError, selectableLevels } from '@whimkit/core/contracts';
 
@@ -47,6 +49,8 @@ export interface AgentOptions {
     readonly idleTimeoutMs?: number;
     readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
     readonly random?: () => number;
+    /** Read stored media by `file:` URI; the file system by default. */
+    readonly readMedia?: (uri: string) => Promise<Uint8Array>;
 }
 
 /**
@@ -120,6 +124,7 @@ export class Agent {
     readonly #idleTimeoutMs: number;
     readonly #sleep: (ms: number, signal: AbortSignal) => Promise<void>;
     readonly #random: () => number;
+    readonly #readMedia: (uri: string) => Promise<Uint8Array>;
 
     /**
      * Create an agent over its ports.
@@ -138,6 +143,7 @@ export class Agent {
         this.#idleTimeoutMs = options.idleTimeoutMs ?? 120_000;
         this.#sleep = options.sleep ?? abortableSleep;
         this.#random = options.random ?? Math.random;
+        this.#readMedia = options.readMedia ?? (uri => readFile(fileURLToPath(uri)));
     }
 
     /**
@@ -259,16 +265,21 @@ export class Agent {
             view.thinking && levels.includes(view.thinking)
                 ? view.thinking
                 : defaultLevel(card.thinking);
-        const request: ChatRequest = {
-            system: view.epoch.system,
-            messages: toRequestMessages(view.history),
-            ...(thinking ? { thinking } : {}),
-            tools: view.epoch.tools,
-            nativeTools: view.epoch.nativeTools,
-        };
         let session: ChatSession;
+        let request: ChatRequest;
         try {
             session = await this.models.open(card, view.credentialId);
+            request = {
+                system: view.epoch.system,
+                messages: await toRequestMessages(view.history, {
+                    accepts: mediaType => mediaType in card.input,
+                    inToolResults: session.toolResultMedia ?? [],
+                    read: this.#readMedia,
+                }),
+                ...(thinking ? { thinking } : {}),
+                tools: view.epoch.tools,
+                nativeTools: view.epoch.nativeTools,
+            };
         } catch (error) {
             return { kind: 'failed', failure: toFailure(error) };
         }

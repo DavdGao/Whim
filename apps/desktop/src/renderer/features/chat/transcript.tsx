@@ -9,12 +9,14 @@ import { useT } from '../../lib/i18n';
 
 import { FailureNotice } from './failure-notice';
 import { mathPlugin, normalizeMath } from './math';
+import { MediaView } from './media-view';
 import { NativeToolView, ToolCallView } from './tool-call';
 
 import type { Draft } from './use-session';
 import type {
     Block,
     Failure,
+    MediaBlock,
     Notice,
     SessionView,
     ToolResult,
@@ -68,6 +70,15 @@ function reasoningTime(blocks: readonly Block[]): { reasoningMs?: number } {
     return block?.type === 'reasoning' && block.durationMs !== undefined
         ? { reasoningMs: block.durationMs }
         : {};
+}
+
+/**
+ * The media blocks of a message.
+ * @param blocks Message blocks.
+ * @returns Its attachments.
+ */
+function mediaOf(blocks: readonly Block[]): MediaBlock[] {
+    return blocks.filter(block => block.type === 'media');
 }
 
 /**
@@ -213,6 +224,9 @@ function ReasoningLine({
  * @param props.children Tool calls shown after the text.
  * @param props.leading Provider-executed calls, which happen before the answer text.
  * @param props.usage The chat's token usage, shown under the last answer only.
+ * @param props.media Files attached to the message, with the session that stores them.
+ * @param props.media.sessionId
+ * @param props.media.blocks
  * @returns The message.
  */
 function Bubble({
@@ -226,6 +240,7 @@ function Bubble({
     children,
     leading,
     usage,
+    media,
 }: {
     role: 'user' | 'assistant';
     text: string;
@@ -237,56 +252,62 @@ function Bubble({
     children?: ReactNode;
     leading?: ReactNode;
     usage?: Usage;
+    media?: { sessionId: string; blocks: readonly MediaBlock[] };
 }) {
     const { t } = useT();
     const assistant = role === 'assistant';
     return (
         // Answers take the full width so short text above a code block does not narrow it.
-        <Message from={role} className={assistant ? 'max-w-full' : undefined}>
-            <MessageContent className={assistant ? 'w-full' : undefined}>
-                {reasoning || hasContent(leading) ? (
-                    <Trace>
-                        {reasoning ? (
-                            <ReasoningLine
-                                text={reasoning}
-                                running={Boolean(streaming && !text)}
-                                {...(reasoningMs !== undefined
-                                    ? { seconds: Math.max(1, Math.ceil(reasoningMs / 1000)) }
-                                    : {})}
-                            />
-                        ) : null}
-                        {leading}
-                    </Trace>
-                ) : null}
-                {role === 'assistant' && !text ? null : role === 'assistant' ? (
-                    <Markdown plugins={{ math: mathPlugin }}>{normalizeMath(text)}</Markdown>
-                ) : (
-                    <p className="whitespace-pre-wrap">{text}</p>
-                )}
-                {hasContent(children) ? <Trace>{children}</Trace> : null}
-                {assistant && !streaming && (text || usage) && (
-                    <div className="flex items-center gap-2">
-                        {text && <CopyAction text={text} />}
-                        {usage && <ChatUsage usage={usage} />}
-                    </div>
-                )}
-                {(badge || onRemove) && (
-                    <div className="flex items-center gap-2">
-                        {badge && <Badge variant="secondary">{badge}</Badge>}
-                        {onRemove && (
-                            <ActionButton
-                                size="xs"
-                                variant="ghost"
-                                icon={<XIcon />}
-                                action={onRemove}
-                            >
-                                {t('chat.withdraw')}
-                            </ActionButton>
-                        )}
-                    </div>
-                )}
-            </MessageContent>
-        </Message>
+        <>
+            {media && media.blocks.length > 0 && (
+                <MediaView sessionId={media.sessionId} media={media.blocks} />
+            )}
+            <Message from={role} className={assistant ? 'max-w-full' : undefined}>
+                <MessageContent className={assistant ? 'w-full' : undefined}>
+                    {reasoning || hasContent(leading) ? (
+                        <Trace>
+                            {reasoning ? (
+                                <ReasoningLine
+                                    text={reasoning}
+                                    running={Boolean(streaming && !text)}
+                                    {...(reasoningMs !== undefined
+                                        ? { seconds: Math.max(1, Math.ceil(reasoningMs / 1000)) }
+                                        : {})}
+                                />
+                            ) : null}
+                            {leading}
+                        </Trace>
+                    ) : null}
+                    {!text ? null : role === 'assistant' ? (
+                        <Markdown plugins={{ math: mathPlugin }}>{normalizeMath(text)}</Markdown>
+                    ) : (
+                        <p className="whitespace-pre-wrap">{text}</p>
+                    )}
+                    {hasContent(children) ? <Trace>{children}</Trace> : null}
+                    {assistant && !streaming && (text || usage) && (
+                        <div className="flex items-center gap-2">
+                            {text && <CopyAction text={text} />}
+                            {usage && <ChatUsage usage={usage} />}
+                        </div>
+                    )}
+                    {(badge || onRemove) && (
+                        <div className="flex items-center gap-2">
+                            {badge && <Badge variant="secondary">{badge}</Badge>}
+                            {onRemove && (
+                                <ActionButton
+                                    size="xs"
+                                    variant="ghost"
+                                    icon={<XIcon />}
+                                    action={onRemove}
+                                >
+                                    {t('chat.withdraw')}
+                                </ActionButton>
+                            )}
+                        </div>
+                    )}
+                </MessageContent>
+            </Message>
+        </>
     );
 }
 
@@ -401,6 +422,10 @@ export function Transcript({
                                 ? { badge: t('chat.interrupted') }
                                 : {})}
                             {...(entry.item.id === lastAnswer ? { usage: view.usage } : {})}
+                            media={{
+                                sessionId: view.sessionId,
+                                blocks: mediaOf(entry.item.blocks),
+                            }}
                             leading={entry.item.blocks.map(block =>
                                 block.type === 'native_tool_call' ? (
                                     <NativeToolView
@@ -437,6 +462,7 @@ export function Transcript({
                             key={item.deliveryId}
                             role="user"
                             text={textOf(item.item.blocks, 'text')}
+                            media={{ sessionId: view.sessionId, blocks: mediaOf(item.item.blocks) }}
                             badge={t('chat.pending')}
                             onRemove={() =>
                                 call('session.withdraw', {

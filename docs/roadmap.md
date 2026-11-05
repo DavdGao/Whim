@@ -50,9 +50,12 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 
 ## PR 4 — Attachments
 
-- [ ] Core attachment store (immutable content, size limits), admission from card `input` and enabled processors
-- [ ] DashScope delivery of images; text files inline; PDF through a processor with page and byte limits
-- [ ] Composer attach button, drag and drop, paste; per-attachment errors; original and prepared references kept for replay
+- [x] Per-session media store (content-addressed, immutable), admission from card `input` at send, `file:` URI references
+- [x] DashScope delivery of images (Qwen3.8 Max, DeepSeek V4.1 Flash, Kimi K3.1 Pro); text files inline; `<data>` references for unreadable media
+- [x] Composer attachments from the + menu, drag and drop, and paste; per-attachment errors; images in messages and tool results
+- [x] Multimodal tool results: `Read` returns images; promoted after all results unless the adapter carries them in tool results
+- [ ] PDF through a processor with page and byte limits
+- [ ] Verify whether DashScope accepts images inside `function_call_output` and declare `toolResultMedia` if so
 
 ## PR 5 — Context
 

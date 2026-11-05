@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { selectableLevels } from '../contracts/card.js';
 
 import { CompiledSchema } from './json-schema.js';
+import { storeMedia } from './media.js';
 import { evaluate } from './permissions.js';
 import { describeError } from './plugin-host.js';
 
@@ -601,10 +602,23 @@ export class ToolRuntime {
         output: ToolOutput,
         jobId: string
     ): Promise<void> {
+        const media = [];
+        for (const item of output.media ?? [])
+            media.push(
+                await storeMedia(
+                    join(this.sessionDir(sessionId), 'media'),
+                    item.data,
+                    item.mediaType,
+                    {
+                        ...(item.name ? { name: item.name } : {}),
+                    }
+                )
+            );
+        const withMedia = media.length ? { media } : {};
         const status = output.isError ? 'error' : 'success';
         const bytes = Buffer.byteLength(output.content);
         if (bytes <= maxResultBytes)
-            return this.#finish(sessionId, call, status, output.content, { jobId });
+            return this.#finish(sessionId, call, status, output.content, { jobId, ...withMedia });
         const dir = join(this.sessionDir(sessionId), 'offload');
         const path = join(dir, `${call.callId.replace(/[^A-Za-z0-9_-]/g, '_')}.txt`);
         await mkdir(dir, { recursive: true });
@@ -617,7 +631,7 @@ export class ToolRuntime {
             call,
             status,
             `${head}\n\n[… ${bytes - 2 * previewBytes} bytes omitted. The full output (${bytes} bytes) is at ${pathToFileURL(path).href}; read it with Read and an offset.]\n\n${tail}`,
-            { jobId, offload: { path, bytes } }
+            { jobId, offload: { path, bytes }, ...withMedia }
         );
     }
 
@@ -647,6 +661,7 @@ export class ToolRuntime {
                 content,
                 ...(extra.jobId ? { jobId: extra.jobId } : {}),
                 ...(extra.offload ? { offload: extra.offload } : {}),
+                ...(extra.media?.length ? { media: extra.media } : {}),
             },
         });
     }

@@ -33,14 +33,27 @@ export interface CardIssue {
     readonly message: string;
 }
 
+/** Media bytes delivered in a request; Core includes only types the card accepts. */
+export interface InlineMedia {
+    readonly type: 'inline_media';
+    readonly mediaType: string;
+    /** Base64 of the bytes. */
+    readonly data: string;
+}
+
+/** Blocks an adapter receives: record blocks with media resolved to bytes or text. */
+export type RequestBlock = Exclude<Block, { type: 'media' }> | InlineMedia;
+
 export type ChatRequestMessage =
-    | { readonly role: 'user' | 'assistant'; readonly blocks: readonly Block[] }
+    | { readonly role: 'user' | 'assistant'; readonly blocks: readonly RequestBlock[] }
     /** One tool result, placed right after the assistant message that called it. */
     | {
           readonly role: 'tool';
           readonly callId: string;
           readonly status: ToolResult['status'];
           readonly content: string;
+          /** Only types listed in the session's `toolResultMedia`. */
+          readonly media?: readonly InlineMedia[];
       };
 
 export interface ChatRequest {
@@ -73,6 +86,11 @@ export type ChatEvent =
 export interface ChatSession {
     /** Largest input, in tokens, the adapter will send for this card. */
     inputBudget(): number;
+    /**
+     * Media types the protocol carries inside a tool result. Core promotes other supported
+     * media to a user message after the tool results. Absent means none.
+     */
+    readonly toolResultMedia?: readonly string[];
     /** Optional provider-accurate token count; Core falls back to an estimate. */
     countTokens?(request: ChatRequest, signal: AbortSignal): Promise<number>;
     /**
@@ -142,6 +160,12 @@ export interface ToolContext extends ToolEnv {
 export interface ToolOutput {
     readonly content: string;
     readonly isError?: boolean;
+    /** Media returned with the text, such as an image Read opened; Core stores it. */
+    readonly media?: readonly {
+        readonly mediaType: string;
+        readonly data: Uint8Array;
+        readonly name?: string;
+    }[];
 }
 
 /**

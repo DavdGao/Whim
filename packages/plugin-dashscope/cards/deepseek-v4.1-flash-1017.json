@@ -1,6 +1,6 @@
 {
     "id": "dashscope/deepseek-v4.1-flash-1017",
-    "revision": 1,
+    "revision": 2,
     "kind": "chat",
     "adapter": "@whimkit/plugin-dashscope#responses",
     "model": "deepseek-v4.1-flash-1017",
@@ -8,7 +8,19 @@
     "contextWindow": 1000000,
     "maxOutputTokens": 393216,
     "input": {
-        "text/plain": {}
+        "text/plain": {},
+        "image/png": {
+            "delivery": ["inline"],
+            "maxBytes": 10485760
+        },
+        "image/jpeg": {
+            "delivery": ["inline"],
+            "maxBytes": 10485760
+        },
+        "image/webp": {
+            "delivery": ["inline"],
+            "maxBytes": 10485760
+        }
     },
     "output": ["text/plain"],
     "thinking": {

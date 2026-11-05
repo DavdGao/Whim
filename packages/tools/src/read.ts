@@ -1,7 +1,9 @@
 import { createReadStream } from 'node:fs';
 import { open, stat } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { createInterface } from 'node:readline';
 
+import { sniffImage } from '@whimkit/core/contracts';
 import { defineTool } from '@whimkit/core/plugin';
 
 import { hasErrorCode, resolve } from './paths.js';
@@ -32,6 +34,32 @@ async function looksBinary(path: string): Promise<boolean> {
     }
 }
 
+/** Images above this size are described instead of attached. */
+const maxImageBytes = 10 * 1024 * 1024;
+
+/**
+ * Open an image for the model: PNG, JPEG, WebP, or GIF by signature, within the size limit.
+ * @param path The file.
+ * @param size Its size in bytes.
+ * @returns The bytes and type, or undefined for other files.
+ */
+async function readImage(
+    path: string,
+    size: number
+): Promise<{ mediaType: string; data: Uint8Array } | undefined> {
+    if (size > maxImageBytes) return undefined;
+    const handle = await open(path, 'r');
+    try {
+        const head = new Uint8Array(16);
+        await handle.read(head, 0, head.length, 0);
+        const mediaType = sniffImage(head);
+        if (!mediaType) return undefined;
+        return { mediaType, data: new Uint8Array(await handle.readFile()) };
+    } finally {
+        await handle.close();
+    }
+}
+
 /**
  * Format one line with a right-aligned line number and a long-line marker.
  * @param lineNumber 1-based line number.
@@ -54,7 +82,7 @@ export const readTool = defineTool<ReadInput>({
         '- `path` is absolute, or relative to the workspace. Files outside the workspace may be read; the user is asked first.',
         '- By default up to 2000 lines are returned. Use `offset` (1-based first line) and `limit` (line count) to read a window of a large file; the result says how to continue when more lines remain.',
         '- Lines longer than 2000 characters are cut and marked.',
-        '- Directories are refused (use Glob to list files). Binary files are refused.',
+        '- PNG, JPEG, WebP, and GIF images up to 10 MiB are returned as images. Directories are refused (use Glob to list files). Other binary files are refused.',
         '- Read before you Edit a file so that `old_string` matches exactly. Prefer Read over `cat` in Bash.',
     ].join('\n'),
     inputSchema: {
@@ -87,6 +115,13 @@ export const readTool = defineTool<ReadInput>({
             return {
                 content: `${path} is a directory, not a file. Use Glob to list its files.`,
                 isError: true,
+            };
+        }
+        const image = await readImage(path, info.size);
+        if (image) {
+            return {
+                content: `${path} is an image (${image.mediaType}, ${info.size} bytes); it is attached to this result.`,
+                media: [{ mediaType: image.mediaType, data: image.data, name: basename(path) }],
             };
         }
         if (await looksBinary(path)) {

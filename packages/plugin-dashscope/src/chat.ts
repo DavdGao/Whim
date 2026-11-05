@@ -86,6 +86,11 @@ const separateTools = ['web_fetch'] as const;
 const supportedTools = new Set<string>([...Object.keys(nativeToolTypes), ...separateTools]);
 
 const fetchInput = z.object({ url: z.string(), prompt: z.string().optional() });
+/** Image types DashScope accepts as Base64 data URIs (vision guide, checked 2026-11-05). */
+const deliverableImages = new Set(['image/png', 'image/jpeg', 'image/webp']);
+/** A Base64 data URI may be at most 20 MB, so the raw image stays below 15 MB. */
+const maxImageBytes = 14 * 1024 * 1024;
+
 /** What the extracting model replies when it got none of the page. */
 const notAccessible = 'NOT_ACCESSIBLE';
 const fetchMaxOutputTokens = 16_384;
@@ -413,12 +418,24 @@ export function createChatAdapter(transport: typeof fetch = fetch): ChatAdapter 
                         path: 'nativeTools',
                         message: `Native tool ${tool} is not supported by this adapter.`,
                     });
-            for (const type of Object.keys(card.input))
-                if (type !== 'text/plain')
+            for (const [type, limits] of Object.entries(card.input)) {
+                if (type === 'text/plain') continue;
+                if (!deliverableImages.has(type))
                     issues.push({
                         path: `input.${type}`,
-                        message: 'Only text input is implemented yet.',
+                        message: 'Only text and PNG, JPEG, or WebP images are implemented.',
                     });
+                else if (limits.delivery && !limits.delivery.includes('inline'))
+                    issues.push({
+                        path: `input.${type}.delivery`,
+                        message: 'Images are delivered inline as Base64 data URIs.',
+                    });
+                else if ((limits.maxBytes ?? Infinity) > maxImageBytes)
+                    issues.push({
+                        path: `input.${type}.maxBytes`,
+                        message: `Images must stay at or below ${maxImageBytes} bytes, so the data URI fits DashScope's 20 MB limit.`,
+                    });
+            }
             return issues;
         },
         open: ({ card, credential }) => new DashScopeSession(card, credential, transport),

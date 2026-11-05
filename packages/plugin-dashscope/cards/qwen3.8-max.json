@@ -1,6 +1,6 @@
 {
     "id": "dashscope/qwen3.8-max",
-    "revision": 2,
+    "revision": 3,
     "kind": "chat",
     "adapter": "@whimkit/plugin-dashscope#responses",
     "model": "qwen3.8-max",
@@ -8,7 +8,19 @@
     "contextWindow": 262144,
     "maxOutputTokens": 32768,
     "input": {
-        "text/plain": {}
+        "text/plain": {},
+        "image/png": {
+            "delivery": ["inline"],
+            "maxBytes": 14680064
+        },
+        "image/jpeg": {
+            "delivery": ["inline"],
+            "maxBytes": 14680064
+        },
+        "image/webp": {
+            "delivery": ["inline"],
+            "maxBytes": 14680064
+        }
     },
     "output": ["text/plain"],
     "thinking": {

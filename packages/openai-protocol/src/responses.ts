@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { readSse } from './sse.js';
 
 import type { NativeToolCallBlock, ToolDeclaration, Usage } from '@whimkit/core/contracts';
-import type { ChatEvent, ChatRequestMessage } from '@whimkit/core/plugin';
+import type { ChatEvent, ChatRequestMessage, InlineMedia } from '@whimkit/core/plugin';
 
 /** Continuation format version for Responses output items replayed with `store: false`. */
 export const responsesContinuationFormat = 1;
@@ -72,6 +72,15 @@ export interface InputOptions {
 }
 
 /**
+ * An inline image as a Responses `input_image` with a Base64 data URI.
+ * @param media The media; Core passes only types the card accepts.
+ * @returns The content part.
+ */
+function toInputImage(media: InlineMedia): unknown {
+    return { type: 'input_image', image_url: `data:${media.mediaType};base64,${media.data}` };
+}
+
+/**
  * Serialize messages as Responses `input` items. Continuation and native items are replayed
  * only when they were produced by the same adapter in the current format.
  * @param messages Request messages.
@@ -90,7 +99,13 @@ export function toResponsesInput(
             input.push({
                 type: 'function_call_output',
                 call_id: message.callId,
-                output: message.content,
+                // Media go as a content list only when the adapter declared it carries them.
+                output: message.media?.length
+                    ? [
+                          { type: 'input_text', text: message.content },
+                          ...message.media.map(media => toInputImage(media)),
+                      ]
+                    : message.content,
             });
             continue;
         }
@@ -99,7 +114,9 @@ export function toResponsesInput(
             if (content.length) input.push({ role: message.role, content: content.splice(0) });
         };
         for (const block of message.blocks) {
-            if (block.type === 'text' && block.text.length > 0)
+            if (block.type === 'inline_media') {
+                if (message.role === 'user') content.push(toInputImage(block));
+            } else if (block.type === 'text' && block.text.length > 0)
                 content.push({
                     type: message.role === 'assistant' ? 'output_text' : 'input_text',
                     text: block.text,

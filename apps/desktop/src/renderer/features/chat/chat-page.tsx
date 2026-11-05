@@ -80,7 +80,7 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
             workspace: next ?? state.defaultWorkspace,
         }).catch(error => notify(error, t('error.generic')));
     };
-    const send = async (text: string) => {
+    const send = async (text: string, attachments: readonly { sha256: string; name: string }[]) => {
         try {
             let sessionId = selected;
             if (!sessionId) {
@@ -93,7 +93,7 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                 ).sessionId;
                 setSelected(sessionId);
             }
-            await call('session.send', { sessionId, text });
+            await call('session.send', { sessionId, text, attachments: [...attachments] });
         } catch (error) {
             notify(error, t('error.generic'));
             throw error;
