@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { defineTool } from '@whimkit/core/plugin';
 
 import { hasErrorCode, resolve, writeFileAtomic } from './paths.js';
+import { unseenChange, versionOf } from './versions.js';
 
 export interface EditInput {
     readonly path: string;
@@ -53,7 +54,9 @@ export const editTool = defineTool<EditInput>({
     description: [
         'Replace exact text in an existing file.',
         '',
-        '- `path` is absolute, or relative to the workspace. Read the file first so `old_string` matches it exactly, including whitespace; do not include the line-number prefix that Read adds.',
+        '- `path` is absolute, or relative to the workspace.',
+        '- Read the file first. Edit fails if you have not read the file in this conversation, or if it changed after your last Read (for example through Bash or the user); then Read it again. Your own Edit and Write calls keep it current, so consecutive edits need no new Read.',
+        '- `old_string` must match the file exactly, including indentation (tabs or spaces). Read prefixes each line with its number and a tab; copy only the text after that prefix.',
         '- `old_string` must be non-empty, differ from `new_string`, and occur exactly once in the file. If it is ambiguous, add surrounding context to make it unique, or set `replace_all` to replace every occurrence (for example to rename a variable).',
         "- The file's line endings are preserved; in a CRLF file, LF line breaks in `old_string` and `new_string` are matched and written as CRLF.",
         '- The write is atomic. The result shows the changed region with line numbers.',
@@ -63,8 +66,16 @@ export const editTool = defineTool<EditInput>({
         type: 'object',
         properties: {
             path: { type: 'string', minLength: 1, description: 'File to edit.' },
-            old_string: { type: 'string', minLength: 1, description: 'Exact text to replace.' },
-            new_string: { type: 'string', description: 'Replacement text.' },
+            old_string: {
+                type: 'string',
+                minLength: 1,
+                description:
+                    'Exact text to replace, including whitespace and indentation, without Read line-number prefixes.',
+            },
+            new_string: {
+                type: 'string',
+                description: 'Text to put in its place; must differ from old_string.',
+            },
             replace_all: {
                 type: 'boolean',
                 description: 'Replace every occurrence instead of requiring a unique match.',
@@ -100,6 +111,9 @@ export const editTool = defineTool<EditInput>({
             }
             throw error;
         }
+        const current = await versionOf(path);
+        const unseen = current ? unseenChange(current, context) : `File not found: ${path}`;
+        if (unseen) return { content: unseen, isError: true };
 
         let oldString = input.old_string;
         let newString = input.new_string;
@@ -122,11 +136,13 @@ export const editTool = defineTool<EditInput>({
         const updated = original.split(oldString).join(newString);
         context.signal.throwIfAborted();
         await writeFileAtomic(path, updated);
+        const written = await versionOf(path);
 
         const replaced = input.replace_all === true ? count : 1;
         const changedLines = newString.split('\n').length;
         return {
             content: `Replaced ${replaced} occurrence${replaced === 1 ? '' : 's'} in ${path}. First change:\n${snippet(updated, changeIndex, changedLines)}`,
+            ...(written ? { files: [written] } : {}),
         };
     },
 });

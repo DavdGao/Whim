@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
 import { selectableLevels } from '../contracts/card.js';
+import { knownFiles } from '../contracts/view.js';
 
 import { CompiledSchema } from './json-schema.js';
 import { storeMedia } from './media.js';
@@ -16,7 +17,7 @@ import type { Command } from './commands.js';
 import type { PluginHost } from './plugin-host.js';
 import type { Store } from './store.js';
 import type { FrozenChatCard, ThinkingLevel } from '../contracts/card.js';
-import type { ToolDeclaration, ToolResult } from '../contracts/records.js';
+import type { FileVersion, ToolDeclaration, ToolResult } from '../contracts/records.js';
 import type { OpenCall, SessionView } from '../contracts/view.js';
 import type {
     ChatSession,
@@ -421,7 +422,15 @@ export class ToolRuntime {
                               ? { credential: await this.#credentialFor(tool.credentialType) }
                               : {}),
                       });
-        const job = await this.#startJob(sessionId, runId, call, execute, input, env.workspace);
+        const job = await this.#startJob(
+            sessionId,
+            runId,
+            call,
+            execute,
+            input,
+            env.workspace,
+            knownFiles(view)
+        );
         const limit = tool.backgroundAfterMs?.(input);
         const outcome = await race(job.done, limit, signal);
         if (outcome.kind === 'done') {
@@ -462,6 +471,7 @@ export class ToolRuntime {
      * @param execute Runs the tool: its own implementation, or the provider's.
      * @param input Validated input.
      * @param workspace The session's workspace.
+     * @param files The file versions in the model's context.
      * @returns The running job.
      */
     async #startJob(
@@ -470,7 +480,8 @@ export class ToolRuntime {
         call: OpenCall,
         execute: (input: unknown, context: ToolContext) => Promise<ToolOutput>,
         input: unknown,
-        workspace: string | undefined
+        workspace: string | undefined,
+        files: ReadonlyMap<string, FileVersion>
     ): Promise<Job> {
         const jobId = randomUUID();
         await this.#exec(sessionId, { type: 'start-tool', runId, callId: call.callId, jobId });
@@ -502,6 +513,7 @@ export class ToolRuntime {
             callId: call.callId,
             ...(workspace ? { workspace } : {}),
             output,
+            knownFiles: files,
         }).catch((error: unknown) => ({
             content: controller.signal.aborted
                 ? `Cancelled: ${describeError(controller.signal.reason)}`
@@ -614,7 +626,10 @@ export class ToolRuntime {
                     }
                 )
             );
-        const withMedia = media.length ? { media } : {};
+        const withMedia = {
+            ...(media.length ? { media } : {}),
+            ...(output.files?.length ? { files: [...output.files] } : {}),
+        };
         const status = output.isError ? 'error' : 'success';
         const bytes = Buffer.byteLength(output.content);
         if (bytes <= maxResultBytes)
@@ -662,6 +677,7 @@ export class ToolRuntime {
                 ...(extra.jobId ? { jobId: extra.jobId } : {}),
                 ...(extra.offload ? { offload: extra.offload } : {}),
                 ...(extra.media?.length ? { media: extra.media } : {}),
+                ...(extra.files?.length ? { files: extra.files } : {}),
             },
         });
     }

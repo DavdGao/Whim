@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 
 import { readTool } from './read.js';
 import { createContext, createWorkspace } from './testing.js';
+import { versionOf } from './versions.js';
 
 /**
  * Expected numbered output for lines "line N".
@@ -42,6 +43,7 @@ describe('Read', () => {
             assert.deepEqual(await readTool.execute({ path: 'shot.png' }, context), {
                 content: `${join(ws.dir, 'shot.png')} is an image (image/png, 10 bytes); it is attached to this result.`,
                 media: [{ mediaType: 'image/png', data: png, name: 'shot.png' }],
+                files: [await versionOf(join(ws.dir, 'shot.png'))],
             });
         } finally {
             await ws.cleanup();
@@ -56,6 +58,7 @@ describe('Read', () => {
             assert.deepEqual(await readTool.execute({ path: 'a.txt' }, context), {
                 content:
                     '     1\tone\n     2\ttwo\n     3\tthree\n[End of file: 3 lines in total.]',
+                files: [await versionOf(join(ws.dir, 'a.txt'))],
             });
         } finally {
             await ws.cleanup();
@@ -72,12 +75,14 @@ describe('Read', () => {
                 await readTool.execute({ path: 'a.txt', offset: 3, limit: 4 }, context),
                 {
                     content: `${numbered(3, 6)}\n[Showing lines 3-6; more lines follow. Continue with offset=7.]`,
+                    files: [await versionOf(join(ws.dir, 'a.txt'))],
                 }
             );
             assert.deepEqual(
                 await readTool.execute({ path: 'a.txt', offset: 9, limit: 5 }, context),
                 {
                     content: `${numbered(9, 10)}\n[End of file: 10 lines in total.]`,
+                    files: [await versionOf(join(ws.dir, 'a.txt'))],
                 }
             );
             assert.deepEqual(await readTool.execute({ path: 'a.txt', offset: 11 }, context), {
@@ -116,6 +121,7 @@ describe('Read', () => {
             const { context } = createContext(ws.dir);
             assert.deepEqual(await readTool.execute({ path: 'long.txt' }, context), {
                 content: `     1\t${'x'.repeat(2000)}... [line truncated, 2500 characters]\n[End of file: 1 lines in total.]`,
+                files: [await versionOf(join(ws.dir, 'long.txt'))],
             });
         } finally {
             await ws.cleanup();
@@ -132,6 +138,7 @@ describe('Read', () => {
             assert.deepEqual(await readTool.execute({ path: 'empty.txt' }, context), {
                 content: `${join(ws.dir, 'empty.txt')} is empty.`,
                 isError: false,
+                files: [await versionOf(join(ws.dir, 'empty.txt'))],
             });
             assert.deepEqual(await readTool.execute({ path: 'nope.txt' }, context), {
                 content: `File not found: ${join(ws.dir, 'nope.txt')}`,
@@ -158,6 +165,7 @@ describe('Read', () => {
             const { context } = createContext(ws.dir);
             assert.deepEqual(await readTool.execute({ path: join(other.dir, 'o.txt') }, context), {
                 content: '     1\toutside\n[End of file: 1 lines in total.]',
+                files: [await versionOf(join(other.dir, 'o.txt'))],
             });
         } finally {
             await ws.cleanup();

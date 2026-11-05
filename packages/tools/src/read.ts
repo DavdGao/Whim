@@ -117,11 +117,14 @@ export const readTool = defineTool<ReadInput>({
                 isError: true,
             };
         }
+        // What the model has now seen; Edit and Write check the file against it.
+        const files = [{ path, mtimeMs: info.mtimeMs, size: info.size }];
         const image = await readImage(path, info.size);
         if (image) {
             return {
                 content: `${path} is an image (${image.mediaType}, ${info.size} bytes); it is attached to this result.`,
                 media: [{ mediaType: image.mediaType, data: image.data, name: basename(path) }],
+                files,
             };
         }
         if (await looksBinary(path)) {
@@ -164,12 +167,13 @@ export const readTool = defineTool<ReadInput>({
                         ? `${path} is empty.`
                         : `${path} has only ${lineNumber} lines; offset ${first} is past the end.`,
                 isError: lineNumber !== 0,
+                ...(lineNumber === 0 ? { files } : {}),
             };
         }
         const end = first + window.length - 1;
         const footer = more
             ? `\n[Showing lines ${first}-${end}; more lines follow. Continue with offset=${end + 1}.]`
             : `\n[End of file: ${lineNumber} lines in total.]`;
-        return { content: window.join('\n') + footer };
+        return { content: window.join('\n') + footer, files };
     },
 });

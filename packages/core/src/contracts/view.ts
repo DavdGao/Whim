@@ -6,6 +6,7 @@ import type {
     BodyOf,
     ContextItem,
     EpochContext,
+    FileVersion,
     PermissionRule,
     ToolDeclaration,
     Usage,
@@ -471,4 +472,19 @@ function replaceCall(view: SessionView, call: OpenCall): OpenCall[] {
 function requireRun(view: SessionView, runId: string, seq: number): ActiveRun {
     if (view.run?.runId !== runId) throw new InvalidJournalError('Run is not active.', seq);
     return view.run;
+}
+
+/**
+ * The latest version of each file in the model's context: what tool results recorded since the
+ * last compaction, which the summary replaced, so the model must read a file again after it.
+ * @param view The session view.
+ * @returns Versions by absolute path.
+ */
+export function knownFiles(view: SessionView): Map<string, FileVersion> {
+    const from = view.epoch.context?.from ?? 0;
+    const files = new Map<string, FileVersion>();
+    for (const entry of view.history)
+        if (entry.seq >= from && entry.item.type === 'tool_result')
+            for (const file of entry.item.files ?? []) files.set(file.path, file);
+    return files;
 }

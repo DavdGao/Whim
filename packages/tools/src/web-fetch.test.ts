@@ -16,7 +16,7 @@ const MiB = 1024 * 1024;
  * @returns The context.
  */
 function contextWith(signal: AbortSignal = new AbortController().signal): ToolContext {
-    return { signal, sessionId: 's', callId: 'c', output: () => undefined };
+    return { signal, sessionId: 's', callId: 'c', output: () => undefined, knownFiles: new Map() };
 }
 
 /**
