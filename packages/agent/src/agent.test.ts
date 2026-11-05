@@ -11,7 +11,7 @@ import { ApplicationError, knownFiles } from '@whimkit/core/contracts';
 
 import { Agent } from './agent.js';
 
-import type { AgentEvent } from './agent.js';
+import type { AgentCompaction, AgentEvent } from './agent.js';
 import type { Review, ReviewRequest, Reviewer, ToolModels } from '@whimkit/core';
 import type { FrozenChatCard } from '@whimkit/core/contracts';
 import type { ChatEvent, ChatRequest, ChatSession, ToolDefinition } from '@whimkit/core/plugin';
@@ -148,6 +148,32 @@ async function transcript(sessionId: string) {
 
 const noSleep = async () => {};
 const noTools = { run: async () => {} };
+
+/**
+ * A compaction port writing transcripts under the test folder and keeping the epoch's prefix.
+ * @returns The port.
+ */
+function compaction(): AgentCompaction {
+    return {
+        transcriptPath: (sessionId, compactionId) =>
+            join(dir, 'transcripts', sessionId, `${compactionId}.md`),
+        epoch: async view => ({
+            epochId: randomUUID(),
+            system: view.epoch.system,
+            card: view.epoch.card,
+            renderer: view.epoch.renderer,
+            tools: [...view.epoch.tools],
+            nativeTools: [...view.epoch.nativeTools],
+            providerTools: [...view.epoch.providerTools],
+        }),
+    };
+}
+
+const contextLimit = new ApplicationError({
+    category: 'context-limit',
+    retry: { kind: 'after-change', change: 'input' },
+    outcome: 'rejected',
+});
 
 describe('Agent', () => {
     it('streams a reply, commits it once, and does not call the model again without input', async () => {
@@ -334,22 +360,9 @@ describe('Agent', () => {
             };
             yield { type: 'completed', usage: { inputTokens: 5, outputTokens: 1 } };
         }, 400);
-        const transcripts = join(dir, 'transcripts');
         const agent = new Agent(store, models, noTools, {
             sleep: noSleep,
-            compaction: {
-                transcriptPath: (sessionId, compactionId) =>
-                    join(transcripts, sessionId, `${compactionId}.md`),
-                epoch: async view => ({
-                    epochId: randomUUID(),
-                    system: view.epoch.system,
-                    card: view.epoch.card,
-                    renderer: view.epoch.renderer,
-                    tools: [...view.epoch.tools],
-                    nativeTools: [...view.epoch.nativeTools],
-                    providerTools: [...view.epoch.providerTools],
-                }),
-            },
+            compaction: compaction(),
         });
         const sessionId = await sessionWith(long('u'));
         await drain(agent.run(sessionId, 'user', new AbortController().signal));
@@ -388,6 +401,67 @@ describe('Agent', () => {
             blocks: [{ type: 'text', text: long('v') }],
         });
         assert.deepEqual(view.usage, { inputTokens: 15, outputTokens: 3 });
+    });
+
+    it('compacts and retries once when the provider reports the context limit', async () => {
+        const { models, requests } = scripted(async function* (request) {
+            if (request.system.startsWith('You compact'))
+                yield { type: 'text-delta', text: 'SUMMARY' };
+            else if (request.messages.length === 3) throw contextLimit;
+            else yield { type: 'text-delta', text: 'ok' };
+            yield { type: 'completed', usage: {} };
+        });
+        const agent = new Agent(store, models, noTools, {
+            sleep: noSleep,
+            compaction: compaction(),
+        });
+        const sessionId = await sessionWith('first');
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        await say(sessionId, 'second');
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        const view = await store.view(sessionId);
+        assert.deepEqual(view.lastRun?.result, { outcome: 'completed' });
+        assert.deepEqual(
+            requests.map(request => request.messages.length),
+            [1, 3, 1, 2]
+        );
+        assert.deepEqual(
+            view.compactions.map(item => item.state),
+            ['succeeded']
+        );
+        assert.deepEqual(await transcript(sessionId), [
+            ['user', 'first', ''],
+            ['assistant', 'ok', 'completed'],
+            ['user', 'second', ''],
+            ['assistant', 'ok', 'completed'],
+        ]);
+    });
+
+    it('fails with the provider context limit when compaction fails, without resending', async () => {
+        const { models, requests } = scripted(async function* (request) {
+            if (request.system.startsWith('You compact')) throw new Error('summary failed');
+            if (request.messages.length === 3) throw contextLimit;
+            yield { type: 'text-delta', text: 'ok' };
+            yield { type: 'completed', usage: {} };
+        });
+        const agent = new Agent(store, models, noTools, {
+            sleep: noSleep,
+            compaction: compaction(),
+        });
+        const sessionId = await sessionWith('first');
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        await say(sessionId, 'second');
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        const view = await store.view(sessionId);
+        assert.deepEqual(view.lastRun?.result, {
+            outcome: 'failed',
+            failure: contextLimit.failure,
+        });
+        assert.equal(requests.length, 3);
+        assert.deepEqual(
+            view.compactions.map(item => item.state),
+            ['failed']
+        );
     });
 
     describe('tools', () => {
@@ -587,19 +661,7 @@ describe('Agent', () => {
             }, 2000);
             const agent = new Agent(store, models, runtime, {
                 sleep: noSleep,
-                compaction: {
-                    transcriptPath: (sessionId, compactionId) =>
-                        join(dir, 'transcripts', sessionId, `${compactionId}.md`),
-                    epoch: async view => ({
-                        epochId: randomUUID(),
-                        system: view.epoch.system,
-                        card: view.epoch.card,
-                        renderer: view.epoch.renderer,
-                        tools: [...view.epoch.tools],
-                        nativeTools: [...view.epoch.nativeTools],
-                        providerTools: [...view.epoch.providerTools],
-                    }),
-                },
+                compaction: compaction(),
             });
             const sessionId = await sessionWith('read it', declarations);
             await drain(agent.run(sessionId, 'user', new AbortController().signal));

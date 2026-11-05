@@ -97,8 +97,11 @@ type StepOutcome =
     | { kind: 'tools' }
     | { kind: 'interrupted' }
     | { kind: 'failed'; failure: Failure }
-    /** The request would exceed the compaction threshold; nothing was sent. */
-    | { kind: 'compact' };
+    /**
+     * Compact and run the step again: the estimate passed the threshold before sending, or the
+     * provider rejected the request with `failure` (`context-limit`) despite the estimate.
+     */
+    | { kind: 'compact'; failure?: Failure };
 
 const defaultRetry: RetryPolicy = { maxAttempts: 4, baseDelayMs: 1000, maxDelayMs: 30_000 };
 
@@ -219,9 +222,14 @@ export class Agent {
                 first = false;
                 let outcome = yield* this.#step(view, runId, stepId, signal, false);
                 if (outcome.kind === 'compact') {
-                    await this.#compact(view, runId, signal);
+                    const compacted = await this.#compact(view, runId, signal);
                     if (signal.aborted) {
                         result = { outcome: 'interrupted', reason: 'user' };
+                        break;
+                    }
+                    // The provider already refused this context; sending it unchanged cannot work.
+                    if (!compacted && outcome.failure) {
+                        result = { outcome: 'failed', failure: outcome.failure };
                         break;
                     }
                     outcome = yield* this.#step(
@@ -288,11 +296,12 @@ export class Agent {
      * @param view The session view after the step consumed its input.
      * @param runId The active run.
      * @param signal Run interruption.
+     * @returns Whether a new epoch was committed.
      */
-    async #compact(view: SessionView, runId: string, signal: AbortSignal): Promise<void> {
+    async #compact(view: SessionView, runId: string, signal: AbortSignal): Promise<boolean> {
         const port = this.#compaction;
         const cut = compactionCut(view);
-        if (!port || cut === undefined) return;
+        if (!port || cut === undefined) return false;
         const sessionId = view.sessionId;
         const card = view.epoch.card;
         const previous = view.epoch.context;
@@ -356,6 +365,7 @@ export class Agent {
                     },
                 },
             });
+            return true;
         } catch (error) {
             await this.#exec(sessionId, {
                 type: 'finish-compaction',
@@ -363,6 +373,7 @@ export class Agent {
                 usage,
                 result: { status: 'failed', failure: toFailure(error) },
             });
+            return false;
         }
     }
 
@@ -533,6 +544,13 @@ export class Agent {
                     result: { status: 'failed', failure },
                 });
                 if (published) yield { type: 'discarded', sessionId, attemptId, failure };
+                if (
+                    failure.category === 'context-limit' &&
+                    !compacted &&
+                    this.#compaction &&
+                    compactionCut(view) !== undefined
+                )
+                    return { kind: 'compact', failure };
                 if (failure.retry.kind !== 'backoff' || number >= this.#retry.maxAttempts)
                     return { kind: 'failed', failure };
                 const delay = this.#delay(number, failure.retry.afterMs);

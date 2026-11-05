@@ -126,7 +126,7 @@ Adapters throw `ApplicationError` carrying a `Failure` ([design.md §10](design.
 - `outcome === 'unknown'` on a non-idempotent effect: no automatic retry before reconciliation. Model calls are side-effect free, so for them `unknown` with `backoff` is retried.
 - Anything else: the step fails, the run ends `failed`, and the failure is shown with its translated category and the provider detail.
 - Each retry is a new attempt with its own id; the failed attempt's `attempt.finished` records its failure and usage, without output. Adapters never retry internally.
-- `context-limit` triggers compaction once ([§8](#8-compaction)) before failing.
+- `context-limit` from the provider, despite the estimate, compacts once ([§8](#8-compaction)) and runs the step again; a second `context-limit` fails the step. When there is nothing to compact or compaction fails, the step fails with the provider's failure without resending the same request. The rejected attempt keeps its failure, and its streamed text is discarded as for a retry.
 
 There is no run-wide timeout. Attempts have an idle timeout between stream events (no bytes for a configured period → `timeout`, `backoff`); tools have their own limits.
 
