@@ -225,6 +225,7 @@ class Backend {
             store,
             host,
             models,
+            credentials,
             this.#baseTools,
             artifactsDir,
             sessionId => this.schedule(sessionId, 'job')
@@ -546,7 +547,12 @@ class Backend {
         const separate = this.host.chatAdapters.get(card.adapter)?.adapter.separateTools ?? [];
         const nativeTools = card.nativeTools.filter(tool => !separate.includes(tool));
         const providerTools = card.nativeTools.filter(tool => separate.includes(tool));
-        const tools = this.tools.declarations(workspace, nativeTools);
+        const credentialTypes = new Set(
+            (await this.credentials.list())
+                .filter(credential => credential.available)
+                .map(credential => credential.typeId)
+        );
+        const tools = this.tools.declarations(workspace, nativeTools, credentialTypes);
         const profile = await this.#profile();
         return {
             epochId: randomUUID(),
@@ -816,7 +822,7 @@ class Backend {
  */
 function bundledPlugins(): { dir: string; source: 'bundled' }[] {
     const require = createRequire(import.meta.url);
-    return ['@whimkit/plugin-dashscope'].map(name => ({
+    return ['@whimkit/plugin-dashscope', '@whimkit/plugin-tavily'].map(name => ({
         dir: dirname(require.resolve(`${name}/package.json`)),
         source: 'bundled' as const,
     }));

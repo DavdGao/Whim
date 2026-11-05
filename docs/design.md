@@ -311,6 +311,8 @@ Core defines standard tool ids with Core-owned semantics, initially `web_search`
 3. Otherwise, if a plugin or the base tools provide a local implementation, the tool is an ordinary local tool subject to permissions.
 4. Otherwise the tool is not offered to the model.
 
+Local tools may declare a `credentialType` (for example the Tavily plugin's API key): they are declared only while the user has a credential of that type, and each call receives the most recent one in its context. Tavily's `WebSearch` implements `web_search` this way, so it reaches only models whose provider does not search natively.
+
 The choice depends only on the card and the adapter, never on per-request options such as the thinking level, so it stays fixed for the epoch. DashScope, for example, runs `web_fetch` separately because its web extractor requires thinking: the separate call always thinks, whatever the chat's level.
 
 Provider-only tools without a Core equivalent (for example DashScope `code_interpreter`) are declared by the adapter as additional native tool ids, namespaced by plugin, and are opt-in per session.

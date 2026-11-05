@@ -1,0 +1,6 @@
+{
+    "plugin.name": "Tavily web search",
+    "plugin.description": "Web search for models without their own, through the Tavily API.",
+    "credential.@whimkit/plugin-tavily#api-key": "Tavily API key",
+    "schema.@whimkit/plugin-tavily#api-key./apiKey.title": "API key"
+}

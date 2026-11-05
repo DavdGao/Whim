@@ -69,7 +69,7 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [x] Responses function calling; DashScope native `web_search`/`web_extractor`
 - [x] `@whimkit/tools` (base tools, part of the harness): Bash, Read, Write, Edit, Glob, Grep (ripgrep via `@vscode/ripgrep`), local WebFetch
 - [x] Default workspace `~/Whim` so every new chat has the base tools
-- [ ] Local WebSearch through Tavily (a plugin with an API-key credential), for models without provider search; scraping a search engine's HTML was dropped because it is challenged as a bot and goes against the engine's intent
+- [x] Local WebSearch through Tavily (a plugin with an API-key credential), for models without provider search; scraping a search engine's HTML was dropped because it is challenged as a bot and goes against the engine's intent
 - [ ] Package the ripgrep binary outside the asar archive when building the macOS app
 - [ ] Live DashScope check of function calling with thinking models (reasoning item replay)
 - [ ] Persistent permission rules in Settings; auto mode with a reviewer model

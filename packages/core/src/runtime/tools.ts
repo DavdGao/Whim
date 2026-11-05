@@ -16,11 +16,23 @@ import type { Store } from './store.js';
 import type { FrozenChatCard, ThinkingLevel } from '../contracts/card.js';
 import type { ToolDeclaration, ToolResult } from '../contracts/records.js';
 import type { OpenCall, SessionView } from '../contracts/view.js';
-import type { ChatSession, ToolContext, ToolDefinition, ToolOutput } from '../plugin/index.js';
+import type {
+    ChatSession,
+    ResolvedCredential,
+    ToolContext,
+    ToolDefinition,
+    ToolOutput,
+} from '../plugin/index.js';
 
 /** Opens the session's model binding for tools the adapter runs; Core's ModelService. */
 export interface ToolModels {
     open(card: FrozenChatCard, credentialId: string): Promise<ChatSession>;
+}
+
+/** Credentials for tools that declare a `credentialType`; Core's CredentialService. */
+export interface ToolCredentials {
+    list(): Promise<readonly { id: string; typeId: string; available: boolean }[]>;
+    resolve(id: string): Promise<ResolvedCredential>;
 }
 
 /**
@@ -155,6 +167,7 @@ export class ToolRuntime {
      * @param store Persistence.
      * @param host Plugin-registered tools.
      * @param models Model bindings for tools the session's adapter runs itself.
+     * @param credentials Credentials for tools that need one.
      * @param baseTools Built-in tools every agent has; they win over a plugin tool of the same name.
      * @param artifactsDir Directory for offloaded results and job output.
      * @param onJobEnded Called after a background job's end is committed.
@@ -163,6 +176,7 @@ export class ToolRuntime {
         private readonly store: Store,
         private readonly host: PluginHost,
         private readonly models: ToolModels,
+        private readonly credentials: ToolCredentials,
         baseTools: readonly ToolDefinition<unknown>[],
         readonly artifactsDir: string,
         private readonly onJobEnded: (sessionId: string) => void
@@ -179,15 +193,22 @@ export class ToolRuntime {
      * @param workspace The session's workspace.
      * @param nativeTools Standard ids the provider executes inside its chat call. Local tools with
      * these ids are left out; tools the adapter runs as separate calls keep their local declaration.
+     * @param credentialTypes Credential types the user has; tools needing another are left out.
      * @returns Base tools, then plugin tools in registration order, then the job tools.
      */
-    declarations(workspace: string | undefined, nativeTools: readonly string[]): ToolDeclaration[] {
+    declarations(
+        workspace: string | undefined,
+        nativeTools: readonly string[],
+        credentialTypes: ReadonlySet<string> = new Set()
+    ): ToolDeclaration[] {
         const plugins = [...this.host.tools.values()]
             .map(entry => entry.tool)
             .filter(tool => !this.#builtins.some(builtin => builtin.name === tool.name));
         const tools = [...this.#base, ...plugins].filter(
             tool =>
-                (workspace || !tool.needsWorkspace) && !nativeTools.includes(tool.standard ?? '')
+                (workspace || !tool.needsWorkspace) &&
+                !nativeTools.includes(tool.standard ?? '') &&
+                (!tool.credentialType || credentialTypes.has(tool.credentialType))
         );
         if (tools.length === 0) return [];
         return [...tools, ...this.#builtins.slice(this.#base.length)].map(tool => ({
@@ -373,7 +394,13 @@ export class ToolRuntime {
             standard && view.epoch.providerTools.includes(standard)
                 ? (args: unknown, context: ToolContext) =>
                       this.#runOnProvider(view, standard, args, context)
-                : (args: unknown, context: ToolContext) => tool.execute(args, context);
+                : async (args: unknown, context: ToolContext) =>
+                      tool.execute(args, {
+                          ...context,
+                          ...(tool.credentialType
+                              ? { credential: await this.#credentialFor(tool.credentialType) }
+                              : {}),
+                      });
         const job = await this.#startJob(sessionId, runId, call, execute, input, env.workspace);
         const limit = tool.backgroundAfterMs?.(input);
         const outcome = await race(job.done, limit, signal);
@@ -463,6 +490,19 @@ export class ToolRuntime {
         }));
         this.#jobs.set(jobId, job);
         return job;
+    }
+
+    /**
+     * The most recently added usable credential of a type.
+     * @param typeId The credential type.
+     * @returns The decrypted credential.
+     */
+    async #credentialFor(typeId: string): Promise<ResolvedCredential> {
+        const match = (await this.credentials.list())
+            .filter(item => item.typeId === typeId && item.available)
+            .at(-1);
+        if (!match) throw new Error('This tool needs a credential that is no longer configured.');
+        return this.credentials.resolve(match.id);
     }
 
     /**

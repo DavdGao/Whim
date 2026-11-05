@@ -114,6 +114,15 @@ const known: Record<string, { icon: LucideIcon; titles: Record<Phase, MessageKey
             failed: 'tool.WebFetch.failed',
         },
     },
+    // Plugin-provided search: titled like provider search, without the query.
+    WebSearch: {
+        icon: SearchIcon,
+        titles: {
+            running: 'tool.search.running',
+            done: 'tool.search.done',
+            failed: 'tool.search.failed',
+        },
+    },
     JobOutput: {
         icon: ListIcon,
         titles: {

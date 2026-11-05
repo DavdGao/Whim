@@ -135,6 +135,8 @@ export interface ToolContext extends ToolEnv {
     readonly callId: string;
     /** Append progressive output, readable through JobOutput while the job runs. */
     output(chunk: string): void;
+    /** The credential a tool with `credentialType` runs with, decrypted. */
+    readonly credential?: ResolvedCredential;
 }
 
 export interface ToolOutput {
@@ -157,6 +159,11 @@ export interface ToolDefinition<Input = Record<string, unknown>> {
     readonly needsWorkspace: boolean;
     /** Local implementation of a standard tool id that a model may also provide natively. */
     readonly standard?: 'web_search' | 'web_fetch';
+    /**
+     * A credential type the tool needs, such as a search API key. The tool is offered only while
+     * the user has a credential of that type, and each call receives the most recent one.
+     */
+    readonly credentialType?: string;
     /** Everything the call would touch; paths absolute. */
     access(input: Input, env: ToolEnv): readonly Access[];
     /** Foreground limit in milliseconds; 0 starts in the background, undefined never moves. */
