@@ -1,5 +1,5 @@
 import { ArrowUpIcon, FolderOpenIcon, PaperclipIcon, PlusIcon, SquareIcon } from 'lucide-react';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { chooseDirectory } from '../../lib/client';
 import { useT } from '../../lib/i18n';
@@ -61,6 +61,8 @@ export interface ComposerProps {
     readonly onWorkspaceChange: (workspace: string | undefined) => void;
     /** Changes when the folder's git status may have changed. */
     readonly gitRefresh: unknown;
+    /** Changes when another chat (or a new one) opens; the field takes focus then. */
+    readonly focusKey: string | undefined;
 }
 
 /**
@@ -79,6 +81,7 @@ export interface ComposerProps {
  * @param props.defaultWorkspace The chat's own working folder.
  * @param props.onWorkspaceChange Choose or reset the folder; not while running.
  * @param props.gitRefresh Changes when the folder's git status may have changed.
+ * @param props.focusKey The open chat; focus moves to the field when it changes.
  * @param props.usage Latest usage.
  * @param props.agentName The agent's name.
  * @returns The composer.
@@ -97,12 +100,17 @@ export function Composer({
     usage,
     agentName,
     gitRefresh,
+    focusKey,
 }: ComposerProps) {
     const { t } = useT();
     const [text, setText] = useState('');
     const [sending, setSending] = useState(false);
     const [stacked, setStacked] = useState(false);
     const textarea = useRef<HTMLTextAreaElement>(null);
+    // Opening a chat, or starting a new one, puts the cursor in the field.
+    useEffect(() => {
+        textarea.current?.focus();
+    }, [focusKey]);
     const measure = useRef<HTMLSpanElement>(null);
     const choices = modelChoices(state, slot?.credentialId);
     const current = choices.find(choice => choice.card.id === slot?.cardId);

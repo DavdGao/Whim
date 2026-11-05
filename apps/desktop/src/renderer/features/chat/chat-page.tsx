@@ -212,6 +212,7 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                                 usage={view?.lastUsage}
                                 agentName={state.agent.name}
                                 onWorkspaceChange={changeWorkspace}
+                                focusKey={selected}
                                 gitRefresh={running ? 'running' : view?.head}
                                 onStop={() =>
                                     view &&
