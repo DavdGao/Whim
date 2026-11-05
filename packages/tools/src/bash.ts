@@ -158,7 +158,7 @@ export const bashTool = defineTool<BashInput>({
         'Run a shell command in the workspace using bash and return its combined stdout and stderr plus the exit code.',
         '',
         '- The working directory is the workspace root and does NOT persist between calls; the shell state (cd, exports) is not kept either. Use absolute paths or `cd dir && command` in one call.',
-        '- `description` is a short human-readable summary of what the command does.',
+        '- Always set `description`: what the command does in 5–10 words of active voice, such as "List files in the workspace" or "Install package dependencies". The user sees it instead of the command, so for a piped or chained command say what it achieves, not how.',
         '- `timeout` is in milliseconds (default 120000, max 600000); a timed-out command is terminated.',
         '- A command still running after 30 seconds continues in the background and you get a job handle; its output can be read later and its completion is reported to you. Set `run_in_background` to true for long-running commands such as servers or watchers; those have no timeout.',
         '- Quote paths containing spaces. Chain dependent commands with `&&`.',
@@ -169,7 +169,11 @@ export const bashTool = defineTool<BashInput>({
         type: 'object',
         properties: {
             command: { type: 'string', minLength: 1, description: 'Command to execute.' },
-            description: { type: 'string', description: 'Short summary of what the command does.' },
+            description: {
+                type: 'string',
+                description:
+                    'What the command does in 5–10 words of active voice; shown to the user in place of the command.',
+            },
             timeout: {
                 type: 'integer',
                 minimum: 1,

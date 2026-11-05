@@ -180,6 +180,18 @@ function subject(name: string, input: unknown): string {
 }
 
 /**
+ * The summary a Bash call gave of its command, shown after the generic title so a long or
+ * compound command does not have to fit on the line.
+ * @param input Parsed arguments.
+ * @returns The description, when the call gave one.
+ */
+function commandSummary(input: unknown): string | undefined {
+    if (typeof input !== 'object' || input === null || !('description' in input)) return undefined;
+    const { description } = input;
+    return typeof description === 'string' && description.trim() ? description.trim() : undefined;
+}
+
+/**
  * Where a call stands, for its line.
  * @param open The open call, when it has no result yet.
  * @param result Its result.
@@ -222,6 +234,7 @@ function progress(
  * @param props Line props.
  * @param props.icon Leading icon.
  * @param props.title Title text.
+ * @param props.detail Muted text after the title, truncated first when space runs out.
  * @param props.note Trailing status text.
  * @param props.status Line status.
  * @param props.children Details shown when expanded.
@@ -230,12 +243,14 @@ function progress(
 function ActivityLine({
     icon: Icon,
     title,
+    detail,
     note,
     status,
     children,
 }: {
     icon: LucideIcon;
     title: string;
+    detail?: string | undefined;
     note?: string | undefined;
     status?: 'running' | 'error' | undefined;
     children?: ReactNode;
@@ -245,7 +260,10 @@ function ActivityLine({
             <TraceIcon>
                 <Icon />
             </TraceIcon>
-            <TraceTitle>{title}</TraceTitle>
+            <TraceTitle className="shrink-0">{title}</TraceTitle>
+            {detail && (
+                <TraceDescription className="min-w-0 shrink truncate">{detail}</TraceDescription>
+            )}
             {note && <TraceDescription>{note}</TraceDescription>}
         </TraceLine>
     );
@@ -296,7 +314,8 @@ function AccessLine({ access }: { access: Access }) {
     return (
         <span className="flex min-w-0 gap-2">
             <span className="shrink-0">{t(key)}</span>
-            <code className="text-foreground min-w-0 truncate">{value}</code>
+            {/* In full: the user approves exactly what runs. */}
+            <code className="text-foreground min-w-0 break-all whitespace-pre-wrap">{value}</code>
         </span>
     );
 }
@@ -331,6 +350,7 @@ export function ToolCallView({
     const Icon = tool?.icon ?? WrenchIcon;
     const shown = progress(open, result, jobRunning);
     const title = t((tool?.titles ?? generic)[shown.phase], { target, name: block.name });
+    const detail = block.name === 'Bash' ? (commandSummary(input) ?? target) : undefined;
     const decide = (decision: 'allow' | 'deny', scope: 'once' | 'session') =>
         call('session.decide', { sessionId, callId: block.callId, decision, scope });
     const failed = result !== undefined && !['success', 'background'].includes(result.status);
@@ -345,6 +365,7 @@ export function ToolCallView({
             <ActivityLine
                 icon={Icon}
                 title={title}
+                detail={detail}
                 note={shown.note && t(shown.note)}
                 status={shown.active ? 'running' : shown.phase === 'failed' ? 'error' : undefined}
             >
