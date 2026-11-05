@@ -1,9 +1,8 @@
 import { ArrowDownIcon } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useStickToBottomContext } from 'use-stick-to-bottom';
 
 import { useT } from '../../lib/i18n';
-
-import type { RefObject } from 'react';
 
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
@@ -21,25 +20,23 @@ const idleMs = 160;
  * @param props Pull props.
  * @param props.enabled Whether earlier messages exist.
  * @param props.onLoad Load the previous page.
- * @param props.scrollRef The MessageScroller viewport.
- * @param props.contentRef The content translated during the pull gesture.
+ * @param props.loaded How many earlier entries are loaded; a change means a page arrived.
  * @returns The pull indicator.
  */
 export function PullToLoad({
     enabled,
     onLoad,
-    scrollRef,
-    contentRef,
+    loaded,
 }: {
     enabled: boolean;
     onLoad: () => Promise<void>;
-    scrollRef: RefObject<HTMLDivElement | null>;
-    contentRef: RefObject<HTMLDivElement | null>;
+    loaded: number;
 }) {
     const { t } = useT();
+    const { scrollRef, contentRef } = useStickToBottomContext();
     const [pull, setPull] = useState(0);
     const [loading, setLoading] = useState(false);
-    const state = useRef({ pull: 0, loading: false });
+    const state = useRef({ pull: 0, loading: false, height: 0 });
 
     useEffect(() => {
         const scroller = scrollRef.current;
@@ -72,6 +69,7 @@ export function PullToLoad({
             clearTimeout(idle);
             if (state.current.pull >= threshold) {
                 state.current.loading = true;
+                state.current.height = scroller.scrollHeight;
                 setLoading(true);
                 move(threshold * 0.6, true);
                 onLoad().finally(() => {
@@ -89,6 +87,14 @@ export function PullToLoad({
             scroller.removeEventListener('wheel', onWheel);
         };
     }, [enabled, onLoad, scrollRef, contentRef]);
+
+    // Earlier entries grow the content above the reading position; keep that position in view.
+    useLayoutEffect(() => {
+        const scroller = scrollRef.current;
+        if (!scroller || !state.current.height) return;
+        scroller.scrollTop += scroller.scrollHeight - state.current.height;
+        state.current.height = 0;
+    }, [loaded, scrollRef]);
 
     if (!enabled && !loading) return null;
     const progress = Math.min(1, pull / threshold);

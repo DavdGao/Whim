@@ -1,5 +1,5 @@
 import { ArchiveIcon, CheckIcon, CopyIcon, MessageSquareIcon, XIcon } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import { ActionButton } from '../../components/action-button';
@@ -27,7 +27,12 @@ import type {
 } from '@whimkit/core/contracts';
 import type { ReactNode } from 'react';
 
-import { ConversationEmptyState } from '@/components/ai-elements/conversation';
+import {
+    Conversation,
+    ConversationContent,
+    ConversationEmptyState,
+    ConversationScrollButton,
+} from '@/components/ai-elements/conversation';
 import {
     Message,
     MessageAction,
@@ -35,14 +40,6 @@ import {
     MessageContent,
 } from '@/components/ai-elements/message';
 import { Badge } from '@/components/ui/badge';
-import {
-    MessageScroller,
-    MessageScrollerButton,
-    MessageScrollerContent,
-    MessageScrollerItem,
-    MessageScrollerProvider,
-    MessageScrollerViewport,
-} from '@/components/ui/message-scroller';
 import {
     Trace,
     TraceCollapsible,
@@ -324,7 +321,6 @@ type Row =
     | { readonly kind: 'user'; readonly entry: HistoryEntry }
     | {
           readonly kind: 'turn';
-          readonly id: string;
           readonly entries: readonly HistoryEntry[];
           /** When the user message that started it was committed, if it is loaded. */
           readonly since?: string;
@@ -338,24 +334,16 @@ type Row =
 function rowsOf(history: readonly HistoryEntry[]): Row[] {
     const rows: Row[] = [];
     let since: string | undefined;
-    let userId: string | undefined;
     for (const entry of history) {
         if (entry.item.type === 'message' && entry.item.role === 'user') {
             rows.push({ kind: 'user', entry });
             since = entry.at;
-            userId = entry.item.id;
             continue;
         }
         const last = rows.at(-1);
         if (last?.kind === 'turn')
             rows[rows.length - 1] = { ...last, entries: [...last.entries, entry] };
-        else
-            rows.push({
-                kind: 'turn',
-                id: `turn-${userId ?? entry.item.id}`,
-                entries: [entry],
-                ...(since ? { since } : {}),
-            });
+        else rows.push({ kind: 'turn', entries: [entry], ...(since ? { since } : {}) });
     }
     return rows;
 }
@@ -495,8 +483,6 @@ export function Transcript({
     discarded?: Failure;
 }) {
     const { t } = useT();
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const contentRef = useRef<HTMLDivElement>(null);
     const pending = [...view.inbox.values()]
         .filter(item => item.item.type === 'message' || item.item.type === 'notice')
         .sort((left, right) => left.seq - right.seq);
@@ -517,7 +503,6 @@ export function Transcript({
         const last = rows.at(-1);
         rows.push({
             kind: 'turn',
-            id: last?.kind === 'user' ? `turn-${last.entry.item.id}` : 'working',
             entries: [],
             ...(last?.kind === 'user' ? { since: last.entry.at } : {}),
         });
@@ -577,153 +562,101 @@ export function Transcript({
     ];
 
     return (
-        <MessageScrollerProvider autoScroll defaultScrollPosition="end" scrollPreviousItemPeek={0}>
-            <MessageScroller className="min-h-0 flex-1">
-                <PullToLoad
-                    enabled={hasOlder}
-                    onLoad={onLoadOlder}
-                    scrollRef={scrollRef}
-                    contentRef={contentRef}
-                />
-                <MessageScrollerViewport
-                    ref={scrollRef}
-                    className="scroll-fade-4"
-                    aria-label={t('chat.messages')}
-                >
-                    <MessageScrollerContent
-                        ref={contentRef}
-                        className="mx-auto w-full max-w-3xl gap-8 p-4"
-                    >
-                        {empty ? (
-                            <MessageScrollerItem messageId="empty">
-                                <ConversationEmptyState
-                                    icon={<MessageSquareIcon className="size-8" />}
-                                    title={t('chat.empty.start')}
-                                    description={t('chat.empty.description')}
+        <Conversation className="min-h-0 flex-1">
+            <PullToLoad enabled={hasOlder} onLoad={onLoadOlder} loaded={older.length} />
+            <ConversationContent
+                className="mx-auto w-full max-w-3xl"
+                scrollClassName="scroll-fade-y scroll-fade-4"
+            >
+                {empty ? (
+                    <ConversationEmptyState
+                        icon={<MessageSquareIcon className="size-8" />}
+                        title={t('chat.empty.start')}
+                        description={t('chat.empty.description')}
+                    />
+                ) : null}
+                {rows.map((row, index) => {
+                    if (row.kind === 'user') return renderEntry(row.entry);
+                    const current = index === rows.length - 1;
+                    const over = !(current && working);
+                    const first = row.since ?? row.entries[0]?.at;
+                    const last = row.entries.at(-1)?.at;
+                    return (
+                        <Turn
+                            key={row.entries[0]?.seq ?? 'working'}
+                            footer={
+                                over && row.entries.length > 0 ? (
+                                    <MessageFooter
+                                        text={turnText(row.entries)}
+                                        {...(first && last
+                                            ? {
+                                                  note: formatDuration(
+                                                      Date.parse(last) - Date.parse(first),
+                                                      t
+                                                  ),
+                                              }
+                                            : {})}
+                                    />
+                                ) : undefined
+                            }
+                        >
+                            {row.entries.flatMap(renderEntry)}
+                            {current && draft && (
+                                <AssistantOutput
+                                    text={draft.text}
+                                    reasoning={draft.reasoning}
+                                    streaming
                                 />
-                            </MessageScrollerItem>
-                        ) : null}
-                        {/* One keyed list preserves queued message nodes when history consumes them. */}
-                        {[
-                            ...rows.map((row, index) => {
-                                if (row.kind === 'user')
-                                    return (
-                                        <MessageScrollerItem
-                                            key={row.entry.item.id}
-                                            messageId={row.entry.item.id}
-                                            scrollAnchor
-                                        >
-                                            {renderEntry(row.entry)}
-                                        </MessageScrollerItem>
-                                    );
-                                const current = index === rows.length - 1;
-                                const over = !(current && working);
-                                const first = row.since ?? row.entries[0]?.at;
-                                const last = row.entries.at(-1)?.at;
-                                return (
-                                    <MessageScrollerItem key={row.id} messageId={row.id}>
-                                        <Turn
-                                            footer={
-                                                over && row.entries.length > 0 ? (
-                                                    <MessageFooter
-                                                        text={turnText(row.entries)}
-                                                        {...(first && last
-                                                            ? {
-                                                                  note: formatDuration(
-                                                                      Date.parse(last) -
-                                                                          Date.parse(first),
-                                                                      t
-                                                                  ),
-                                                              }
-                                                            : {})}
-                                                    />
-                                                ) : undefined
-                                            }
-                                        >
-                                            {row.entries.flatMap(renderEntry)}
-                                            {current && draft && (
-                                                <AssistantOutput
-                                                    text={draft.text}
-                                                    reasoning={draft.reasoning}
-                                                    streaming
-                                                />
-                                            )}
-                                            {current && view.run?.retry && (
-                                                <div className="flex flex-col gap-2">
-                                                    {discarded && (
-                                                        <FailureNotice
-                                                            failure={discarded}
-                                                            title={t('chat.failed')}
-                                                        />
-                                                    )}
-                                                    <RetryCountdown
-                                                        at={view.run.retry.at}
-                                                        number={view.run.retry.number}
-                                                    />
-                                                </div>
-                                            )}
-                                            {current && failed && (
-                                                <FailureNotice
-                                                    failure={failed}
-                                                    title={t('chat.failed')}
-                                                />
-                                            )}
-                                        </Turn>
-                                    </MessageScrollerItem>
-                                );
-                            }),
-                            ...view.compactions
-                                .filter(compaction => compaction.state !== 'succeeded')
-                                .map(compaction => (
-                                    <MessageScrollerItem
-                                        key={compaction.compactionId}
-                                        messageId={compaction.compactionId}
-                                    >
-                                        <CompactionLine compaction={compaction} />
-                                    </MessageScrollerItem>
-                                )),
-                            ...pending.map(item =>
-                                item.item.type === 'notice' ? (
-                                    <MessageScrollerItem
-                                        key={item.item.id}
-                                        messageId={item.item.id}
-                                    >
-                                        <NoticeLine notice={item.item} />
-                                    </MessageScrollerItem>
-                                ) : item.item.type === 'message' ? (
-                                    <MessageScrollerItem
-                                        key={item.item.id}
-                                        messageId={item.item.id}
-                                        scrollAnchor
-                                    >
-                                        <UserBubble
-                                            text={textOf(item.item.blocks, 'text')}
-                                            media={{
-                                                sessionId: view.sessionId,
-                                                blocks: mediaOf(item.item.blocks),
-                                            }}
-                                            at={item.at}
-                                            badge={t('chat.pending')}
-                                            onRemove={() =>
-                                                call('session.withdraw', {
-                                                    sessionId: view.sessionId,
-                                                    deliveryId: item.deliveryId,
-                                                })
-                                            }
+                            )}
+                            {current && view.run?.retry && (
+                                <div className="flex flex-col gap-2">
+                                    {discarded && (
+                                        <FailureNotice
+                                            failure={discarded}
+                                            title={t('chat.failed')}
                                         />
-                                    </MessageScrollerItem>
-                                ) : null
-                            ),
-                        ]}
-                        {failed && rows.at(-1)?.kind !== 'turn' && (
-                            <MessageScrollerItem messageId="failure">
+                                    )}
+                                    <RetryCountdown
+                                        at={view.run.retry.at}
+                                        number={view.run.retry.number}
+                                    />
+                                </div>
+                            )}
+                            {current && failed && (
                                 <FailureNotice failure={failed} title={t('chat.failed')} />
-                            </MessageScrollerItem>
-                        )}
-                    </MessageScrollerContent>
-                </MessageScrollerViewport>
-                <MessageScrollerButton aria-label={t('chat.scrollLatest')} />
-            </MessageScroller>
-        </MessageScrollerProvider>
+                            )}
+                        </Turn>
+                    );
+                })}
+                {view.compactions
+                    .filter(compaction => compaction.state !== 'succeeded')
+                    .map(compaction => (
+                        <CompactionLine key={compaction.compactionId} compaction={compaction} />
+                    ))}
+                {pending.map(item =>
+                    item.item.type === 'notice' ? (
+                        <NoticeLine key={item.deliveryId} notice={item.item} />
+                    ) : item.item.type === 'message' ? (
+                        <UserBubble
+                            key={item.deliveryId}
+                            text={textOf(item.item.blocks, 'text')}
+                            media={{ sessionId: view.sessionId, blocks: mediaOf(item.item.blocks) }}
+                            at={item.at}
+                            badge={t('chat.pending')}
+                            onRemove={() =>
+                                call('session.withdraw', {
+                                    sessionId: view.sessionId,
+                                    deliveryId: item.deliveryId,
+                                })
+                            }
+                        />
+                    ) : null
+                )}
+                {failed && rows.at(-1)?.kind !== 'turn' && (
+                    <FailureNotice failure={failed} title={t('chat.failed')} />
+                )}
+            </ConversationContent>
+            <ConversationScrollButton />
+        </Conversation>
     );
 }
