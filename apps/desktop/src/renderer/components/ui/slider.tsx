@@ -42,7 +42,9 @@ function Slider({
                 <SliderPrimitive.Thumb
                     data-slot="slider-thumb"
                     key={index}
-                    className="block size-4 shrink-0 rounded-4xl border border-primary bg-white shadow-sm ring-ring/50 transition-colors select-none hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
+                    // Whim: a primary ring inside a background-colored edge, so the thumb stays visible
+                    // over the primary range (design.md §11.3).
+                    className="block size-5 shrink-0 rounded-4xl border-2 border-background bg-background shadow-[inset_0_0_0_3px_var(--color-primary),0_1px_3px_rgb(0_0_0/0.25)] ring-ring/50 transition-colors select-none hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
                 />
             ))}
         </SliderPrimitive.Root>

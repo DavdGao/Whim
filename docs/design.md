@@ -417,7 +417,7 @@ Configuration lives in Settings; the rail is for feature pages. Planned feature 
 
 ### 11.3 Components and style
 
-Use official shadcn/ui components and AI Elements (conversation, message, trace, code block) from the official registry, installed with the CLI into `apps/desktop/src/components/ui`. Compose and theme them through tokens; do not restyle internals with broad selectors. Keyboard and focus behavior are part of acceptance.
+Use official shadcn/ui components and AI Elements (conversation, message, trace, code block) from the official registry, installed with the CLI into `apps/desktop/src/components/ui`. Compose and theme them through tokens; do not restyle internals with broad selectors. Vendored files change only through the CLI, except for small edits marked with a `Whim:` comment in the file and listed here: the slider thumb is a primary ring inside a background-colored edge, so it stays distinct over the primary range. Keyboard and focus behavior are part of acceptance.
 
 Whim is a consumer application. The visual direction is friendly and soft rather than dense and formal:
 
