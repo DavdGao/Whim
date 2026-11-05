@@ -5,8 +5,8 @@ import type { Access, PermissionRule } from '../contracts/records.js';
 export interface PermissionEnv {
     /** The session's workspace, when it has one. */
     readonly workspace?: string;
-    /** Core's offload directory; tool results point the model there. */
-    readonly artifactsDir: string;
+    /** Whim-owned directories the model may read without asking: the session's own files. */
+    readonly readable: readonly string[];
 }
 
 /**
@@ -84,7 +84,7 @@ export function evaluate(
         if (
             item.kind === 'read' &&
             ((env.workspace && isInside(env.workspace, item.path)) ||
-                isInside(env.artifactsDir, item.path))
+                env.readable.some(root => isInside(root, item.path)))
         )
             continue;
         if (!rules.some(rule => matches(rule, name, item))) return 'ask';

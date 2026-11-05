@@ -323,7 +323,8 @@ A media type is admissible for a session when the card's `input` declares it (na
 
 - Native wins by default; Settings can prefer processing per media type.
 - Limits are checked **before** the message is accepted: per-file bytes and pages from the card or processor, attachment count, and the estimated context cost against `inputBudget`. A message that cannot fit is rejected with a specific error; it never enters the inbox.
-- Original bytes are stored once as immutable, content-addressed files under `<userData>/artifacts/` with metadata in SQLite. Prepared content (extracted text, page images) is snapshotted into SQLite when a reasoning step consumes it, so replay never depends on re-running a processor.
+- Every file Whim keeps for a session lives under `<userData>/sessions/<sessionId>/`: `media/` (attachments and tool media, content-addressed by SHA-256), `offload/` (truncated tool output), and `jobs/` (background job logs). Deleting a session deletes its folder; files are never shared between sessions. Metadata lives in the session's records. Whim refers to its own files with standard `file:` URIs (`pathToFileURL`, percent-encoded), never bare paths, so a reference can later be opened as a link.
+- Original bytes are immutable once written. Prepared content (extracted text, page images) is snapshotted into SQLite when a reasoning step consumes it, so replay never depends on re-running a processor.
 - Core's PDF processor runs in the PDF helper process with byte, page, time, and memory limits. Pages without extractable text are reported as such instead of failing the whole document. A failed attachment marks only that attachment failed.
 - Renderer duplicates no limits: it asks Backend for the effective admission policy of the session and shows it.
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir, rm, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -205,7 +205,7 @@ class Backend {
      * @param catalog Model cards.
      * @param credentials Credentials.
      * @param models Adapter binding.
-     * @param artifactsDir Directory for offloaded tool output.
+     * @param userData The application data directory; session files live in `sessions/`.
      * @param version Application version.
      * @param defaultWorkspace The folder a chat works in when the user picks none.
      */
@@ -215,7 +215,7 @@ class Backend {
         readonly catalog: Catalog,
         readonly credentials: CredentialService,
         readonly models: ModelService,
-        artifactsDir: string,
+        userData: string,
         version: string,
         readonly defaultWorkspace: string
     ) {
@@ -227,7 +227,8 @@ class Backend {
             models,
             credentials,
             this.#baseTools,
-            artifactsDir,
+            join(userData, 'sessions'),
+            join(userData, 'artifacts'),
             sessionId => this.schedule(sessionId, 'job')
         );
         this.agent = new Agent(store, models, this.tools);
@@ -375,6 +376,8 @@ class Backend {
             case 'session.delete': {
                 const { sessionId } = methodSchemas[method].parse(raw);
                 await this.store.deleteSession(sessionId);
+                // Files belong to the session; the journal is gone, so nothing refers to them.
+                await rm(this.tools.sessionDir(sessionId), { recursive: true, force: true });
                 await this.store.setSetting(
                     'sessions.pinned',
                     (await this.#pinned()).filter(id => id !== sessionId)
@@ -886,7 +889,7 @@ async function start(userData: string, version: string): Promise<void> {
             catalog,
             credentials,
             new ModelService(host, credentials),
-            join(userData, 'artifacts'),
+            userData,
             version,
             join(homedir(), 'Whim')
         );

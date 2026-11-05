@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { appendFile, mkdir, open, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { z } from 'zod';
 
@@ -169,7 +170,10 @@ export class ToolRuntime {
      * @param models Model bindings for tools the session's adapter runs itself.
      * @param credentials Credentials for tools that need one.
      * @param baseTools Built-in tools every agent has; they win over a plugin tool of the same name.
-     * @param artifactsDir Directory for offloaded results and job output.
+     * @param sessionsDir Directory holding one folder of files per session (offloads, job output,
+     * media); a session's folder is removed with the session.
+     * @param legacyArtifactsDir Where results were offloaded before per-session folders; still
+     * readable without asking.
      * @param onJobEnded Called after a background job's end is committed.
      */
     constructor(
@@ -178,7 +182,8 @@ export class ToolRuntime {
         private readonly models: ToolModels,
         private readonly credentials: ToolCredentials,
         baseTools: readonly ToolDefinition<unknown>[],
-        readonly artifactsDir: string,
+        readonly sessionsDir: string,
+        private readonly legacyArtifactsDir: string | undefined,
         private readonly onJobEnded: (sessionId: string) => void
     ) {
         this.#base = baseTools;
@@ -186,6 +191,17 @@ export class ToolRuntime {
         this.#builtinSchemas = new Map(
             this.#builtins.map(tool => [tool.name, new CompiledSchema(tool.inputSchema)])
         );
+    }
+
+    /**
+     * The folder of a session's files. Session ids are generated UUIDs; anything else is
+     * rejected so an id can never point outside the sessions directory.
+     * @param sessionId The session.
+     * @returns The absolute folder path.
+     */
+    sessionDir(sessionId: string): string {
+        if (!/^[A-Za-z0-9-]+$/.test(sessionId)) throw new Error(`Invalid session id ${sessionId}.`);
+        return join(this.sessionsDir, sessionId);
     }
 
     /**
@@ -369,7 +385,10 @@ export class ToolRuntime {
         }
         const verdict = evaluate(call.name, access, view.permissionRules, {
             ...env,
-            artifactsDir: this.artifactsDir,
+            readable: [
+                this.sessionDir(sessionId),
+                ...(this.legacyArtifactsDir ? [this.legacyArtifactsDir] : []),
+            ],
         });
         if (verdict === 'ask') {
             const answer = new Promise<Decision>(resolve =>
@@ -454,7 +473,7 @@ export class ToolRuntime {
     ): Promise<Job> {
         const jobId = randomUUID();
         await this.#exec(sessionId, { type: 'start-tool', runId, callId: call.callId, jobId });
-        await mkdir(join(this.artifactsDir, 'jobs'), { recursive: true });
+        await mkdir(join(this.sessionDir(sessionId), 'jobs'), { recursive: true });
         const controller = new AbortController();
         const job: Job = {
             jobId,
@@ -462,7 +481,7 @@ export class ToolRuntime {
             callId: call.callId,
             name: call.name,
             controller,
-            log: join(this.artifactsDir, 'jobs', `${jobId}.log`),
+            log: join(this.sessionDir(sessionId), 'jobs', `${jobId}.log`),
             writes: Promise.resolve(),
             bytes: 0,
             tail: '',
@@ -586,8 +605,9 @@ export class ToolRuntime {
         const bytes = Buffer.byteLength(output.content);
         if (bytes <= maxResultBytes)
             return this.#finish(sessionId, call, status, output.content, { jobId });
-        const path = join(this.artifactsDir, `${call.callId.replace(/[^A-Za-z0-9_-]/g, '_')}.txt`);
-        await mkdir(this.artifactsDir, { recursive: true });
+        const dir = join(this.sessionDir(sessionId), 'offload');
+        const path = join(dir, `${call.callId.replace(/[^A-Za-z0-9_-]/g, '_')}.txt`);
+        await mkdir(dir, { recursive: true });
         await writeFile(path, output.content);
         const encoded = Buffer.from(output.content);
         const head = encoded.subarray(0, previewBytes).toString('utf8').replace(/�+$/, '');
@@ -596,7 +616,7 @@ export class ToolRuntime {
             sessionId,
             call,
             status,
-            `${head}\n\n[… ${bytes - 2 * previewBytes} bytes omitted. The full output (${bytes} bytes) is in ${path}; read it with Read and an offset.]\n\n${tail}`,
+            `${head}\n\n[… ${bytes - 2 * previewBytes} bytes omitted. The full output (${bytes} bytes) is at ${pathToFileURL(path).href}; read it with Read and an offset.]\n\n${tail}`,
             { jobId, offload: { path, bytes } }
         );
     }
@@ -675,7 +695,7 @@ export class ToolRuntime {
             concurrencySafe: true,
             needsWorkspace: false,
             access: () => [],
-            execute: async input => {
+            execute: async (input, context) => {
                 const { jobId, offset = 0 } = z
                     .object({
                         jobId: z.string(),
@@ -685,7 +705,7 @@ export class ToolRuntime {
                 const job = this.#jobs.get(jobId);
                 await job?.writes;
                 const path = join(
-                    this.artifactsDir,
+                    this.sessionDir(context.sessionId),
                     'jobs',
                     `${jobId.replace(/[^A-Za-z0-9-]/g, '')}.log`
                 );

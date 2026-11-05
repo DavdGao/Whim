@@ -1,18 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, normalize, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { ToolEnv } from '@whimkit/core/plugin';
 
 /**
- * Resolve a tool path: absolute paths are kept (normalized), relative ones are
- * interpreted against the session workspace.
+ * Resolve a tool path: `file:` URIs (which Whim uses to reference its own files) become paths,
+ * absolute paths are kept (normalized), relative ones are interpreted against the workspace.
  * @param env Tool environment carrying the workspace.
  * @param path Path given by the model.
  * @returns Absolute normalized path.
  * @throws When the path is relative and the session has no workspace.
  */
 export function resolve(env: ToolEnv, path: string): string {
+    if (path.startsWith('file:')) return fileURLToPath(path);
     if (isAbsolute(path)) {
         return normalize(path);
     }

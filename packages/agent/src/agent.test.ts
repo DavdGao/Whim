@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 import { CompiledSchema, PluginHost, Store, ToolRuntime } from '@whimkit/core';
 import { ApplicationError } from '@whimkit/core/contracts';
@@ -361,7 +362,8 @@ describe('Agent', () => {
                     resolve: () => Promise.reject(new Error('No credentials.')),
                 },
                 [],
-                join(dir, 'artifacts'),
+                join(dir, 'sessions'),
+                undefined,
                 id => ended.push(id)
             );
             return { runtime, declarations: runtime.declarations(undefined, []), ended };
@@ -454,6 +456,30 @@ describe('Agent', () => {
             const view = await store.view(sessionId);
             assert.deepEqual(view.usage, { inputTokens: 40, outputTokens: 5 });
             assert.equal(view.lastUsage, undefined);
+        });
+
+        it("offloads a large result into the session's folder and references it by file URI", async () => {
+            const big = 'x'.repeat(40 * 1024);
+            const { runtime, declarations } = runtimeWith([
+                { ...echo, execute: async () => ({ content: big }) },
+            ]);
+            const { models } = callingModel('Echo', '{"text":"hi"}');
+            const sessionId = await sessionWith('big output', declarations);
+            await drain(
+                new Agent(store, models, runtime, { sleep: noSleep }).run(
+                    sessionId,
+                    'user',
+                    new AbortController().signal
+                )
+            );
+            const result = (await store.view(sessionId)).history.find(
+                entry => entry.item.type === 'tool_result'
+            )?.item;
+            assert.ok(result?.type === 'tool_result');
+            const path = join(runtime.sessionDir(sessionId), 'offload', 'call-1.txt');
+            assert.deepEqual(result.offload, { path, bytes: big.length });
+            assert.ok(result.content.includes(pathToFileURL(path).href));
+            assert.equal(await readFile(path, 'utf8'), big);
         });
 
         it('reports invalid arguments to the model without running the tool', async () => {

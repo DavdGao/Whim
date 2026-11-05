@@ -27,6 +27,10 @@ describe('Read', () => {
         assert.deepEqual(readTool.access({ path: '/etc/hosts' }, { workspace: '/w' }), [
             { kind: 'read', path: '/etc/hosts' },
         ]);
+        assert.deepEqual(
+            readTool.access({ path: 'file:///tmp/a%20b/out.txt' }, { workspace: '/w' }),
+            [{ kind: 'read', path: '/tmp/a b/out.txt' }]
+        );
     });
 
     it('reads a whole small file with numbered lines', async () => {
