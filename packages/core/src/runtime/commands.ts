@@ -76,6 +76,14 @@ export const commandSchema = z.discriminatedUnion('type', [
     z.strictObject({ ...base, type: z.literal('switch-model'), epoch: z.strictObject(epochInput) }),
     z.strictObject({
         ...base,
+        type: z.literal('set-workspace'),
+        workspace: z.string().min(1),
+        deliveryId: idSchema,
+        noticeId: idSchema,
+        observedAt: z.iso.datetime(),
+    }),
+    z.strictObject({
+        ...base,
         type: z.literal('start-run'),
         runId: idSchema,
         trigger: z.enum(['user', 'continue', 'restart', 'job']),
@@ -203,6 +211,34 @@ export function decide(view: SessionView | null, command: Command): Body[] {
             if (command.credentialId !== undefined) body.credentialId = command.credentialId;
             if (command.thinking !== undefined) body.thinking = command.thinking;
             return [body];
+        }
+        case 'set-workspace': {
+            if (run) throw new StoreError('conflict', 'The folder cannot change during a run.');
+            if (view.jobs.length)
+                throw new StoreError(
+                    'conflict',
+                    'The folder cannot change while jobs are running.'
+                );
+            // Chats started without a folder froze an epoch without file tools.
+            if (!view.workspace)
+                throw new StoreError('conflict', 'This chat was started without a folder.');
+            if (view.workspace === command.workspace) return [];
+            return [
+                { type: 'session.updated', workspace: command.workspace },
+                {
+                    type: 'delivery.accepted',
+                    deliveryId: command.deliveryId,
+                    placement: 'next-step',
+                    item: {
+                        type: 'notice',
+                        id: command.noticeId,
+                        origin: { type: 'user' },
+                        observedAt: command.observedAt,
+                        kind: 'workspace-changed',
+                        payload: { from: view.workspace, to: command.workspace },
+                    },
+                },
+            ];
         }
         case 'switch-model':
             if (run) throw new StoreError('conflict', 'The model cannot change during a run.');

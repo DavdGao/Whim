@@ -11,13 +11,7 @@ import { mathPlugin, normalizeMath } from './math';
 import { NativeToolView, ToolCallView } from './tool-call';
 
 import type { Draft } from './use-session';
-import type {
-    Block,
-    Failure,
-    HistoryEntry,
-    SessionView,
-    ToolResult,
-} from '@whimkit/core/contracts';
+import type { Block, Failure, Notice, SessionView, ToolResult } from '@whimkit/core/contracts';
 import type { ReactNode } from 'react';
 
 import {
@@ -236,24 +230,32 @@ function Bubble({
 
 /**
  * A notice line, shown for the kinds the user should see.
- * @param props The history entry.
- * @param props.entry A notice entry.
+ * @param props The notice.
+ * @param props.notice A committed or pending notice.
  * @returns The line, or null.
  */
-function NoticeLine({ entry }: { entry: HistoryEntry }) {
+function NoticeLine({ notice }: { notice: Notice }) {
     const { t } = useT();
-    if (entry.item.type !== 'notice') return null;
-    const notice = entry.item;
-    const text =
-        notice.kind === 'restarted'
-            ? t('chat.restarted')
-            : notice.kind === 'interrupted'
-              ? notice.payload.reason === 'user'
-                  ? t('chat.userInterrupted')
-                  : null
-              : notice.kind === 'job-finished'
-                ? t('tool.jobFinished', { tool: notice.payload.tool })
-                : t('tool.jobLost', { tool: notice.payload.tool });
+    let text: string | null;
+    switch (notice.kind) {
+        case 'restarted':
+            text = t('chat.restarted');
+            break;
+        case 'interrupted':
+            text = notice.payload.reason === 'user' ? t('chat.userInterrupted') : null;
+            break;
+        case 'job-finished':
+            text = t('tool.jobFinished', { tool: notice.payload.tool });
+            break;
+        case 'job-lost':
+            text = t('tool.jobLost', { tool: notice.payload.tool });
+            break;
+        case 'workspace-changed':
+            text = t('chat.workspace.changed', {
+                name: notice.payload.to.split(/[\\/]/).filter(Boolean).at(-1) ?? notice.payload.to,
+            });
+            break;
+    }
     if (!text) return null;
     return <p className="text-muted-foreground text-center text-xs">{text}</p>;
 }
@@ -298,7 +300,9 @@ export function Transcript({
     discarded?: Failure;
 }) {
     const { t } = useT();
-    const pending = [...view.inbox.values()].filter(item => item.item.type === 'message');
+    const pending = [...view.inbox.values()]
+        .filter(item => item.item.type === 'message' || item.item.type === 'notice')
+        .sort((left, right) => left.seq - right.seq);
     const failed =
         !view.run && view.lastRun?.result.outcome === 'failed'
             ? view.lastRun.result.failure
@@ -353,11 +357,13 @@ export function Transcript({
                             )}
                         </Bubble>
                     ) : entry.item.type === 'notice' ? (
-                        <NoticeLine key={entry.item.id} entry={entry} />
+                        <NoticeLine key={entry.item.id} notice={entry.item} />
                     ) : null
                 )}
                 {pending.map(item =>
-                    item.item.type === 'message' ? (
+                    item.item.type === 'notice' ? (
+                        <NoticeLine key={item.deliveryId} notice={item.item} />
+                    ) : item.item.type === 'message' ? (
                         <Bubble
                             key={item.deliveryId}
                             role="user"

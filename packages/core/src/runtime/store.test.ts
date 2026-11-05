@@ -303,4 +303,64 @@ describe('Store', () => {
         assert.deepEqual(await store.read(sessionId), []);
         await store.close();
     });
+
+    it('changes the folder between runs with a notice for the model', async () => {
+        const store = await Store.open(join(dir, 'workspace.sqlite'));
+        const plain = await createSession(store);
+        const change = (sessionId: string, workspace: string) =>
+            store.execute(
+                cmd(sessionId, {
+                    type: 'set-workspace',
+                    workspace,
+                    deliveryId: 'd1',
+                    noticeId: 'n1',
+                    observedAt: '2026-11-05T00:00:00.000Z',
+                })
+            );
+        await assert.rejects(change(plain, '/b'), { code: 'conflict' });
+        const sessionId = randomUUID();
+        await store.execute(
+            cmd(sessionId, {
+                type: 'create',
+                title: 'Chat',
+                credentialId: 'cred',
+                workspace: '/a',
+                epoch: {
+                    epochId: randomUUID(),
+                    system: 'system',
+                    card,
+                    renderer: 1,
+                    tools: [],
+                    nativeTools: [],
+                },
+            })
+        );
+        const runId = randomUUID();
+        await store.execute(cmd(sessionId, { type: 'start-run', runId, trigger: 'user' }));
+        await assert.rejects(change(sessionId, '/b'), { code: 'conflict' });
+        await store.execute(
+            cmd(sessionId, { type: 'end-run', runId, result: { outcome: 'completed' } })
+        );
+        assert.deepEqual(
+            (await change(sessionId, '/b')).map(record => record.body),
+            [
+                { type: 'session.updated', workspace: '/b' },
+                {
+                    type: 'delivery.accepted',
+                    deliveryId: 'd1',
+                    placement: 'next-step',
+                    item: {
+                        type: 'notice',
+                        id: 'n1',
+                        origin: { type: 'user' },
+                        observedAt: '2026-11-05T00:00:00.000Z',
+                        kind: 'workspace-changed',
+                        payload: { from: '/a', to: '/b' },
+                    },
+                },
+            ]
+        );
+        assert.equal((await store.view(sessionId)).workspace, '/b');
+        await store.close();
+    });
 });

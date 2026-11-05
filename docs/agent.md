@@ -24,7 +24,9 @@ A session's state is the fold of its journal:
 - **Runs** — one active run at most. A run is a sequence of steps; each step makes one or more model attempts.
 - **Jobs** — tool executions owned by Core's Job service, referenced from history.
 
-A session has a **workspace**: a directory the user picks when creating it, or `~/Whim` (created on demand) when they pick none, fixed for the session's life. Sessions from before this default may have none; workspace tools are offered only with a workspace, and the epoch's system prompt is the user's agent profile (name and instructions from Settings) followed by the workspace path, platform, and date as of the epoch's start. Profile edits therefore reach a session only at its next epoch.
+A session has a **workspace**: a directory the user picks, or `~/Whim` (created on demand) when they pick none. Sessions from before this default may have none; workspace tools are offered only with a workspace, and the epoch's system prompt is the user's agent profile (name and instructions from Settings) followed by the workspace path, platform, and date as of the epoch's start. Profile edits therefore reach a session only at its next epoch.
+
+The user can move a session to another folder between runs (no active run and no running background job). `set-workspace` commits `session.updated { workspace }` and a `workspace-changed { from, to }` notice delivery in one transaction. The frozen system prompt keeps the old path until the next epoch; the notice tells the model that tools now run in the new folder and that earlier paths refer to the old one. Tools, permissions, and the per-workspace lock use the current folder from the next call on. Session grants stay as recorded: a path grant still covers only its original prefix. Sessions without a workspace cannot gain one this way, because their epoch has no file tools.
 
 The journal head (latest seq), the epoch, and the run generation are separate values. New input advances the head without invalidating an in-flight step.
 

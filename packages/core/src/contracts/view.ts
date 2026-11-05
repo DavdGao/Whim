@@ -185,6 +185,7 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
             if (body.credentialId !== undefined) next.credentialId = body.credentialId;
             if (body.thinking === null) delete next.thinking;
             else if (body.thinking !== undefined) next.thinking = body.thinking;
+            if (body.workspace !== undefined) next.workspace = body.workspace;
             return next;
         }
         case 'epoch.started':

@@ -33,6 +33,14 @@ export const agentProfileSchema = z.strictObject({
 });
 export type AgentProfile = z.infer<typeof agentProfileSchema>;
 
+/** Branch and uncommitted line counts of a folder's git repository. */
+export interface GitStatus {
+    /** Branch name, or the short commit when HEAD is detached. */
+    readonly head: string;
+    readonly insertions: number;
+    readonly deletions: number;
+}
+
 /** Parameters of every Renderer → Backend method; validated in Backend. */
 export const methodSchemas = {
     'app.state': z.strictObject({}),
@@ -75,6 +83,11 @@ export const methodSchemas = {
         cardId: idSchema,
         credentialId: idSchema,
     }),
+    'session.setWorkspace': z.strictObject({
+        sessionId: idSchema,
+        workspace: z.string().min(1).max(4096),
+    }),
+    'workspace.git': z.strictObject({ path: z.string().min(1).max(4096) }),
     'session.rename': z.strictObject({
         sessionId: idSchema,
         title: z.string().trim().min(1).max(200),
@@ -195,6 +208,8 @@ export interface Results {
     'session.setThinking': null;
     'session.switchModel': null;
     'session.rename': null;
+    'session.setWorkspace': null;
+    'workspace.git': GitStatus | null;
 }
 
 /** Errors crossing IPC: a code for the UI, a message, optional field issues or failure. */

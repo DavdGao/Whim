@@ -27,6 +27,9 @@ export function renderNotice(notice: Notice): string {
         case 'job-lost':
             text = `Background job ${notice.payload.jobId} (${notice.payload.tool}) was lost when the application restarted; its outcome is unknown.`;
             break;
+        case 'workspace-changed':
+            text = `The user changed the working folder from ${notice.payload.from} to ${notice.payload.to}. Tools now run there and relative paths resolve against it; paths mentioned earlier in this conversation refer to the previous folder.`;
+            break;
     }
     return `<system-reminder>${text}</system-reminder>`;
 }
