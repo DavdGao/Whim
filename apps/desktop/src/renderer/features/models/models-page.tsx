@@ -367,7 +367,8 @@ export function ModelSettings({ state }: { state: AppState }) {
                                             t('models.context', {
                                                 tokens: formatter.format(entry.card.contextWindow),
                                             }),
-                                        t(`models.layer.${entry.layer}`),
+                                        entry.layer !== 'upstream' &&
+                                            t(`models.layer.${entry.layer}`),
                                     ]
                                         .filter(Boolean)
                                         .join(' · ')}
