@@ -67,6 +67,7 @@ function systemPrompt(
     const now = new Date();
     const lines = [
         profile.systemPrompt.replaceAll('{name}', profile.name),
+        ...(profile.userName ? ['', `Address the user as ${profile.userName}.`] : []),
         '',
         `<environment observed-at="${now.toISOString()}">`,
         `Date: ${now.toISOString().slice(0, 10)}`,

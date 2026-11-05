@@ -2,7 +2,7 @@ import { MessageSquareIcon, SettingsIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
-import logo from './assets/whim.svg';
+import { AgentAvatar } from './components/agent-avatar';
 import { ChatPage } from './features/chat/chat-page';
 import { SettingsPage } from './features/settings/settings-page';
 import { AppStateProvider } from './lib/app-state';
@@ -146,12 +146,12 @@ function Shell() {
                             <SidebarMenuItem>
                                 <SidebarMenuButton
                                     size="lg"
-                                    tooltip={t('app.name')}
+                                    tooltip={state?.agent.name ?? t('app.name')}
                                     onClick={() => setPage('chat')}
                                 >
-                                    <img src={logo} alt="" className="size-8 shrink-0 rounded-xl" />
-                                    <span className="text-base font-semibold tracking-tight">
-                                        {t('app.name')}
+                                    <AgentAvatar icon={state?.agent.icon} />
+                                    <span className="truncate text-base font-semibold tracking-tight">
+                                        {state?.agent.name ?? t('app.name')}
                                     </span>
                                 </SidebarMenuButton>
                             </SidebarMenuItem>

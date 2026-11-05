@@ -52,13 +52,16 @@ export function AgentSettings({ state }: { state: AppState }) {
     const [name, setName] = useState(state.agent.name);
     const [prompt, setPrompt] = useState(state.agent.systemPrompt);
     const [icon, setIcon] = useState(state.agent.icon);
+    const [userName, setUserName] = useState(state.agent.userName ?? '');
     const input = useRef<HTMLInputElement>(null);
     const profile = (): AgentProfile => ({
         name: name.trim(),
         systemPrompt: prompt.trim(),
         ...(icon ? { icon } : {}),
+        ...(userName.trim() ? { userName: userName.trim() } : {}),
     });
     const changed =
+        userName !== (state.agent.userName ?? '') ||
         name !== state.agent.name ||
         prompt !== state.agent.systemPrompt ||
         icon !== state.agent.icon;
@@ -121,6 +124,21 @@ export function AgentSettings({ state }: { state: AppState }) {
                                 maxLength={60}
                                 onChange={event => setName(event.currentTarget.value)}
                             />
+                        </Field>
+                        <Field>
+                            <FieldLabel htmlFor="agent-user-name">{t('agent.userName')}</FieldLabel>
+                            <Input
+                                id="agent-user-name"
+                                value={userName}
+                                maxLength={60}
+                                placeholder={t('agent.userNamePlaceholder')}
+                                onChange={event => setUserName(event.currentTarget.value)}
+                            />
+                            <FieldDescription>
+                                {t('agent.userNameDescription', {
+                                    name: name.trim() || state.agent.name,
+                                })}
+                            </FieldDescription>
                         </Field>
                         <Field>
                             <FieldLabel htmlFor="agent-prompt">{t('agent.prompt')}</FieldLabel>

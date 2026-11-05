@@ -132,6 +132,13 @@ function createWindow(): void {
     window.on('closed', () => {
         window = undefined;
     });
+    // Links never open Electron windows: web links go to the system browser, anything else is
+    // refused. In-page navigation away from the app is blocked the same way.
+    window.webContents.setWindowOpenHandler(({ url }) => {
+        if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+        return { action: 'deny' };
+    });
+    window.webContents.on('will-navigate', event => event.preventDefault());
     void window.loadFile(join(here, 'renderer', 'index.html'));
 }
 
