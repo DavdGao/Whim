@@ -250,16 +250,16 @@ Core's Job service owns every execution; the agent only waits. A call runs as a 
 
 ### 9.5 Truncation and offload
 
-A result above 32 KiB of text is written to `<userData>/artifacts/<callId>.txt`; the context gets the first and last 8 KiB, the total size, and the file path, which `Read` accepts with offsets and which is readable without a permission prompt. Background job output is bounded the same way. Nothing is silently dropped.
+A result above 32 KiB of text is written to `<userData>/sessions/<sessionId>/offload/<callId>.txt`; the context gets the first and last 8 KiB, the total size, and the file's `file:` URI, which `Read` accepts (with offsets) and which is readable without a permission prompt. Results offloaded before per-session folders stay readable under `<userData>/artifacts/`. Background job output is bounded the same way. Nothing is silently dropped.
 
 ## 10. Permissions
 
 Core decides each call from its `access` list:
 
-| Access                                                          | Default (manual mode) |
-| --------------------------------------------------------------- | --------------------- |
-| none, or `read` inside the workspace or the artifacts directory | allow                 |
-| `read` elsewhere, `write`, `execute`, `network`                 | ask                   |
+| Access                                                           | Default (manual mode) |
+| ---------------------------------------------------------------- | --------------------- |
+| none, or `read` inside the workspace or the session's own folder | allow                 |
+| `read` elsewhere, `write`, `execute`, `network`                  | ask                   |
 
 The user answers an ask with **Allow once**, **Allow for this session**, or **Deny**. A session grant becomes a rule for that tool: a path prefix for files (the workspace), the first word of the command for `execute`, the host for `network`. A denial produces a `denied` result telling the model the user declined. Stop while an ask is open cancels the call.
 
