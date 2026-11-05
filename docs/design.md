@@ -444,6 +444,8 @@ Configuration lives in Settings; the rail is for feature pages. Planned feature 
 
 ### 11.2 Data flow
 
+Chat retains the AI Elements Conversation's bottom-following behavior. Its scroll viewport uses shadcn's `scroll-fade-y` utility: both edges fade when more content exists in that direction, and short transcripts have no fade. Running sessions display the existing Spinner with a localized accessible label instead of a pulsing dot, respecting reduced motion. Acceptance covers the running/idle indicator, English and Simplified Chinese labels, and fade behavior at the top, middle, bottom, and without overflow. Sending a message does not introduce top anchoring.
+
 - Renderer loads a session with a query returning a bounded page of history plus the current head seq, then subscribes with `afterSeq`. Backend pushes committed records in batches after each commit; Renderer folds them into its presentation state. No full snapshots per token.
 - Streaming deltas are transient events delivered on the same subscription, coalesced to a short interval, and not stored; the attempt's output is committed when it ends ([agent.md §5.1](agent.md#51-streaming-output)). An `attempt.discarded` event tells the frontend to drop a failed attempt's text before a retry.
 - Commands return acceptance, not completion. The UI shows queued, included, running, retrying, interrupted, failed, and completed states from committed records.

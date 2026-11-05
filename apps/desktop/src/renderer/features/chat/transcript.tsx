@@ -564,7 +564,10 @@ export function Transcript({
     return (
         <Conversation className="min-h-0 flex-1">
             <PullToLoad enabled={hasOlder} onLoad={onLoadOlder} loaded={older.length} />
-            <ConversationContent className="mx-auto w-full max-w-3xl">
+            <ConversationContent
+                className="mx-auto w-full max-w-3xl"
+                scrollClassName="scroll-fade-y scroll-fade-4"
+            >
                 {empty ? (
                     <ConversationEmptyState
                         icon={<MessageSquareIcon className="size-8" />}

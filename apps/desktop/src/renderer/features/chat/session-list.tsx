@@ -34,6 +34,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
 type Group = { label: MessageKey; sessions: SessionInfo[] };
@@ -213,7 +214,10 @@ function SessionRow({
                     {session.title || t('chat.untitled')}
                 </span>
                 {session.running && (
-                    <span className="bg-primary size-1.5 shrink-0 animate-pulse rounded-full" />
+                    <Spinner
+                        className="text-primary size-3.5 shrink-0 motion-reduce:animate-none"
+                        aria-label={t('chat.running')}
+                    />
                 )}
                 <span
                     className={cn(
