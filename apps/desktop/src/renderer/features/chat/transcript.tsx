@@ -12,7 +12,14 @@ import { mathPlugin, normalizeMath } from './math';
 import { NativeToolView, ToolCallView } from './tool-call';
 
 import type { Draft } from './use-session';
-import type { Block, Failure, Notice, SessionView, ToolResult } from '@whimkit/core/contracts';
+import type {
+    Block,
+    Failure,
+    Notice,
+    SessionView,
+    ToolResult,
+    Usage,
+} from '@whimkit/core/contracts';
 import type { ReactNode } from 'react';
 
 import {
@@ -28,6 +35,7 @@ import {
     MessageContent,
 } from '@/components/ai-elements/message';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
     Trace,
     TraceCollapsible,
@@ -90,6 +98,52 @@ function CopyAction({ text }: { text: string }) {
                 {copied ? <CheckIcon /> : <CopyIcon />}
             </MessageAction>
         </MessageActions>
+    );
+}
+
+/**
+ * Tokens the whole chat has used so far, including tool-internal model calls; a tooltip
+ * breaks them down. Unknown fields stay unknown.
+ * @param props The usage.
+ * @param props.usage The session's summed usage.
+ * @returns The line, or null before anything was reported.
+ */
+function ChatUsage({ usage }: { usage: Usage }) {
+    const { t, locale } = useT();
+    const total =
+        usage.totalTokens ??
+        (usage.inputTokens !== undefined || usage.outputTokens !== undefined
+            ? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+            : undefined);
+    if (total === undefined) return null;
+    const exact = new Intl.NumberFormat(locale);
+    const compact = new Intl.NumberFormat(locale, { notation: 'compact' });
+    const rows: [string, number | undefined][] = [
+        [t('context.input'), usage.inputTokens],
+        [t('context.cached'), usage.cachedInputTokens],
+        [t('context.output'), usage.outputTokens],
+        [t('context.reasoning'), usage.reasoningTokens],
+    ];
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <span tabIndex={0} className="text-muted-foreground ml-auto text-xs tabular-nums">
+                    {t('chat.usage', { tokens: compact.format(total) })}
+                </span>
+            </TooltipTrigger>
+            <TooltipContent>
+                <dl className="grid grid-cols-[auto_auto] gap-x-4 gap-y-0.5 text-xs">
+                    {rows.map(([label, value]) => (
+                        <div key={label} className="contents">
+                            <dt>{label}</dt>
+                            <dd className="text-end tabular-nums">
+                                {value === undefined ? '—' : exact.format(value)}
+                            </dd>
+                        </div>
+                    ))}
+                </dl>
+            </TooltipContent>
+        </Tooltip>
     );
 }
 
@@ -158,6 +212,7 @@ function ReasoningLine({
  * @param props.onRemove Optional remove action.
  * @param props.children Tool calls shown after the text.
  * @param props.leading Provider-executed calls, which happen before the answer text.
+ * @param props.usage The chat's token usage, shown under the last answer only.
  * @returns The message.
  */
 function Bubble({
@@ -170,6 +225,7 @@ function Bubble({
     onRemove,
     children,
     leading,
+    usage,
 }: {
     role: 'user' | 'assistant';
     text: string;
@@ -180,11 +236,14 @@ function Bubble({
     onRemove?: () => Promise<unknown>;
     children?: ReactNode;
     leading?: ReactNode;
+    usage?: Usage;
 }) {
     const { t } = useT();
+    const assistant = role === 'assistant';
     return (
-        <Message from={role}>
-            <MessageContent>
+        // Answers take the full width so short text above a code block does not narrow it.
+        <Message from={role} className={assistant ? 'max-w-full' : undefined}>
+            <MessageContent className={assistant ? 'w-full' : undefined}>
                 {reasoning || hasContent(leading) ? (
                     <Trace>
                         {reasoning ? (
@@ -205,7 +264,12 @@ function Bubble({
                     <p className="whitespace-pre-wrap">{text}</p>
                 )}
                 {hasContent(children) ? <Trace>{children}</Trace> : null}
-                {role === 'assistant' && !streaming && text && <CopyAction text={text} />}
+                {assistant && !streaming && (text || usage) && (
+                    <div className="flex items-center gap-2">
+                        {text && <CopyAction text={text} />}
+                        {usage && <ChatUsage usage={usage} />}
+                    </div>
+                )}
                 {(badge || onRemove) && (
                     <div className="flex items-center gap-2">
                         {badge && <Badge variant="secondary">{badge}</Badge>}
@@ -306,6 +370,12 @@ export function Transcript({
             ? view.lastRun.result.failure
             : undefined;
     const empty = view.history.length === 0 && pending.length === 0 && !draft;
+    // Usage is the chat's running total, so it shows once, under the latest answer.
+    const lastAnswer = view.run
+        ? undefined
+        : view.history.findLast(
+              entry => entry.item.type === 'message' && entry.item.role === 'assistant'
+          )?.item.id;
     const results = new Map<string, ToolResult>();
     for (const entry of view.history)
         if (entry.item.type === 'tool_result') results.set(entry.item.callId, entry.item);
@@ -330,6 +400,7 @@ export function Transcript({
                             {...(entry.status === 'interrupted'
                                 ? { badge: t('chat.interrupted') }
                                 : {})}
+                            {...(entry.item.id === lastAnswer ? { usage: view.usage } : {})}
                             leading={entry.item.blocks.map(block =>
                                 block.type === 'native_tool_call' ? (
                                     <NativeToolView
