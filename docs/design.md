@@ -413,7 +413,9 @@ Whim is a consumer application. The visual direction is friendly and soft rather
 - **Choices.** Single-choice pickers (model, thinking level, language, credential type, enum fields) are `DropdownMenu` radio menus behind a button trigger (`ChoiceMenu`). The shadcn `Select` component is not used; lint forbids importing it outside vendored code.
 - **Vocabulary.** The UI speaks in user terms. Internal design concepts such as cards, layers, adapters, or slots do not appear in visible text: a card is a "model", a slot is a "default model".
 - **Messages.** Assistant actions (copy) appear while the message is hovered or focused. Reasoning shows its duration ("Thought for 12 s") from the reasoning block's recorded `durationMs`.
-- **Icons.** Models and plugins show their plugin-provided icon (§5.1), falling back to a generic glyph.
+- **Icons.** Models and plugins show their plugin-provided icon (§5.1), falling back to a generic glyph. Compact controls such as the model button under the input show text only.
+- **Type.** The platform UI font (SF Pro on macOS) with grayscale antialiasing. Regular weight is the default; `font-medium` marks only titles and labels that must stand out, `font-semibold` only page headings. Selection is shown by surface, not weight. Hierarchy within a control comes from color: the primary value (model name) is darker than its qualifier (thinking level).
+- **Status boxes.** Errors, warnings, and notices use `StatusAlert`: border, background, icon, and text share one hue per tone (red, amber, blue), with the border darker than the tinted background. Red text alone is not an error state.
 
 ## 12. Observability
 

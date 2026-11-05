@@ -8,6 +8,7 @@ import { useAction } from '../../lib/use-action';
 
 import type { AppState } from '../../../shared/ipc';
 
+import { StatusAlert } from '@/components/status-alert';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -144,9 +145,12 @@ export function PluginSettings({ state }: { state: AppState }) {
                                                     : ''}
                                             </p>
                                             {plugin.error && (
-                                                <p className="text-destructive mt-2 text-xs break-all">
+                                                <StatusAlert
+                                                    tone="error"
+                                                    className="mt-2 text-xs break-all"
+                                                >
                                                     {plugin.error}
-                                                </p>
+                                                </StatusAlert>
                                             )}
                                         </div>
                                         <div className="flex flex-col items-end gap-1">
