@@ -219,7 +219,7 @@ interface ToolOutput {
 }
 ```
 
-The tool set is frozen into the epoch (`tools`: name, description, input schema, in registration order) together with `nativeTools`, the native tool ids the adapter will execute. Sessions created before tools existed have empty sets. A tool whose plugin is disabled later stays declared until compaction but fails its calls immediately (§7.2).
+The tool set is frozen into the epoch (`tools`: name, description, input schema, in registration order) together with `nativeTools`, the ids the provider executes inside its chat call, and `providerTools`, the ids whose declared local tool Core runs through the adapter as separate provider calls ([design.md §7.6](design.md#76-native-and-local-tools)). Sessions created before tools existed have empty sets. A tool whose plugin is disabled later stays declared until compaction but fails its calls immediately (§7.2).
 
 ### 9.2 Calls and results
 

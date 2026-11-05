@@ -4,6 +4,8 @@ import { join } from 'node:path';
 
 import { z } from 'zod';
 
+import { selectableLevels } from '../contracts/card.js';
+
 import { CompiledSchema } from './json-schema.js';
 import { evaluate } from './permissions.js';
 import { describeError } from './plugin-host.js';
@@ -11,9 +13,33 @@ import { describeError } from './plugin-host.js';
 import type { Command } from './commands.js';
 import type { PluginHost } from './plugin-host.js';
 import type { Store } from './store.js';
+import type { FrozenChatCard, ThinkingLevel } from '../contracts/card.js';
 import type { ToolDeclaration, ToolResult } from '../contracts/records.js';
 import type { OpenCall, SessionView } from '../contracts/view.js';
-import type { ToolDefinition, ToolOutput } from '../plugin/index.js';
+import type { ChatSession, ToolContext, ToolDefinition, ToolOutput } from '../plugin/index.js';
+
+/** Opens the session's model binding for tools the adapter runs; Core's ModelService. */
+export interface ToolModels {
+    open(card: FrozenChatCard, credentialId: string): Promise<ChatSession>;
+}
+
+/**
+ * The thinking level of a provider-run tool call. Providers may require thinking for their
+ * tools, so the chat's level is used when on and the card's default (or highest) otherwise.
+ * @param view The session view.
+ * @returns The level, or undefined when the card has no adjustable thinking.
+ */
+function toolThinking(view: SessionView): ThinkingLevel | undefined {
+    const levels = selectableLevels(view.epoch.card.thinking);
+    const on: readonly ThinkingLevel[] = levels.filter(level => level !== 'off');
+    if (view.thinking && on.includes(view.thinking)) return view.thinking;
+    const thinking = view.epoch.card.thinking;
+    const fallback =
+        thinking && typeof thinking === 'object' && 'default' in thinking
+            ? on.find(level => level === thinking.default)
+            : undefined;
+    return fallback ?? on.at(-1);
+}
 
 /** Results above this many UTF-8 bytes are offloaded to a file with a preview in context. */
 export const maxResultBytes = 32 * 1024;
@@ -128,6 +154,7 @@ export class ToolRuntime {
      * Create the runtime.
      * @param store Persistence.
      * @param host Plugin-registered tools.
+     * @param models Model bindings for tools the session's adapter runs itself.
      * @param baseTools Built-in tools every agent has; they win over a plugin tool of the same name.
      * @param artifactsDir Directory for offloaded results and job output.
      * @param onJobEnded Called after a background job's end is committed.
@@ -135,6 +162,7 @@ export class ToolRuntime {
     constructor(
         private readonly store: Store,
         private readonly host: PluginHost,
+        private readonly models: ToolModels,
         baseTools: readonly ToolDefinition<unknown>[],
         readonly artifactsDir: string,
         private readonly onJobEnded: (sessionId: string) => void
@@ -149,7 +177,8 @@ export class ToolRuntime {
     /**
      * The tools to freeze into a new epoch.
      * @param workspace The session's workspace.
-     * @param nativeTools Standard ids the provider executes natively.
+     * @param nativeTools Standard ids the provider executes inside its chat call. Local tools with
+     * these ids are left out; tools the adapter runs as separate calls keep their local declaration.
      * @returns Base tools, then plugin tools in registration order, then the job tools.
      */
     declarations(workspace: string | undefined, nativeTools: readonly string[]): ToolDeclaration[] {
@@ -339,7 +368,13 @@ export class ToolRuntime {
                 return;
             }
         }
-        const job = await this.#startJob(sessionId, runId, call, tool, input, env.workspace);
+        const standard = tool.standard;
+        const execute =
+            standard && view.epoch.providerTools.includes(standard)
+                ? (args: unknown, context: ToolContext) =>
+                      this.#runOnProvider(view, standard, args, context)
+                : (args: unknown, context: ToolContext) => tool.execute(args, context);
+        const job = await this.#startJob(sessionId, runId, call, execute, input, env.workspace);
         const limit = tool.backgroundAfterMs?.(input);
         const outcome = await race(job.done, limit, signal);
         if (outcome.kind === 'done') {
@@ -377,7 +412,7 @@ export class ToolRuntime {
      * @param sessionId The session.
      * @param runId The run.
      * @param call The call.
-     * @param tool The definition.
+     * @param execute Runs the tool: its own implementation, or the provider's.
      * @param input Validated input.
      * @param workspace The session's workspace.
      * @returns The running job.
@@ -386,7 +421,7 @@ export class ToolRuntime {
         sessionId: string,
         runId: string,
         call: OpenCall,
-        tool: ToolDefinition<unknown>,
+        execute: (input: unknown, context: ToolContext) => Promise<ToolOutput>,
         input: unknown,
         workspace: string | undefined
     ): Promise<Job> {
@@ -414,22 +449,51 @@ export class ToolRuntime {
                 .then(() => appendFile(job.log, chunk))
                 .catch(error => console.error(`Job ${jobId} output:`, describeError(error)));
         };
-        job.done = tool
-            .execute(input, {
-                signal: controller.signal,
-                sessionId,
-                callId: call.callId,
-                ...(workspace ? { workspace } : {}),
-                output,
-            })
-            .catch((error: unknown) => ({
-                content: controller.signal.aborted
-                    ? `Cancelled: ${describeError(controller.signal.reason)}`
-                    : describeError(error),
-                isError: true,
-            }));
+        job.done = execute(input, {
+            signal: controller.signal,
+            sessionId,
+            callId: call.callId,
+            ...(workspace ? { workspace } : {}),
+            output,
+        }).catch((error: unknown) => ({
+            content: controller.signal.aborted
+                ? `Cancelled: ${describeError(controller.signal.reason)}`
+                : describeError(error),
+            isError: true,
+        }));
         this.#jobs.set(jobId, job);
         return job;
+    }
+
+    /**
+     * Run a standard tool through the session's adapter as a separate provider call and record
+     * its token usage. The call has its own context; only its usage joins the session's.
+     * @param view The session view when the call started.
+     * @param standard The standard tool id.
+     * @param input Validated input.
+     * @param context The tool context.
+     * @returns The tool output.
+     */
+    async #runOnProvider(
+        view: SessionView,
+        standard: string,
+        input: unknown,
+        context: ToolContext
+    ): Promise<ToolOutput> {
+        const session = await this.models.open(view.epoch.card, view.credentialId);
+        if (!session.runTool) throw new Error(`The model provider cannot run ${standard} now.`);
+        const thinking = toolThinking(view);
+        // #resolve admitted only JSON objects.
+        const result = await session.runTool(standard, input as Record<string, unknown>, {
+            signal: context.signal,
+            ...(thinking ? { thinking } : {}),
+        });
+        await this.#exec(context.sessionId, {
+            type: 'record-tool-usage',
+            callId: context.callId,
+            usage: result.usage,
+        });
+        return result.output;
     }
 
     /**

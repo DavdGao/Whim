@@ -10,12 +10,18 @@ import { z } from 'zod';
 
 import { httpFailure, streamFailure } from './errors.js';
 
-import type { FrozenChatCard, NativeToolCallBlock, ThinkingLevel } from '@whimkit/core/contracts';
+import type {
+    FrozenChatCard,
+    NativeToolCallBlock,
+    ThinkingLevel,
+    Usage,
+} from '@whimkit/core/contracts';
 import type {
     ChatAdapter,
     ChatEvent,
     ChatRequest,
     ChatSession,
+    ProviderToolResult,
     ResolvedCredential,
 } from '@whimkit/core/plugin';
 import type { NativeEvent } from '@whimkit/openai-protocol';
@@ -73,10 +79,16 @@ const optionsSchema = {
 } as const;
 
 /** Standard native tool ids this adapter implements, and the DashScope tool each maps to. */
-const nativeToolTypes: Readonly<Record<string, string>> = {
-    web_search: 'web_search',
-    web_fetch: 'web_extractor',
-};
+const nativeToolTypes: Readonly<Record<string, string>> = { web_search: 'web_search' };
+
+/** Standard tools this adapter runs as separate calls: the extractor needs thinking on. */
+const separateTools = ['web_fetch'] as const;
+const supportedTools = new Set<string>([...Object.keys(nativeToolTypes), ...separateTools]);
+
+const fetchInput = z.object({ url: z.string(), prompt: z.string().optional() });
+/** What the extracting model replies when it got none of the page. */
+const notAccessible = 'NOT_ACCESSIBLE';
+const fetchMaxOutputTokens = 16_384;
 
 const extractorCallSchema = z.looseObject({
     type: z.literal('web_extractor_call'),
@@ -193,30 +205,15 @@ class DashScopeSession implements ChatSession {
      * @yields Normalized chat events.
      */
     async *stream(request: ChatRequest, signal: AbortSignal): AsyncGenerator<ChatEvent> {
-        const thinking = this.card.thinking;
-        const adjustable =
-            thinking !== undefined &&
-            typeof thinking === 'object' &&
-            thinking !== null &&
-            'levels' in thinking;
-        const effort =
-            adjustable && request.thinking
-                ? (this.#effort[request.thinking] ?? defaultEffort[request.thinking])
-                : undefined;
-        // The service rejects web_extractor in non-thinking mode ("Normal mode does not support
-        // web_extractor"), so a request with thinking off searches without extraction.
-        const nativeTools =
-            effort === 'none'
-                ? request.nativeTools.filter(id => id !== 'web_fetch')
-                : request.nativeTools;
+        const effort = this.#effortFor(request.thinking);
         const body = JSON.stringify({
             model: this.card.model,
             instructions: request.system,
             input: toResponsesInput(request.messages, adapterId, { replayNative }),
-            ...(request.tools.length || nativeTools.length
+            ...(request.tools.length || request.nativeTools.length
                 ? {
                       tools: [
-                          ...nativeTools.flatMap(id =>
+                          ...request.nativeTools.flatMap(id =>
                               nativeToolTypes[id] ? [{ type: nativeToolTypes[id] }] : []
                           ),
                           ...toResponsesTools(request.tools),
@@ -228,6 +225,90 @@ class DashScopeSession implements ChatSession {
             max_output_tokens: this.card.maxOutputTokens,
             ...(effort ? { reasoning: { effort } } : {}),
         });
+        yield* this.#events(body, signal);
+    }
+
+    /**
+     * Fetch one page with DashScope's web extractor in a call of its own. The extractor needs
+     * thinking and must be offered with web search, so the call enables both and asks the model
+     * to read only the given page.
+     * @param tool The standard tool id; only `web_fetch`.
+     * @param input `{ url, prompt? }`, validated by Core against the WebFetch schema.
+     * @param options Thinking level and cancellation.
+     * @param options.thinking The level to think at; the chat's own level may be off.
+     * @param options.signal Cancellation.
+     * @returns The page text as the model read it, and the call's usage.
+     */
+    async runTool(
+        tool: string,
+        input: Readonly<Record<string, unknown>>,
+        options: { readonly thinking?: ThinkingLevel; readonly signal: AbortSignal }
+    ): Promise<ProviderToolResult> {
+        if (tool !== 'web_fetch') throw new Error(`DashScope does not run ${tool}.`);
+        const { url, prompt } = fetchInput.parse(input);
+        const effort = this.#effortFor(options.thinking);
+        const ask = prompt?.trim()
+            ? `answer from that page only: ${prompt.trim()}\nKeep exact statements, figures, and formulas as written.`
+            : "return the page's main text as written, in its original language, without summarizing.";
+        const body = JSON.stringify({
+            model: this.card.model,
+            input:
+                `Read ${url} with the web extractor and ${ask}\n` +
+                'Read only this page; do not search for other pages. If the extractor got none of ' +
+                `the page's own text (an error, or only a verification page), reply exactly: ${notAccessible}`,
+            tools: [{ type: 'web_search' }, { type: 'web_extractor' }],
+            stream: true,
+            store: false,
+            max_output_tokens: Math.min(this.card.maxOutputTokens, fetchMaxOutputTokens),
+            ...(effort && effort !== 'none' ? { reasoning: { effort } } : {}),
+        });
+        let text = '';
+        let usage: Usage = {};
+        for await (const event of this.#events(body, options.signal)) {
+            if (event.type === 'text-delta') text += event.text;
+            else if (event.type === 'completed') usage = event.usage;
+        }
+        const answer = text.trim();
+        if (!answer || answer.startsWith(notAccessible))
+            return {
+                output: {
+                    content: `DashScope's web extractor could not read ${url}.`,
+                    isError: true,
+                },
+                usage,
+            };
+        return {
+            output: {
+                content:
+                    `[${url} as read by DashScope's web extractor. This is a model's reading and may be ` +
+                    `partial: check exact statements before relying on them.]\n\n${answer}`,
+            },
+            usage,
+        };
+    }
+
+    /**
+     * The reasoning effort for a thinking level, when the card's thinking is adjustable.
+     * @param level The requested level.
+     * @returns The effort, or undefined to send none.
+     */
+    #effortFor(level: ThinkingLevel | undefined) {
+        const thinking = this.card.thinking;
+        const adjustable =
+            thinking !== undefined &&
+            typeof thinking === 'object' &&
+            thinking !== null &&
+            'levels' in thinking;
+        return adjustable && level ? (this.#effort[level] ?? defaultEffort[level]) : undefined;
+    }
+
+    /**
+     * Send one streaming Responses request and normalize its events.
+     * @param body The JSON request body.
+     * @param signal Cancellation.
+     * @yields Normalized chat events.
+     */
+    async *#events(body: string, signal: AbortSignal): AsyncGenerator<ChatEvent> {
         let response: Response;
         try {
             response = await this.transport(this.#endpoint, {
@@ -323,19 +404,15 @@ export function createChatAdapter(transport: typeof fetch = fetch): ChatAdapter 
         kind: 'chat',
         credentialTypes: [credentialTypeId],
         optionsSchema,
+        separateTools,
         validateCard(card) {
             const issues = [];
             for (const tool of card.nativeTools)
-                if (!(tool in nativeToolTypes))
+                if (!supportedTools.has(tool))
                     issues.push({
                         path: 'nativeTools',
                         message: `Native tool ${tool} is not supported by this adapter.`,
                     });
-            if (card.nativeTools.includes('web_fetch') && !card.nativeTools.includes('web_search'))
-                issues.push({
-                    path: 'nativeTools',
-                    message: 'DashScope web_fetch (web_extractor) requires web_search.',
-                });
             for (const type of Object.keys(card.input))
                 if (type !== 'text/plain')
                     issues.push({

@@ -215,6 +215,8 @@ export const bodySchema = z.discriminatedUnion('type', [
         renderer: z.number().int().positive(),
         tools: z.array(toolDeclarationSchema).default([]),
         nativeTools: z.array(z.string()).default([]),
+        /** Standard tool ids the adapter runs as separate provider calls. */
+        providerTools: z.array(z.string()).default([]),
     }),
     z.strictObject({
         type: z.literal('delivery.accepted'),
@@ -288,6 +290,8 @@ export const bodySchema = z.discriminatedUnion('type', [
         jobId: idSchema,
     }),
     z.strictObject({ type: z.literal('tool.finished'), result: toolResultSchema }),
+    /** Tokens of a provider call a tool made; counted in the session's usage, not its context. */
+    z.strictObject({ type: z.literal('tool.usage'), callId: idSchema, usage: usageSchema }),
     z.strictObject({
         type: z.literal('job.ended'),
         jobId: idSchema,

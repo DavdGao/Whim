@@ -192,7 +192,7 @@ describe('DashScope Responses adapter', () => {
                 { role: 'tool', callId: 'call_1', status: 'success', content: 'file a' },
             ],
             tools: [{ name: 'Read', description: 'Read a file.', inputSchema: { type: 'object' } }],
-            nativeTools: ['web_search', 'web_fetch'],
+            nativeTools: ['web_search'],
         });
         assert.deepEqual(requests[0].body, {
             model: 'qwen3.8-flash',
@@ -217,7 +217,6 @@ describe('DashScope Responses adapter', () => {
             ],
             tools: [
                 { type: 'web_search' },
-                { type: 'web_extractor' },
                 {
                     type: 'function',
                     name: 'Read',
@@ -253,31 +252,68 @@ describe('DashScope Responses adapter', () => {
         ]);
     });
 
-    it('drops web_extractor when thinking is off', async () => {
+    it('fetches a page in a separate thinking call and reports its usage', async () => {
         const { transport, requests } = fakeFetch(() =>
-            sse([{ type: 'response.completed', response: { status: 'completed' } }])
+            sse([
+                { type: 'response.output_text.delta', delta: 'Page text.' },
+                {
+                    type: 'response.completed',
+                    response: {
+                        status: 'completed',
+                        usage: { input_tokens: 50, output_tokens: 7 },
+                    },
+                },
+            ])
         );
-        const messages: ChatRequest['messages'] = [
-            { role: 'user', blocks: [{ type: 'text', text: 'hi' }] },
-        ];
-        const base = {
-            system: 'sys',
-            messages,
-            tools: [],
-            nativeTools: ['web_search', 'web_fetch'],
-        };
-        await run(transport, undefined, { ...base, thinking: 'off' });
-        await run(transport, undefined, { ...base, thinking: 'low' });
+        const adapter = createChatAdapter(transport);
+        assert.deepEqual(adapter.separateTools, ['web_fetch']);
+        const session = adapter.open({
+            card,
+            credential: { id: 'c', typeId: credentialTypeId, values: { apiKey: 'sk-test' } },
+        });
+        assert.ok(session.runTool);
+        const result = await session.runTool(
+            'web_fetch',
+            { url: 'https://a.example/p' },
+            { thinking: 'low', signal: new AbortController().signal }
+        );
+        assert.deepEqual(result, {
+            output: {
+                content:
+                    "[https://a.example/p as read by DashScope's web extractor. This is a model's reading and may be partial: check exact statements before relying on them.]\n\nPage text.",
+            },
+            usage: { inputTokens: 50, outputTokens: 7 },
+        });
+        const body = requests[0].body as Record<string, unknown>;
         assert.deepEqual(
-            requests.map(request => {
-                const body = request.body as { reasoning: unknown; tools: unknown };
-                return [body.reasoning, body.tools];
-            }),
-            [
-                [{ effort: 'none' }, [{ type: 'web_search' }]],
-                [{ effort: 'low' }, [{ type: 'web_search' }, { type: 'web_extractor' }]],
-            ]
+            [body.tools, body.reasoning, body.stream, body.store],
+            [[{ type: 'web_search' }, { type: 'web_extractor' }], { effort: 'low' }, true, false]
         );
+    });
+
+    it('reports a page the extractor could not read as an error', async () => {
+        const { transport } = fakeFetch(() =>
+            sse([
+                { type: 'response.output_text.delta', delta: 'NOT_ACCESSIBLE' },
+                { type: 'response.completed', response: { status: 'completed' } },
+            ])
+        );
+        const session = createChatAdapter(transport).open({
+            card,
+            credential: { id: 'c', typeId: credentialTypeId, values: { apiKey: 'sk-test' } },
+        });
+        const result = await session.runTool?.(
+            'web_fetch',
+            { url: 'https://a.example/p' },
+            { signal: new AbortController().signal }
+        );
+        assert.deepEqual(result, {
+            output: {
+                content: "DashScope's web extractor could not read https://a.example/p.",
+                isError: true,
+            },
+            usage: {},
+        });
     });
 
     it('maps HTTP failures with provider detail', async () => {
