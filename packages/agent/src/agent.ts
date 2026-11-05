@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { ApplicationError, selectableLevels } from '@whimkit/core/contracts';
 
-import { estimateTokens, toRequestMessages } from './render.js';
+import { epochMessages, estimateTokens, transcriptText } from './render.js';
 
 import type { Command } from '@whimkit/core';
 import type {
@@ -51,7 +52,26 @@ export interface AgentOptions {
     readonly random?: () => number;
     /** Read stored media by `file:` URI; the file system by default. */
     readonly readMedia?: (uri: string) => Promise<Uint8Array>;
+    /** Enables automatic compaction; without it, an oversized context fails the step. */
+    readonly compaction?: AgentCompaction;
 }
+
+/** What compaction needs from the host. */
+export interface AgentCompaction {
+    /** Absolute path of a compaction's transcript, inside the session's own folder. */
+    transcriptPath(sessionId: string, compactionId: string): string;
+    /** The prefix of the epoch after a compaction: the current prompt, tools, and model. */
+    epoch(view: SessionView): Promise<Extract<Command, { type: 'switch-model' }>['epoch']>;
+}
+
+/** Compaction starts once a request would exceed this share of the context window. */
+export const compactionShare = 0.8;
+
+const compactionSystem = [
+    'You compact a conversation between a user and an AI agent so that the agent can continue from your summary alone.',
+    "Write in the conversation's language. Cover: the user's goals and requests (quote them when the wording matters), decisions and preferences, work done so far (files created or changed, commands run and their outcomes), important facts and data found, open questions, and what remains to do next.",
+    'Keep identifiers exactly as written: file paths and file: URIs, media identifiers such as img-…, URLs, names, and numbers. Never invent anything. Output only the summary.',
+].join('\n');
 
 /**
  * Transient events for subscribers; never stored. Committed records reach subscribers through
@@ -76,7 +96,9 @@ type StepOutcome =
     | { kind: 'completed' }
     | { kind: 'tools' }
     | { kind: 'interrupted' }
-    | { kind: 'failed'; failure: Failure };
+    | { kind: 'failed'; failure: Failure }
+    /** The request would exceed the compaction threshold; nothing was sent. */
+    | { kind: 'compact' };
 
 const defaultRetry: RetryPolicy = { maxAttempts: 4, baseDelayMs: 1000, maxDelayMs: 30_000 };
 
@@ -125,6 +147,7 @@ export class Agent {
     readonly #sleep: (ms: number, signal: AbortSignal) => Promise<void>;
     readonly #random: () => number;
     readonly #readMedia: (uri: string) => Promise<Uint8Array>;
+    readonly #compaction: AgentCompaction | undefined;
 
     /**
      * Create an agent over its ports.
@@ -144,6 +167,7 @@ export class Agent {
         this.#sleep = options.sleep ?? abortableSleep;
         this.#random = options.random ?? Math.random;
         this.#readMedia = options.readMedia ?? (uri => readFile(fileURLToPath(uri)));
+        this.#compaction = options.compaction;
     }
 
     /**
@@ -193,7 +217,21 @@ export class Agent {
                 const view = await this.store.view(sessionId);
                 if (first && !needsResponse(view)) break;
                 first = false;
-                const outcome = yield* this.#step(view, runId, stepId, signal);
+                let outcome = yield* this.#step(view, runId, stepId, signal, false);
+                if (outcome.kind === 'compact') {
+                    await this.#compact(view, runId, signal);
+                    if (signal.aborted) {
+                        result = { outcome: 'interrupted', reason: 'user' };
+                        break;
+                    }
+                    outcome = yield* this.#step(
+                        await this.store.view(sessionId),
+                        runId,
+                        stepId,
+                        signal,
+                        true
+                    );
+                }
                 if (outcome.kind === 'interrupted') {
                     result = {
                         outcome: 'interrupted',
@@ -244,11 +282,97 @@ export class Agent {
     }
 
     /**
+     * Compact the history before the latest input: write its transcript into the session's
+     * folder, summarize it with the session's model, and commit a new epoch that starts from the
+     * summary. Failure keeps the current epoch; the step then proceeds or fails on the budget.
+     * @param view The session view after the step consumed its input.
+     * @param runId The active run.
+     * @param signal Run interruption.
+     */
+    async #compact(view: SessionView, runId: string, signal: AbortSignal): Promise<void> {
+        const port = this.#compaction;
+        const cut = compactionCut(view);
+        if (!port || cut === undefined) return;
+        const sessionId = view.sessionId;
+        const card = view.epoch.card;
+        const previous = view.epoch.context;
+        const covered = view.history.filter(
+            entry => entry.seq >= (previous?.from ?? 0) && entry.seq < cut
+        );
+        const compactionId = randomUUID();
+        const path = port.transcriptPath(sessionId, compactionId);
+        const transcript = transcriptText(covered);
+        // Published before anything refers to it.
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(
+            path,
+            `${previous ? `Earlier transcript: ${previous.transcript}\n\n` : ''}${transcript}\n`
+        );
+        await this.#exec(sessionId, { type: 'start-compaction', runId, compactionId });
+        let usage: Usage = {};
+        try {
+            const session = await this.models.open(card, view.credentialId);
+            // Keep the summary call within budget: the newest part of a very long transcript wins.
+            const room = Math.floor(session.inputBudget() * 0.6) * 3;
+            const clipped =
+                transcript.length > room
+                    ? `[The beginning is omitted here; it is in the transcript file.]\n${transcript.slice(-room)}`
+                    : transcript;
+            const thinking = defaultLevel(card.thinking);
+            const request: ChatRequest = {
+                system: compactionSystem,
+                messages: [
+                    {
+                        role: 'user',
+                        blocks: [
+                            {
+                                type: 'text',
+                                text: `${previous ? `Summary of the conversation before this transcript:\n${previous.summary}\n\n` : ''}<transcript>\n${clipped}\n</transcript>\n\nWrite the summary now.`,
+                            },
+                        ],
+                    },
+                ],
+                ...(thinking ? { thinking } : {}),
+                tools: [],
+                nativeTools: [],
+            };
+            let summary = '';
+            for await (const event of session.stream(request, signal)) {
+                if (event.type === 'text-delta') summary += event.text;
+                else if (event.type === 'completed') usage = event.usage;
+            }
+            summary = summary.trim();
+            if (!summary) throw new Error('The summary came back empty.');
+            const epoch = await port.epoch(view);
+            await this.#exec(sessionId, {
+                type: 'finish-compaction',
+                compactionId,
+                usage,
+                result: {
+                    status: 'succeeded',
+                    epoch: {
+                        ...epoch,
+                        context: { summary, from: cut, transcript: pathToFileURL(path).href },
+                    },
+                },
+            });
+        } catch (error) {
+            await this.#exec(sessionId, {
+                type: 'finish-compaction',
+                compactionId,
+                usage,
+                result: { status: 'failed', failure: toFailure(error) },
+            });
+        }
+    }
+
+    /**
      * Run one reasoning step, retrying failed attempts per policy.
      * @param view The view after the step was prepared.
      * @param runId The run.
      * @param stepId The step.
      * @param signal Run interruption.
+     * @param compacted Whether this step already compacted; it does not compact twice.
      * @yields Transient stream events.
      * @returns How the step ended.
      */
@@ -256,7 +380,8 @@ export class Agent {
         view: SessionView,
         runId: string,
         stepId: string,
-        signal: AbortSignal
+        signal: AbortSignal,
+        compacted: boolean
     ): AsyncGenerator<AgentEvent, StepOutcome> {
         const sessionId = view.sessionId;
         const card = view.epoch.card;
@@ -271,7 +396,7 @@ export class Agent {
             session = await this.models.open(card, view.credentialId);
             request = {
                 system: view.epoch.system,
-                messages: await toRequestMessages(view.history, {
+                messages: await epochMessages(view, {
                     accepts: mediaType => mediaType in card.input,
                     inToolResults: session.toolResultMedia ?? [],
                     read: this.#readMedia,
@@ -286,6 +411,12 @@ export class Agent {
         const estimate = session.countTokens
             ? await session.countTokens(request, signal)
             : estimateTokens(request.system, request.messages, request.tools);
+        const threshold = Math.min(
+            session.inputBudget(),
+            Math.floor(card.contextWindow * compactionShare)
+        );
+        if (estimate > threshold && !compacted && compactionCut(view) !== undefined)
+            return { kind: 'compact' };
         if (estimate > session.inputBudget())
             return {
                 kind: 'failed',
@@ -545,4 +676,24 @@ function outputBlocks(
     blocks.push(...continuations);
     if (text.length) blocks.push({ type: 'text', text: text.join('') });
     return blocks;
+}
+
+/**
+ * Where a compaction would cut: the latest input (a user message or notice) after the current
+ * epoch's start, so that input stays verbatim while everything before it is summarized.
+ * @param view The session view.
+ * @returns The first sequence number to keep, or undefined when nothing could be compacted.
+ */
+function compactionCut(view: SessionView): number | undefined {
+    const from = view.epoch.context?.from ?? 0;
+    const input = view.history.findLast(
+        entry =>
+            entry.seq > from &&
+            (entry.item.type === 'notice' ||
+                (entry.item.type === 'message' && entry.item.role === 'user'))
+    );
+    if (!input) return undefined;
+    return view.history.some(entry => entry.seq >= from && entry.seq < input.seq)
+        ? input.seq
+        : undefined;
 }

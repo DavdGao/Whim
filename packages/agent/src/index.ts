@@ -1,5 +1,6 @@
-export { Agent } from './agent.js';
+export { Agent, compactionShare } from './agent.js';
 export type {
+    AgentCompaction,
     AgentEvent,
     AgentModels,
     AgentOptions,

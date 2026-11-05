@@ -60,7 +60,8 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 
 ## PR 5 — Context
 
-- [ ] Automatic compaction (no manual trigger): records, epochs, UI feedback
+- [x] Automatic compaction (no manual trigger): records, epochs, transcript offload with media references, summary with the session's model, UI line with the summary
+- [ ] Compact and retry once when the provider reports `context-limit` despite the estimate
 - [ ] Context-source tracking and notices
 - [ ] Skills
 - [ ] MEMORY.md plugin

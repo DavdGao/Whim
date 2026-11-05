@@ -198,6 +198,18 @@ export const toolDeclarationSchema = z.strictObject({
 });
 export type ToolDeclaration = z.infer<typeof toolDeclarationSchema>;
 
+/**
+ * What a compacted epoch's requests start from: a summary of everything before `from`, whose
+ * full text was written to `transcript` (a `file:` URI) before the epoch was committed.
+ */
+export const epochContextSchema = z.strictObject({
+    summary: z.string(),
+    /** History entries with a smaller sequence number are covered by the summary. */
+    from: z.number().int().positive(),
+    transcript: z.string().startsWith('file:'),
+});
+export type EpochContext = z.infer<typeof epochContextSchema>;
+
 export const placementSchema = z.enum(['next-step', 'next-run']);
 export const interruptReasonSchema = z.enum(['user', 'shutdown', 'crash', 'plugin-removed']);
 
@@ -240,6 +252,21 @@ export const bodySchema = z.discriminatedUnion('type', [
         nativeTools: z.array(z.string()).default([]),
         /** Standard tool ids the adapter runs as separate provider calls. */
         providerTools: z.array(z.string()).default([]),
+        /** Set once the session was compacted; model switches carry it forward. */
+        context: epochContextSchema.optional(),
+    }),
+    z.strictObject({
+        type: z.literal('compaction.started'),
+        compactionId: idSchema,
+        runId: idSchema,
+    }),
+    z.strictObject({
+        type: z.literal('compaction.finished'),
+        compactionId: idSchema,
+        outcome: z.enum(['succeeded', 'failed']),
+        /** Usage of the summary call; counted in the session's usage, not its context. */
+        usage: usageSchema,
+        failure: failureSchema.optional(),
     }),
     z.strictObject({
         type: z.literal('delivery.accepted'),

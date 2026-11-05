@@ -5,6 +5,7 @@ import type {
     AgentRecord,
     BodyOf,
     ContextItem,
+    EpochContext,
     PermissionRule,
     ToolDeclaration,
     Usage,
@@ -34,6 +35,19 @@ export interface Epoch {
     readonly tools: readonly ToolDeclaration[];
     readonly nativeTools: readonly string[];
     readonly providerTools: readonly string[];
+    /** Present once the session was compacted. */
+    readonly context?: EpochContext;
+}
+
+/** A compaction, for display at its place in the conversation. */
+export interface Compaction {
+    readonly seq: number;
+    readonly compactionId: string;
+    readonly state: 'running' | 'succeeded' | 'failed';
+    /** The summary, once it succeeded. */
+    readonly summary?: string;
+    /** The first history entry the summary does not cover, once it succeeded. */
+    readonly from?: number;
 }
 
 /** A tool call of the current step that has no result yet. */
@@ -80,6 +94,7 @@ export interface SessionView {
     readonly run?: ActiveRun;
     readonly lastRun?: { readonly runId: string; readonly result: BodyOf<'run.ended'>['result'] };
     readonly calls: readonly OpenCall[];
+    readonly compactions: readonly Compaction[];
     readonly jobs: readonly BackgroundJob[];
     readonly permissionRules: readonly PermissionRule[];
     readonly usage: Usage;
@@ -139,6 +154,7 @@ export function foldSession(records: readonly AgentRecord[]): SessionView {
         inbox: new Map(),
         calls: [],
         jobs: [],
+        compactions: [],
         permissionRules: [],
         usage: {},
         createdAt: first.createdAt,
@@ -163,6 +179,7 @@ function epochOf(body: BodyOf<'epoch.started'>): Omit<Epoch, 'seq'> {
         tools: body.tools,
         nativeTools: body.nativeTools,
         providerTools: body.providerTools,
+        ...(body.context ? { context: body.context } : {}),
     };
 }
 
@@ -191,8 +208,37 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
             return next;
         }
         case 'epoch.started':
-            if (run) throw new InvalidJournalError('Epoch change during a run.', record.seq);
+            // Only compaction replaces the prefix while a run is active.
+            if (run && body.reason !== 'compaction')
+                throw new InvalidJournalError('Epoch change during a run.', record.seq);
             return { ...base, epoch: { seq: record.seq, ...epochOf(body) } };
+        case 'compaction.started':
+            return {
+                ...base,
+                compactions: [
+                    ...view.compactions,
+                    { seq: record.seq, compactionId: body.compactionId, state: 'running' },
+                ],
+            };
+        case 'compaction.finished':
+            return {
+                ...base,
+                usage: addUsage(view.usage, body.usage),
+                compactions: view.compactions.map(item =>
+                    item.compactionId === body.compactionId
+                        ? {
+                              ...item,
+                              state: body.outcome,
+                              ...(body.outcome === 'succeeded' && view.epoch.context
+                                  ? {
+                                        summary: view.epoch.context.summary,
+                                        from: view.epoch.context.from,
+                                    }
+                                  : {}),
+                          }
+                        : item
+                ),
+            };
         case 'delivery.accepted': {
             const inbox = new Map(view.inbox);
             inbox.set(body.deliveryId, {
