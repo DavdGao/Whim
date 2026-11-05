@@ -203,7 +203,6 @@ export interface AppState {
     readonly chatSlot?: ChatSlot;
     readonly userCardsDir: string;
     /** The folder a new chat works in when the user picks none. */
-    readonly defaultWorkspace: string;
     /** Names of the built-in tools every agent has. */
     readonly baseTools: readonly string[];
     readonly plugins: readonly PluginInfo[];
@@ -217,6 +216,8 @@ export interface AppState {
 /** A session view with the inbox as an array, safe to copy across context bridges. */
 export type SessionSnapshot = Omit<SessionView, 'inbox'> & {
     readonly pending: readonly PendingDelivery[];
+    /** The session's own working folder, used while the user has chosen none. */
+    readonly defaultWorkspace: string;
 };
 
 export interface Results {

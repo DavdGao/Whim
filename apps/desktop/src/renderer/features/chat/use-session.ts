@@ -18,6 +18,8 @@ export interface SessionState {
     /** Failure of an attempt whose text was discarded before a retry. */
     readonly discarded: Failure | undefined;
     readonly error: string | undefined;
+    /** The session's own working folder, used while the user has chosen none. */
+    readonly defaultWorkspace?: string;
 }
 
 /**
@@ -26,7 +28,7 @@ export interface SessionState {
  * @returns The view.
  */
 function fromSnapshot(snapshot: SessionSnapshot): SessionView {
-    const { pending, ...rest } = snapshot;
+    const { pending, defaultWorkspace: _default, ...rest } = snapshot;
     return { ...rest, inbox: new Map(pending.map(item => [item.deliveryId, item])) };
 }
 
@@ -51,9 +53,15 @@ export function useSession(sessionId: string | undefined): SessionState {
 
     const load = useCallback(async (id: string) => {
         try {
-            const view = fromSnapshot(await call('session.get', { sessionId: id }));
+            const snapshot = await call('session.get', { sessionId: id });
+            const view = fromSnapshot(snapshot);
             viewRef.current = view;
-            setState(current => ({ ...current, view, error: undefined }));
+            setState(current => ({
+                ...current,
+                view,
+                error: undefined,
+                defaultWorkspace: snapshot.defaultWorkspace,
+            }));
         } catch (error) {
             setState(current => ({
                 ...current,
