@@ -1,0 +1,6 @@
+{
+    "plugin.name": "Tavily 联网搜索",
+    "plugin.description": "通过 Tavily API，为没有自带搜索的模型提供联网搜索。",
+    "credential.@whimkit/plugin-tavily#api-key": "Tavily API Key",
+    "schema.@whimkit/plugin-tavily#api-key./apiKey.title": "API Key"
+}

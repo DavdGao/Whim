@@ -356,6 +356,10 @@ describe('Agent', () => {
                 store,
                 host,
                 toolModels,
+                {
+                    list: async () => [],
+                    resolve: () => Promise.reject(new Error('No credentials.')),
+                },
                 [],
                 join(dir, 'artifacts'),
                 id => ended.push(id)

@@ -71,6 +71,9 @@ importers:
       '@whimkit/plugin-dashscope':
         specifier: workspace:*
         version: link:../../packages/plugin-dashscope
+      '@whimkit/plugin-tavily':
+        specifier: workspace:*
+        version: link:../../packages/plugin-tavily
       '@whimkit/tools':
         specifier: workspace:*
         version: link:../../packages/tools
@@ -195,6 +198,19 @@ importers:
       '@whimkit/openai-protocol':
         specifier: workspace:*
         version: link:../openai-protocol
+      zod:
+        specifier: ^4.1.12
+        version: 4.6.5
+    devDependencies:
+      '@types/node':
+        specifier: ^24.10.0
+        version: 24.19.2
+      '@whimkit/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/plugin-tavily:
+    dependencies:
       zod:
         specifier: ^4.1.12
         version: 4.6.5
