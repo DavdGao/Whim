@@ -129,14 +129,7 @@ export function ModelPicker({
                     aria-label={t('chat.model')}
                     className="text-muted-foreground hover:text-foreground max-w-72 rounded-full"
                 >
-                    {apply.pending ? (
-                        <Spinner />
-                    ) : (
-                        <EntityIcon
-                            src={current ? modelIcon(state, current.card) : undefined}
-                            fallback={BoxIcon}
-                        />
-                    )}
+                    {apply.pending && <Spinner />}
                     <span className="truncate">{current?.card.name ?? t('chat.model')}</span>
                     {summary && <span className="text-muted-foreground">{summary}</span>}
                     <ChevronDownIcon className="text-muted-foreground" />
