@@ -1,6 +1,6 @@
-import { FolderIcon, FolderOpenIcon, HouseIcon } from 'lucide-react';
+import { ExternalLinkIcon, FolderIcon, FolderOpenIcon, HouseIcon } from 'lucide-react';
 
-import { chooseDirectory } from '../../lib/client';
+import { chooseDirectory, openDirectory } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,8 @@ function folderName(path: string): string {
 }
 
 /**
- * The chat's workspace folder: a picker before the chat starts, read-only afterwards.
+ * The chat's workspace folder as a menu: choose or reset it before the chat starts, and open it
+ * in the file manager at any time.
  * @param props Picker props.
  * @param props.workspace The chosen folder.
  * @param props.fallback The folder used when none is chosen.
@@ -41,23 +42,13 @@ export function WorkspacePicker({
     const { t } = useT();
     const effective = onChange ? (workspace ?? fallback) : workspace;
     const label = effective ? folderName(effective) : t('chat.workspace.none');
-    if (!onChange)
-        return (
-            <span
-                className="text-muted-foreground flex max-w-48 items-center gap-1.5 px-2 text-xs"
-                title={workspace ?? t('chat.workspace.hint')}
-            >
-                <FolderIcon className="size-3.5 shrink-0" />
-                <span className="truncate">{label}</span>
-            </span>
-        );
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
                 <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
+                    size="xs"
                     className="text-muted-foreground hover:text-foreground max-w-48 rounded-full"
                     aria-label={t('chat.workspace')}
                     title={effective}
@@ -66,17 +57,28 @@ export function WorkspacePicker({
                     <span className="truncate">{label}</span>
                 </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-64">
-                <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">
-                    {t('chat.workspace.hint')}
+            <DropdownMenuContent align="start" className="w-72">
+                <DropdownMenuLabel className="flex flex-col gap-1 text-xs font-normal">
+                    {effective && <span className="truncate font-medium">{effective}</span>}
+                    <span className="text-muted-foreground">
+                        {onChange ? t('chat.workspace.hint') : t('chat.workspace.fixed')}
+                    </span>
                 </DropdownMenuLabel>
-                <DropdownMenuItem
-                    onSelect={() => void chooseDirectory().then(path => path && onChange(path))}
-                >
-                    <FolderOpenIcon />
-                    {t('chat.workspace.choose')}
-                </DropdownMenuItem>
-                {workspace && (
+                {effective && (
+                    <DropdownMenuItem onSelect={() => void openDirectory(effective)}>
+                        <ExternalLinkIcon />
+                        {t('chat.workspace.open')}
+                    </DropdownMenuItem>
+                )}
+                {onChange && (
+                    <DropdownMenuItem
+                        onSelect={() => void chooseDirectory().then(path => path && onChange(path))}
+                    >
+                        <FolderOpenIcon />
+                        {t('chat.workspace.choose')}
+                    </DropdownMenuItem>
+                )}
+                {onChange && workspace && (
                     <DropdownMenuItem onSelect={() => onChange(undefined)}>
                         <HouseIcon />
                         {t('chat.workspace.clear')}

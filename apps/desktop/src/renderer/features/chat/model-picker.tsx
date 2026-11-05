@@ -125,7 +125,7 @@ export function ModelPicker({
                 <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
+                    size="xs"
                     aria-label={t('chat.model')}
                     className="text-muted-foreground hover:text-foreground max-w-72 rounded-full"
                 >

@@ -404,11 +404,9 @@ export function NativeToolView({ block }: { block: NativeToolCallBlock }) {
     const { t } = useT();
     const search = block.tool === 'web_search';
     const failed = block.status !== 'completed';
-    const target = search
-        ? (block.query ?? '')
-        : (block.urls?.[0]?.replace(/^https?:\/\//, '') ?? '');
+    const target = block.urls?.[0]?.replace(/^https?:\/\//, '') ?? '';
     const title = search
-        ? t(failed ? 'tool.search.failed' : 'tool.search.done', { target })
+        ? t(failed ? 'tool.search.failed' : 'tool.search.done')
         : t(failed ? 'tool.WebFetch.failed' : 'tool.WebFetch.done', { target });
     return (
         <ActivityLine

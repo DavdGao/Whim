@@ -39,7 +39,6 @@ import {
     TraceCollapsible,
     TraceCollapsibleContent,
     TraceCollapsibleTrigger,
-    TraceDescription,
     TraceLine,
     TraceTitle,
 } from '@/components/ui/trace';
@@ -135,10 +134,13 @@ function ReasoningLine({
         <TraceCollapsible open={open ?? running} onOpenChange={setOpen}>
             <TraceCollapsibleTrigger>
                 <TraceLine status={running ? 'running' : undefined}>
-                    <TraceTitle>{running ? t('chat.thinkingNow') : t('chat.thought')}</TraceTitle>
-                    {!running && seconds !== undefined && (
-                        <TraceDescription>{t('chat.seconds', { seconds })}</TraceDescription>
-                    )}
+                    <TraceTitle>
+                        {running
+                            ? t('chat.thinkingNow')
+                            : seconds === undefined
+                              ? t('chat.thought')
+                              : t('chat.thoughtFor', { seconds })}
+                    </TraceTitle>
                 </TraceLine>
             </TraceCollapsibleTrigger>
             <TraceCollapsibleContent>

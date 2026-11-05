@@ -108,7 +108,7 @@ export function Composer({
     };
 
     return (
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-1.5">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-1">
             <form
                 className="bg-background flex w-full flex-col rounded-[28px] border px-2 shadow-xs"
                 onSubmit={event => {
@@ -203,7 +203,7 @@ export function Composer({
                     </div>
                 </div>
             </form>
-            <div className="flex items-center gap-1 px-2">
+            <div className="flex items-center gap-0.5 px-2">
                 <WorkspacePicker
                     workspace={workspace}
                     fallback={state.defaultWorkspace}

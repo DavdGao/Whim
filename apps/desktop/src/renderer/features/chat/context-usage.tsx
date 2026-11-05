@@ -56,9 +56,9 @@ export function ContextUsage({
                 <button
                     type="button"
                     aria-label={t('context.label', { percent })}
-                    className="hover:bg-accent focus-visible:ring-ring/50 flex size-7 items-center justify-center rounded-full outline-none focus-visible:ring-3"
+                    className="hover:bg-accent focus-visible:ring-ring/50 flex size-6 items-center justify-center rounded-full outline-none focus-visible:ring-3"
                 >
-                    <svg viewBox="0 0 18 18" className="size-[18px] -rotate-90" aria-hidden="true">
+                    <svg viewBox="0 0 18 18" className="size-4 -rotate-90" aria-hidden="true">
                         <circle
                             cx="9"
                             cy="9"
