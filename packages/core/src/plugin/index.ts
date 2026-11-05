@@ -1,4 +1,4 @@
-import type { ChatCard, FrozenChatCard, ThinkingLevel } from '../contracts/card.js';
+import type { ChatCard, DecisionCard, FrozenChatCard, ThinkingLevel } from '../contracts/card.js';
 import type {
     Access,
     Block,
@@ -141,6 +141,59 @@ export interface ChatAdapter {
     }): ChatSession;
 }
 
+/** A question with named options; the answer is one of them. */
+export interface ChoiceQuestion {
+    readonly type: 'choice';
+    readonly instructions: string;
+    /** Option name to what it means. */
+    readonly options: Readonly<Record<string, string>>;
+}
+
+export interface DecisionRequest {
+    /** What every question refers to. */
+    readonly state: string;
+    readonly questions: Readonly<Record<string, ChoiceQuestion>>;
+}
+
+export interface ChoiceAnswer {
+    readonly type: 'choice';
+    /** One of the question's option names. */
+    readonly choice: string;
+    /** The model's calibrated confidence in `choice`, from 0 to 1. */
+    readonly confidence: number;
+    readonly probabilities: Readonly<Record<string, number>>;
+}
+
+export interface DecisionResult {
+    /** One answer per question, keyed like the questions. */
+    readonly answers: Readonly<Record<string, ChoiceAnswer>>;
+    readonly usage: Usage;
+}
+
+/** One Decision adapter binding for a card and a credential. */
+export interface DecisionSession {
+    /**
+     * Answer the questions in one provider call. Throws `ApplicationError` on failure, including
+     * an answer that does not match its question. Never retries internally.
+     */
+    decide(request: DecisionRequest, signal: AbortSignal): Promise<DecisionResult>;
+}
+
+export interface DecisionAdapter {
+    /** `<pluginId>#<name>`, referenced by cards' `adapter` field. */
+    readonly id: string;
+    readonly kind: 'decision';
+    readonly credentialTypes: readonly string[];
+    readonly optionsSchema: JsonSchema;
+    /** Bind a card and credential. Throws `ApplicationError` when the pair is unusable. */
+    open(binding: {
+        readonly card: DecisionCard;
+        readonly credential: ResolvedCredential;
+    }): DecisionSession;
+}
+
+export type ModelAdapter = ChatAdapter | DecisionAdapter;
+
 /** Environment a tool needs to resolve paths. */
 export interface ToolEnv {
     readonly workspace?: string;
@@ -211,7 +264,7 @@ export interface PluginContext {
     readonly version: string;
     readonly signal: AbortSignal;
     readonly credentials: { registerType(type: CredentialType): Disposer };
-    readonly models: { registerAdapter(adapter: ChatAdapter): Disposer };
+    readonly models: { registerAdapter(adapter: ModelAdapter): Disposer };
     readonly tools: {
         // Plugins type their own input; Core validates it against the schema first.
         register<Input>(tool: ToolDefinition<Input>): Disposer;

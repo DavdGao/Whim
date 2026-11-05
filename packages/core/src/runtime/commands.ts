@@ -10,6 +10,7 @@ import {
     contextItemSchema,
     epochContextSchema,
     placementSchema,
+    reviewOutcomeSchema,
     runResultSchema,
     toolDeclarationSchema,
     toolResultSchema,
@@ -154,6 +155,16 @@ export const commandSchema = z.discriminatedUnion('type', [
         runId: idSchema,
         callId: idSchema,
         access: z.array(accessSchema),
+        reviewer: z.strictObject({ cardId: idSchema }).optional(),
+    }),
+    z.strictObject({
+        ...base,
+        type: z.literal('review-permission'),
+        callId: idSchema,
+        outcome: reviewOutcomeSchema,
+        reason: z.string().max(2000),
+        usage: usageSchema,
+        failure: failureSchema.optional(),
     }),
     z.strictObject({
         ...base,
@@ -405,6 +416,23 @@ export function decide(view: SessionView | null, command: Command): Body[] {
                     callId: command.callId,
                     name: call.name,
                     access: command.access,
+                    ...(command.reviewer ? { reviewer: command.reviewer } : {}),
+                },
+            ];
+        }
+        case 'review-permission': {
+            const call = view.calls.find(item => item.callId === command.callId);
+            if (!run || call?.state !== 'asking' || !call.review || call.review.state !== 'running')
+                throw new StoreError('conflict', 'The tool call is not being reviewed.');
+            return [
+                {
+                    type: 'permission.reviewed',
+                    runId: run.runId,
+                    callId: command.callId,
+                    outcome: command.outcome,
+                    reason: command.reason,
+                    usage: command.usage,
+                    ...(command.failure ? { failure: command.failure } : {}),
                 },
             ];
         }

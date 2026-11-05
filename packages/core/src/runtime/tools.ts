@@ -6,17 +6,22 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
 import { selectableLevels } from '../contracts/card.js';
+import { ApplicationError, boundText } from '../contracts/failure.js';
 import { knownFiles } from '../contracts/view.js';
 
+import { StoreError } from './commands.js';
 import { CompiledSchema } from './json-schema.js';
 import { storeMedia } from './media.js';
 import { evaluate } from './permissions.js';
 import { describeError } from './plugin-host.js';
+import { reviewRequest } from './review.js';
 
 import type { Command } from './commands.js';
 import type { PluginHost } from './plugin-host.js';
+import type { Review, Reviewer, ReviewRequest } from './review.js';
 import type { Store } from './store.js';
 import type { FrozenChatCard, ThinkingLevel } from '../contracts/card.js';
+import type { Failure } from '../contracts/failure.js';
 import type { FileVersion, ToolDeclaration, ToolResult } from '../contracts/records.js';
 import type { OpenCall, SessionView } from '../contracts/view.js';
 import type {
@@ -63,6 +68,8 @@ const maxParallel = 4;
 const maxJobOutputRead = 32 * 1024;
 /** How long a cancelled foreground job may take to settle before its result is written. */
 const cancelGraceMs = 5000;
+/** An automatic review taking longer is left to the user. */
+const reviewTimeoutMs = 60_000;
 
 type Decision = { decision: 'allow' | 'deny' } | { decision: 'cancelled' };
 
@@ -177,6 +184,8 @@ export class ToolRuntime {
      * @param legacyArtifactsDir Where results were offloaded before per-session folders; still
      * readable without asking.
      * @param onJobEnded Called after a background job's end is committed.
+     * @param reviewer The reviewer answering asks first in auto mode, read at each ask; undefined
+     * in manual mode. Throwing is a review failure.
      */
     constructor(
         private readonly store: Store,
@@ -186,7 +195,8 @@ export class ToolRuntime {
         baseTools: readonly ToolDefinition<unknown>[],
         readonly sessionsDir: string,
         private readonly legacyArtifactsDir: string | undefined,
-        private readonly onJobEnded: (sessionId: string) => void
+        private readonly onJobEnded: (sessionId: string) => void,
+        private readonly reviewer: () => Promise<Reviewer | undefined> = async () => undefined
     ) {
         this.#base = baseTools;
         this.#builtins = [...baseTools, this.#jobOutputTool(), this.#jobStopTool()];
@@ -392,16 +402,50 @@ export class ToolRuntime {
                 ...(this.legacyArtifactsDir ? [this.legacyArtifactsDir] : []),
             ],
         });
+        // TODO(rules): persistent allow/deny/ask rules join `evaluate` as the step before asking,
+        // with a Bash parser that matches each simple command of a compound one (agent.md §10).
         if (verdict === 'ask') {
             const answer = new Promise<Decision>(resolve =>
                 this.#waiters.set(call.callId, resolve)
             );
+            let reviewer: Reviewer | undefined;
+            let unavailable: Failure | undefined;
+            try {
+                reviewer = await this.reviewer();
+            } catch (error) {
+                unavailable = failureOf(error);
+            }
             await this.#exec(sessionId, {
                 type: 'request-permission',
                 runId,
                 callId: call.callId,
                 access: [...access],
+                ...(reviewer ? { reviewer: { cardId: reviewer.cardId } } : {}),
             });
+            if (unavailable) console.error('Automatic review is unavailable:', unavailable);
+            if (reviewer) {
+                const review = await this.#review(
+                    sessionId,
+                    call.callId,
+                    reviewer,
+                    reviewRequest(view, call.name, input, access),
+                    signal
+                );
+                if (review === undefined) {
+                    this.#waiters.delete(call.callId);
+                    return;
+                }
+                if (review.outcome === 'deny') {
+                    this.#waiters.delete(call.callId);
+                    await finish(
+                        'denied',
+                        `The automatic reviewer denied this tool call: ${review.reason} Do not retry the same call; choose another way or ask the user.`
+                    );
+                    return;
+                }
+                if (review.outcome === 'allow')
+                    this.#waiters.get(call.callId)?.({ decision: 'allow' });
+            }
             const outcome = await race(answer, undefined, signal);
             this.#waiters.delete(call.callId);
             if (outcome.kind !== 'done' || outcome.value.decision === 'cancelled') return;
@@ -461,6 +505,65 @@ export class ToolRuntime {
             { jobId: job.jobId }
         );
         void job.done.then(output => this.#endBackground(job, output));
+    }
+
+    /**
+     * Run the reviewer and commit its answer. A failure is committed as `ask` with the failure,
+     * leaving the call to the user.
+     * @param sessionId The session.
+     * @param callId The call.
+     * @param reviewer The reviewer.
+     * @param request What it judges.
+     * @param signal Run interruption; cancels the review without committing.
+     * @returns The committed review, or undefined when the run was interrupted or the call
+     * was settled otherwise.
+     */
+    async #review(
+        sessionId: string,
+        callId: string,
+        reviewer: Reviewer,
+        request: ReviewRequest,
+        signal: AbortSignal
+    ): Promise<Review | undefined> {
+        const limit = AbortSignal.timeout(reviewTimeoutMs);
+        let review: Review;
+        let failure: Failure | undefined;
+        try {
+            review = await reviewer.review(request, AbortSignal.any([signal, limit]));
+        } catch (error) {
+            if (signal.aborted) return undefined;
+            failure = limit.aborted
+                ? {
+                      category: 'timeout',
+                      retry: { kind: 'never' },
+                      outcome: 'unknown',
+                      detail: {
+                          provider: 'whim',
+                          message: `The review took longer than ${reviewTimeoutMs / 1000} s.`,
+                      },
+                  }
+                : failureOf(error);
+            review = {
+                outcome: 'ask',
+                reason: boundText(failure.detail?.message ?? failure.category) ?? '',
+                usage: {},
+            };
+        }
+        if (signal.aborted) return undefined;
+        try {
+            await this.#exec(sessionId, {
+                type: 'review-permission',
+                callId,
+                outcome: review.outcome,
+                reason: boundText(review.reason) ?? '',
+                usage: review.usage,
+                ...(failure ? { failure } : {}),
+            });
+        } catch (error) {
+            if (error instanceof StoreError && error.code === 'conflict') return undefined;
+            throw error;
+        }
+        return review;
     }
 
     /**
@@ -787,6 +890,21 @@ export class ToolRuntime {
             },
         };
     }
+}
+
+/**
+ * The failure of a review that threw.
+ * @param error What it threw.
+ * @returns The normalized failure.
+ */
+function failureOf(error: unknown): Failure {
+    if (error instanceof ApplicationError) return error.failure;
+    return {
+        category: 'internal',
+        retry: { kind: 'never' },
+        outcome: 'unknown',
+        detail: { provider: 'whim', message: boundText(describeError(error)) ?? 'Unknown error.' },
+    };
 }
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;

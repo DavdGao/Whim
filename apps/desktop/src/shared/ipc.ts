@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import type {
     AgentRecord,
-    ChatCard,
+    Card,
     Failure,
     HistoryEntry,
     PendingDelivery,
@@ -20,6 +20,14 @@ export const chatSlotSchema = z.strictObject({
     thinking: thinkingLevelSchema.optional(),
 });
 export type ChatSlot = z.infer<typeof chatSlotSchema>;
+
+/** How permission asks are answered: by the user, or by a reviewer model first. */
+export const permissionSettingsSchema = z.strictObject({
+    mode: z.enum(['manual', 'auto']),
+    /** The `reviewer` slot: a Chat or Decision card and a credential it accepts. */
+    reviewer: z.strictObject({ credentialId: idSchema, cardId: idSchema }).optional(),
+});
+export type PermissionSettings = z.infer<typeof permissionSettingsSchema>;
 
 /** The agent's identity; applies to epochs started after a change. */
 export const agentProfileSchema = z.strictObject({
@@ -64,6 +72,7 @@ export const methodSchemas = {
     'settings.locale': z.strictObject({ locale: localeSchema }),
     'settings.resumeAfterRestart': z.strictObject({ enabled: z.boolean() }),
     'settings.chatSlot': z.strictObject({ slot: chatSlotSchema }),
+    'settings.permissions': z.strictObject({ permissions: permissionSettingsSchema }),
     'settings.agent': z.strictObject({ profile: agentProfileSchema.nullable() }),
     'settings.userName': z.strictObject({ name: userNameSchema }),
     'credentials.save': z.strictObject({
@@ -166,6 +175,7 @@ export interface CredentialTypeInfo {
 
 export interface AdapterInfo {
     readonly id: string;
+    readonly kind: 'chat' | 'decision';
     readonly pluginId: string;
     readonly credentialTypes: readonly string[];
 }
@@ -176,7 +186,7 @@ export interface CatalogEntryInfo {
     readonly pluginId?: string;
     readonly files: readonly string[];
     readonly hidden: boolean;
-    readonly card?: ChatCard;
+    readonly card?: Card;
     readonly issues: readonly string[];
 }
 
@@ -212,6 +222,7 @@ export interface AppState {
     /** The effective profile, and whether it is the default. */
     readonly agent: AgentProfile & { readonly isDefault: boolean };
     readonly chatSlot?: ChatSlot;
+    readonly permissions: PermissionSettings;
     readonly userCardsDir: string;
     /** The folder a new chat works in when the user picks none. */
     /** Names of the built-in tools every agent has. */
@@ -244,6 +255,7 @@ export interface Results {
     'settings.locale': null;
     'settings.resumeAfterRestart': null;
     'settings.chatSlot': null;
+    'settings.permissions': null;
     'settings.agent': null;
     'settings.userName': null;
     'credentials.save': { id: string };

@@ -46,6 +46,7 @@ import {
     ItemMedia,
     ItemTitle,
 } from '@/components/ui/item';
+import { Spinner } from '@/components/ui/spinner';
 import {
     TraceCollapsible,
     TraceCollapsibleContent,
@@ -209,7 +210,12 @@ function progress(
             : {
                   phase: 'running',
                   active: false,
-                  note: open?.state === 'asking' ? 'tool.status.asking' : 'tool.status.pending',
+                  note:
+                      open?.state !== 'asking'
+                          ? 'tool.status.pending'
+                          : open.review?.state === 'running'
+                            ? 'tool.status.reviewing'
+                            : 'tool.status.asking',
               };
     switch (result.status) {
         case 'success':
@@ -402,33 +408,49 @@ export function ToolCallView({
                             {(open.access ?? []).map((access, index) => (
                                 <AccessLine key={index} access={access} />
                             ))}
+                            {open.review?.state === 'done' && (
+                                <span>
+                                    {open.review.failure
+                                        ? t('tool.review.failed', {
+                                              reason: t(`failure.${open.review.failure.category}`),
+                                          })
+                                        : t('tool.review.unsure', { reason: open.review.reason })}
+                                </span>
+                            )}
                         </ItemDescription>
                     </ItemContent>
-                    <ItemActions className="flex-wrap justify-end">
-                        <ActionButton
-                            size="sm"
-                            variant="ghost"
-                            icon={<XIcon />}
-                            action={() => decide('deny', 'once')}
-                        >
-                            {t('tool.ask.deny')}
-                        </ActionButton>
-                        <ActionButton
-                            size="sm"
-                            variant="outline"
-                            icon={<ShieldCheckIcon />}
-                            action={() => decide('allow', 'session')}
-                        >
-                            {t('tool.ask.session')}
-                        </ActionButton>
-                        <ActionButton
-                            size="sm"
-                            icon={<CheckIcon />}
-                            action={() => decide('allow', 'once')}
-                        >
-                            {t('tool.ask.once')}
-                        </ActionButton>
-                    </ItemActions>
+                    {open.review?.state === 'running' ? (
+                        <ItemActions className="text-muted-foreground text-xs">
+                            <Spinner />
+                            {t('tool.review.running')}
+                        </ItemActions>
+                    ) : (
+                        <ItemActions className="flex-wrap justify-end">
+                            <ActionButton
+                                size="sm"
+                                variant="ghost"
+                                icon={<XIcon />}
+                                action={() => decide('deny', 'once')}
+                            >
+                                {t('tool.ask.deny')}
+                            </ActionButton>
+                            <ActionButton
+                                size="sm"
+                                variant="outline"
+                                icon={<ShieldCheckIcon />}
+                                action={() => decide('allow', 'session')}
+                            >
+                                {t('tool.ask.session')}
+                            </ActionButton>
+                            <ActionButton
+                                size="sm"
+                                icon={<CheckIcon />}
+                                action={() => decide('allow', 'once')}
+                            >
+                                {t('tool.ask.once')}
+                            </ActionButton>
+                        </ItemActions>
+                    )}
                 </Item>
             )}
         </>

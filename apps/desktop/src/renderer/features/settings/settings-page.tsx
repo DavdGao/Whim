@@ -1,7 +1,10 @@
 import {
     BotIcon,
     BoxesIcon,
+    BoxIcon,
     LanguagesIcon,
+    ShieldCheckIcon,
+    UserRoundIcon,
     PuzzleIcon,
     SaveIcon,
     SlidersHorizontalIcon,
@@ -11,9 +14,12 @@ import { toast } from 'sonner';
 
 import { ActionButton } from '../../components/action-button';
 import { ChoiceMenu } from '../../components/choice-menu';
+import { EntityIcon } from '../../components/entity-icon';
 import { call } from '../../lib/client';
 import { useT } from '../../lib/i18n';
+import { modelIcon } from '../../lib/icons';
 import { useAction } from '../../lib/use-action';
+import { reviewerChoices } from '../chat/model-choices';
 import { ModelSettings } from '../models/models-page';
 import { PluginSettings } from '../plugins/plugins-page';
 
@@ -175,6 +181,7 @@ function GeneralSettings({ state }: { state: AppState }) {
                             </ActionButton>
                         </div>
                     </Field>
+                    <PermissionSettings state={state} />
                     <Field orientation="horizontal">
                         <FieldContent>
                             <FieldLabel htmlFor="resume">{t('settings.resume')}</FieldLabel>
@@ -191,5 +198,103 @@ function GeneralSettings({ state }: { state: AppState }) {
                 </FieldGroup>
             </CardContent>
         </Card>
+    );
+}
+
+/**
+ * How tool calls that need permission are answered: by the user, or by a reviewer model first.
+ * @param props Application state.
+ * @param props.state Application state.
+ * @returns The fields.
+ */
+function PermissionSettings({ state }: { state: AppState }) {
+    const { t } = useT();
+    const { permissions } = state;
+    const choices = reviewerChoices(state, permissions.reviewer?.credentialId);
+    const reviewer =
+        choices.find(choice => choice.card.id === permissions.reviewer?.cardId) ?? choices[0];
+    return (
+        <>
+            <Field orientation="horizontal">
+                <FieldContent>
+                    <FieldLabel htmlFor="permission-mode">{t('settings.permissions')}</FieldLabel>
+                    <FieldDescription>{t('settings.permissionsDescription')}</FieldDescription>
+                </FieldContent>
+                <ChoiceMenu
+                    id="permission-mode"
+                    value={permissions.mode}
+                    choices={[
+                        {
+                            value: 'manual',
+                            label: t('settings.permissions.manual'),
+                            icon: <UserRoundIcon />,
+                        },
+                        {
+                            value: 'auto',
+                            label: t('settings.permissions.auto'),
+                            icon: <ShieldCheckIcon />,
+                        },
+                    ]}
+                    icon={<ShieldCheckIcon />}
+                    placeholder={t('settings.permissions')}
+                    className="w-56"
+                    align="end"
+                    onChange={mode =>
+                        call('settings.permissions', {
+                            permissions: {
+                                mode,
+                                ...(reviewer
+                                    ? {
+                                          reviewer: {
+                                              cardId: reviewer.card.id,
+                                              credentialId: reviewer.credentialId,
+                                          },
+                                      }
+                                    : {}),
+                            },
+                        })
+                    }
+                />
+            </Field>
+            {permissions.mode === 'auto' && (
+                <Field orientation="horizontal">
+                    <FieldContent>
+                        <FieldLabel htmlFor="reviewer">{t('settings.reviewer')}</FieldLabel>
+                        <FieldDescription>{t('settings.reviewerDescription')}</FieldDescription>
+                    </FieldContent>
+                    <ChoiceMenu
+                        id="reviewer"
+                        value={permissions.reviewer?.cardId}
+                        disabled={choices.length === 0}
+                        choices={choices.map(choice => ({
+                            value: choice.card.id,
+                            label: choice.card.name,
+                            group: choice.provider,
+                            icon: (
+                                <EntityIcon
+                                    src={modelIcon(state, choice.card)}
+                                    fallback={BoxIcon}
+                                />
+                            ),
+                        }))}
+                        icon={<BoxIcon />}
+                        placeholder={t('chat.model')}
+                        className="w-56"
+                        align="end"
+                        onChange={cardId => {
+                            const choice = choices.find(item => item.card.id === cardId);
+                            return choice
+                                ? call('settings.permissions', {
+                                      permissions: {
+                                          mode: 'auto',
+                                          reviewer: { cardId, credentialId: choice.credentialId },
+                                      },
+                                  })
+                                : undefined;
+                        }}
+                    />
+                </Field>
+            )}
+        </>
     );
 }

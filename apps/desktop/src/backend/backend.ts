@@ -8,8 +8,10 @@ import { Agent, rendererVersion } from '@whimkit/agent';
 import {
     ApplicationError,
     Catalog,
+    ChatReviewer,
     CredentialService,
     CredentialValidationError,
+    DecisionReviewer,
     describeError,
     ModelService,
     PluginHost,
@@ -27,6 +29,7 @@ import {
     chatSlotSchema,
     localeSchema,
     methodSchemas,
+    permissionSettingsSchema,
     requestEnvelopeSchema,
     userNameSchema,
 } from '../shared/ipc.js';
@@ -40,13 +43,14 @@ import type {
     ChatSlot,
     IpcError,
     Method,
+    PermissionSettings,
     Results,
     HistoryPage,
     SessionSnapshot,
     StagedAttachment,
 } from '../shared/ipc.js';
 import type { AgentEvent } from '@whimkit/agent';
-import type { ChatCard, FrozenChatCard, SecretCipher } from '@whimkit/core';
+import type { ChatCard, FrozenChatCard, Reviewer, SecretCipher } from '@whimkit/core';
 import type { MediaBlock } from '@whimkit/core/contracts';
 import type { MessagePortMain } from 'electron';
 
@@ -256,7 +260,8 @@ class Backend {
             this.#baseTools,
             join(userData, 'sessions'),
             join(userData, 'artifacts'),
-            sessionId => this.schedule(sessionId, 'job')
+            sessionId => this.schedule(sessionId, 'job'),
+            () => this.#reviewer()
         );
         this.agent = new Agent(store, models, this.tools, {
             compaction: {
@@ -265,7 +270,7 @@ class Backend {
                 // A compaction refreshes the prefix like a model switch: current profile, tools,
                 // and card revision; a card that is no longer available keeps the frozen one.
                 epoch: async view => {
-                    const card = this.catalog.card(view.epoch.card.id);
+                    const card = this.catalog.chatCard(view.epoch.card.id);
                     return card
                         ? this.#epoch(card, view.sessionId, view.workspace)
                         : {
@@ -291,6 +296,7 @@ class Backend {
                         'run.started',
                         'run.ended',
                         'permission.requested',
+                        'permission.reviewed',
                         'permission.decided',
                     ].includes(record.body.type)
                 )
@@ -372,6 +378,24 @@ class Backend {
                 await this.store.setSetting('user.name', methodSchemas[method].parse(raw).name);
                 this.#emit({ type: 'state' });
                 return null;
+            case 'settings.permissions': {
+                const { permissions } = methodSchemas[method].parse(raw);
+                if (permissions.reviewer) {
+                    const { cardId, credentialId } = permissions.reviewer;
+                    const card = this.catalog.card(cardId);
+                    if (!card) throw new Error('The selected model is not available.');
+                    const credential = (await this.credentials.list()).find(
+                        item => item.id === credentialId
+                    );
+                    if (!credential || !this.models.accepts(card.adapter, credential.typeId))
+                        throw new Error('The selected credential does not work with this model.');
+                }
+                if (permissions.mode === 'auto' && !permissions.reviewer)
+                    throw new Error('Choose a model to review tool calls.');
+                await this.store.setSetting('permissions', permissions);
+                this.#emit({ type: 'state' });
+                return null;
+            }
             case 'settings.chatSlot':
                 await this.store.setSetting('slot.chat', methodSchemas[method].parse(raw).slot);
                 this.#emit({ type: 'state' });
@@ -515,6 +539,7 @@ class Backend {
             resumeAfterRestart: (await this.store.getSetting('agent.resumeAfterRestart')) === true,
             ...(userName ? { userName } : {}),
             ...(slot.success ? { chatSlot: slot.data } : {}),
+            permissions: await this.#permissions(),
             userCardsDir: this.catalog.userDir,
             baseTools: this.#baseTools.map(tool => tool.name),
             plugins: this.host.statuses().map(status => ({
@@ -529,7 +554,7 @@ class Backend {
                 ...(status.icon ? { icon: status.icon } : {}),
                 icons: status.icons,
                 category: status.category,
-                adapters: [...this.host.chatAdapters.values()].filter(
+                adapters: [...this.host.adapters.values()].filter(
                     entry => entry.pluginId === status.id
                 ).length,
                 credentialTypes: [...this.host.credentialTypes.values()].filter(
@@ -544,8 +569,9 @@ class Backend {
                 pluginId: entry.pluginId,
                 schema: entry.type.schema,
             })),
-            adapters: [...this.host.chatAdapters.values()].map(entry => ({
+            adapters: [...this.host.adapters.values()].map(entry => ({
                 id: entry.adapter.id,
+                kind: entry.adapter.kind,
                 pluginId: entry.pluginId,
                 credentialTypes: entry.adapter.credentialTypes,
             })),
@@ -602,7 +628,7 @@ class Backend {
      * @returns The card.
      */
     async #checkBinding(cardId: string, credentialId: string): Promise<ChatCard> {
-        const card = this.catalog.card(cardId);
+        const card = this.catalog.chatCard(cardId);
         if (!card) throw new Error('The selected model is not available.');
         const credential = (await this.credentials.list()).find(item => item.id === credentialId);
         if (!credential) throw new Error('The selected credential does not exist.');
@@ -635,6 +661,56 @@ class Backend {
     }
 
     /**
+     * How permission asks are answered.
+     * @returns The saved settings, or manual mode.
+     */
+    async #permissions(): Promise<PermissionSettings> {
+        const saved = permissionSettingsSchema.safeParse(
+            await this.store.getSetting('permissions')
+        );
+        return saved.success ? saved.data : { mode: 'manual' };
+    }
+
+    /**
+     * The reviewer that answers asks first, read at every ask so a settings change applies to the
+     * next one. A reviewer whose model is gone fails its reviews, which leaves asks to the user.
+     * @returns The reviewer in auto mode, otherwise undefined.
+     */
+    async #reviewer(): Promise<Reviewer | undefined> {
+        const settings = await this.#permissions();
+        if (settings.mode !== 'auto' || !settings.reviewer) return undefined;
+        const { cardId, credentialId } = settings.reviewer;
+        const card = this.catalog.card(cardId);
+        switch (card?.kind) {
+            case 'chat':
+                return new ChatReviewer(cardId, card.thinking, () =>
+                    this.models.open(freeze(card), credentialId)
+                );
+            case 'decision':
+                return new DecisionReviewer(cardId, () =>
+                    this.models.openDecision(card, credentialId)
+                );
+            case undefined:
+                return {
+                    cardId,
+                    review: () =>
+                        Promise.reject(
+                            new ApplicationError({
+                                category: 'model-unavailable',
+                                retry: { kind: 'after-change', change: 'configuration' },
+                                outcome: 'rejected',
+                                detail: {
+                                    provider: 'whim',
+                                    message:
+                                        'The model chosen to review tool calls is not available.',
+                                },
+                            })
+                        ),
+                };
+        }
+    }
+
+    /**
      * Pinned session ids, most recently pinned first.
      * @returns The ids.
      */
@@ -653,7 +729,8 @@ class Backend {
     async #epoch(card: ChatCard, sessionId: string, workspace: string | undefined) {
         // Provider tools the adapter runs as separate calls keep the local tool's declaration, so
         // the tool list depends only on the card and never on per-request options like thinking.
-        const separate = this.host.chatAdapters.get(card.adapter)?.adapter.separateTools ?? [];
+        const adapter = this.host.adapters.get(card.adapter)?.adapter;
+        const separate = adapter?.kind === 'chat' ? (adapter.separateTools ?? []) : [];
         const nativeTools = card.nativeTools.filter(tool => !separate.includes(tool));
         const providerTools = card.nativeTools.filter(tool => separate.includes(tool));
         const credentialTypes = new Set(

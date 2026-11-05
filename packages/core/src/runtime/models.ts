@@ -2,8 +2,9 @@ import { ApplicationError } from '../contracts/failure.js';
 
 import type { CredentialService } from './credentials.js';
 import type { PluginHost } from './plugin-host.js';
-import type { FrozenChatCard } from '../contracts/card.js';
-import type { ChatSession } from '../plugin/index.js';
+import type { RegisteredAdapter } from './plugin-host.js';
+import type { DecisionCard, FrozenChatCard } from '../contracts/card.js';
+import type { ChatSession, DecisionSession, ResolvedCredential } from '../plugin/index.js';
 
 /**
  * Report a configuration problem as a non-retryable failure.
@@ -38,28 +39,55 @@ export class ModelService {
      * @returns True when compatible.
      */
     accepts(adapterId: string, typeId: string): boolean {
-        return (
-            this.host.chatAdapters.get(adapterId)?.adapter.credentialTypes.includes(typeId) ?? false
-        );
+        return this.host.adapters.get(adapterId)?.adapter.credentialTypes.includes(typeId) ?? false;
     }
 
     /**
-     * Open an adapter session for a frozen card and credential.
+     * Open a Chat adapter session for a frozen card and credential.
      * @param card The card fields frozen in the session's epoch.
      * @param credentialId The session's credential.
      * @returns A ready chat session.
      */
     async open(card: FrozenChatCard, credentialId: string): Promise<ChatSession> {
-        const registered = this.host.chatAdapters.get(card.adapter);
-        if (!registered) throw unavailable(`The plugin providing ${card.adapter} is not active.`);
-        const issues = registered.optionsSchema.issues(card.options);
+        const { adapter, credential } = await this.#bind(card.adapter, card.options, credentialId);
+        if (adapter.kind !== 'chat')
+            throw unavailable(`${card.adapter} does not serve chat models.`);
+        return adapter.open({ card, credential });
+    }
+
+    /**
+     * Open a Decision adapter session for a card and credential.
+     * @param card The Decision card.
+     * @param credentialId The credential to use.
+     * @returns A ready decision session.
+     */
+    async openDecision(card: DecisionCard, credentialId: string): Promise<DecisionSession> {
+        const { adapter, credential } = await this.#bind(card.adapter, card.options, credentialId);
+        if (adapter.kind !== 'decision')
+            throw unavailable(`${card.adapter} does not serve decision models.`);
+        return adapter.open({ card, credential });
+    }
+
+    /**
+     * Find a card's adapter and resolve a credential it accepts.
+     * @param adapterId The card's adapter.
+     * @param options The card's adapter options.
+     * @param credentialId The credential.
+     * @returns The adapter and the decrypted credential.
+     */
+    async #bind(
+        adapterId: string,
+        options: Readonly<Record<string, unknown>>,
+        credentialId: string
+    ): Promise<{ adapter: RegisteredAdapter['adapter']; credential: ResolvedCredential }> {
+        const registered = this.host.adapters.get(adapterId);
+        if (!registered) throw unavailable(`The plugin providing ${adapterId} is not active.`);
+        const issues = registered.optionsSchema.issues(options);
         if (issues.length)
-            throw unavailable(
-                `The session's model options are no longer valid: ${issues[0].message}.`
-            );
+            throw unavailable(`The model options are no longer valid: ${issues[0].message}.`);
         const credential = await this.credentials.resolve(credentialId);
         if (!registered.adapter.credentialTypes.includes(credential.typeId))
             throw unavailable('The selected credential does not work with this model.');
-        return registered.adapter.open({ card, credential });
+        return { adapter: registered.adapter, credential };
     }
 }

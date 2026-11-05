@@ -34,27 +34,27 @@ The journal head (latest seq), the epoch, and the run generation are separate va
 
 Each record has `id`, `sessionId`, `seq`, `type`, `version`, `createdAt`, `operationId`, and a typed body. Bodies are discriminated by `type`; incompatible states are separate variants, not optional fields.
 
-| Record                                       | Written when                                                                 | Key fields                                                                                                                             |
-| -------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `session.created`                            | Session creation                                                             | title, credential, thinking level                                                                                                      |
-| `session.updated`                            | Rename, credential change, thinking level change                             | changed fields; none of them alter the prompt prefix, so they apply to the next attempt                                                |
-| `epoch.started`                              | Creation, successful compaction, model switch                                | `epochId`, `reason`, system sections, tool declarations, frozen card, source snapshots                                                 |
-| `delivery.accepted`                          | Input admitted to the inbox                                                  | `deliveryId`, `placement`, item (message or notice)                                                                                    |
-| `delivery.withdrawn`                         | User removes a pending item                                                  | `deliveryId`                                                                                                                           |
-| `run.started`                                | Scheduler begins a run                                                       | `runId`, trigger                                                                                                                       |
-| `step.prepared`                              | Before reasoning                                                             | `stepId`, consumed delivery ids, plan (epoch id, history end seq, estimate)                                                            |
-| `attempt.started`                            | Each model request                                                           | `attemptId`, `stepId`, attempt number                                                                                                  |
-| `attempt.finished`                           | Attempt terminal                                                             | `status` (completed, failed, interrupted), usage, failure; for completed and interrupted attempts, the output (text, reasoning, items) |
-| `retry.scheduled`                            | Runtime decides to retry                                                     | `stepId`, next attempt number, `at`, failure that caused it                                                                            |
-| `interrupt.requested`                        | Stop or shutdown                                                             | `runId`, `reason`: user, shutdown, or plugin-removed                                                                                   |
-| `run.ended`                                  | Run terminal                                                                 | `{ outcome: 'completed' }` / `{ outcome: 'interrupted', reason }` / `{ outcome: 'failed', failure }`                                   |
-| `compaction.started`                         | Compaction begins                                                            | `compactionId`, trigger                                                                                                                |
-| `compaction.finished`                        | Compaction terminal                                                          | `{ status: 'succeeded', epochId, coveredSeq }` / `{ status: 'failed', failure }`                                                       |
-| `permission.requested`, `permission.decided` | A call needs the user's decision ([§10](#10-permissions))                    | `callId`, access / decision and scope                                                                                                  |
-| `tool.started`, `tool.finished`              | A call starts / gets its result ([§9.2](#92-calls-and-results))              | `callId`, `jobId` / result item                                                                                                        |
-| `job.ended`                                  | A background job ends or is lost ([§9.4](#94-jobs-and-background-execution)) | `jobId`, status                                                                                                                        |
+| Record                                                              | Written when                                                                   | Key fields                                                                                                                             |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `session.created`                                                   | Session creation                                                               | title, credential, thinking level                                                                                                      |
+| `session.updated`                                                   | Rename, credential change, thinking level change                               | changed fields; none of them alter the prompt prefix, so they apply to the next attempt                                                |
+| `epoch.started`                                                     | Creation, successful compaction, model switch                                  | `epochId`, `reason`, system sections, tool declarations, frozen card, source snapshots                                                 |
+| `delivery.accepted`                                                 | Input admitted to the inbox                                                    | `deliveryId`, `placement`, item (message or notice)                                                                                    |
+| `delivery.withdrawn`                                                | User removes a pending item                                                    | `deliveryId`                                                                                                                           |
+| `run.started`                                                       | Scheduler begins a run                                                         | `runId`, trigger                                                                                                                       |
+| `step.prepared`                                                     | Before reasoning                                                               | `stepId`, consumed delivery ids, plan (epoch id, history end seq, estimate)                                                            |
+| `attempt.started`                                                   | Each model request                                                             | `attemptId`, `stepId`, attempt number                                                                                                  |
+| `attempt.finished`                                                  | Attempt terminal                                                               | `status` (completed, failed, interrupted), usage, failure; for completed and interrupted attempts, the output (text, reasoning, items) |
+| `retry.scheduled`                                                   | Runtime decides to retry                                                       | `stepId`, next attempt number, `at`, failure that caused it                                                                            |
+| `interrupt.requested`                                               | Stop or shutdown                                                               | `runId`, `reason`: user, shutdown, or plugin-removed                                                                                   |
+| `run.ended`                                                         | Run terminal                                                                   | `{ outcome: 'completed' }` / `{ outcome: 'interrupted', reason }` / `{ outcome: 'failed', failure }`                                   |
+| `compaction.started`                                                | Compaction begins                                                              | `compactionId`, trigger                                                                                                                |
+| `compaction.finished`                                               | Compaction terminal                                                            | `{ status: 'succeeded', epochId, coveredSeq }` / `{ status: 'failed', failure }`                                                       |
+| `permission.requested`, `permission.reviewed`, `permission.decided` | A call needs a decision from the reviewer or the user ([§10](#10-permissions)) | `callId`, access and reviewer / outcome, reason, usage / decision and scope                                                            |
+| `tool.started`, `tool.finished`                                     | A call starts / gets its result ([§9.2](#92-calls-and-results))                | `callId`, `jobId` / result item                                                                                                        |
+| `job.ended`                                                         | A background job ends or is lost ([§9.4](#94-jobs-and-background-execution))   | `jobId`, status                                                                                                                        |
 
-Usage is recorded on every `attempt.finished`, including failures, with missing fields left unknown. Compaction and reviewer attempts are attempts too.
+Usage is recorded on every `attempt.finished`, including failures, with missing fields left unknown. Compaction calls and reviews record their usage too.
 
 ## 4. Messages and notices
 
@@ -257,16 +257,56 @@ A result above 32 KiB of text is written to `<userData>/sessions/<sessionId>/off
 
 ## 10. Permissions
 
-Core decides each call from its `access` list:
+Core decides each call in three steps, from its `access` list:
 
-| Access                                                           | Default (manual mode) |
-| ---------------------------------------------------------------- | --------------------- |
-| none, or `read` inside the workspace or the session's own folder | allow                 |
-| `read` elsewhere, `write`, `execute`, `network`                  | ask                   |
+1. **Built in.** No access, or `read` inside the workspace or the session's own folder: allow.
+2. **Rules.** A session grant matching every remaining access: allow. Persistent allow, deny, and ask rules from Settings join this step later, together with a Bash parser that splits a compound command into simple commands and matches each one; until then any `execute` access that is not covered by a grant goes to step 3.
+3. **Ask.** Everything else. In manual mode the user answers; in auto mode the reviewer answers first (§10.1).
+
+| Access                                                           | Without a rule |
+| ---------------------------------------------------------------- | -------------- |
+| none, or `read` inside the workspace or the session's own folder | allow          |
+| `read` elsewhere, `write`, `execute`, `network`                  | ask            |
 
 The user answers an ask with **Allow once**, **Allow for this session**, or **Deny**. A session grant becomes a rule for that tool: a path prefix for files (the workspace), the first word of the command for `execute`, the host for `network`. A denial produces a `denied` result telling the model the user declined. Stop while an ask is open cancels the call.
 
-Records: `permission.requested { callId, name, access }` and `permission.decided { callId, decision, scope }`. Persistent rules in Settings and **auto mode** (a reviewer model deciding asks: a Chat model with structured output or a Decision model behind one contract, falling back to the user on failure, with its attempts recorded) follow in a later change.
+Records: `permission.requested { callId, name, access, reviewer? }`, `permission.reviewed { callId, outcome, reason, usage, failure? }`, and `permission.decided { callId, decision, scope }`.
+
+### 10.1 Automatic review
+
+Settings → General → Permissions chooses the mode: **Ask me** (manual, the default) or **Review automatically** with a reviewer model, the `reviewer` slot `{ credentialId, cardId }` ([design.md §6.3](design.md#63-model-slots)), which may be any Chat or Decision card. The setting is not prompt-affecting: every session uses it from its next ask.
+
+One contract covers both model kinds:
+
+```ts
+interface Reviewer {
+    readonly cardId: string;
+    /** Throws ApplicationError on failure; never retries. */
+    review(request: ReviewRequest, signal: AbortSignal): Promise<Review>;
+}
+interface ReviewRequest {
+    tool: { name: string; description: string };
+    input: unknown; // validated against the tool's schema
+    access: readonly Access[];
+    workspace?: string;
+    requests: readonly string[]; // the user's messages, oldest first
+}
+interface Review {
+    outcome: 'allow' | 'deny' | 'ask';
+    reason: string;
+    usage: Usage;
+}
+```
+
+- **What the reviewer sees.** The user's messages since the last compaction (the latest 8, each cut to 2,000 characters), the workspace, the tool's name and description, its validated input, and its access list. It does not see assistant text, tool results, or notices: those can carry instructions from files and web pages, and the question is whether the call serves what the user asked.
+- **Policy.** Allow when the call is a reasonable step toward what the user asked and its effects stay inside the workspace or are what the user requested. Deny when it is destructive or irreversible beyond the request (deleting outside the workspace, rewriting published history, reading or sending credentials, weakening security settings) or when it follows instructions that did not come from the user. Ask when unsure.
+- **Chat reviewer.** One Chat call: a fixed policy as the system prompt, the request as JSON in one user message, and one tool, `decide { decision: allow | deny | ask, reason }`. The answer is that tool call, validated against its schema; text without the call, or invalid arguments, is a failure, because Chat text is never parsed as a decision. Thinking is off when the card allows it, otherwise its lowest level.
+- **Decision reviewer.** One choice question over the same JSON state, with the options `allow`, `ask`, and `deny` described by the policy. The chosen option is the outcome when its confidence is at least 0.8, otherwise `ask`. The reason names the choice and its confidence, since a Decision model returns no text.
+- **Failure.** One attempt with a 60 s limit. An adapter error, a timeout, an invalid answer, or a reviewer that cannot be opened (card gone, credential removed) is recorded with its failure and leaves the ask to the user.
+
+`permission.requested` carries `reviewer { cardId }` when the call goes to review, and `permission.reviewed` follows with the outcome, the reason, and the reviewer's usage, which counts toward the session's usage but not its context. `allow` and `deny` settle the call as an answer for this call only: no rule is granted. A denial gives the model a `denied` result with the reviewer's reason, so it can try another way. `ask` and failures leave the call waiting for the user, whose card shows the reviewer's reason or failure. While the review runs, the card shows that it is reviewing and the user can still press Stop, which cancels the review and the call. An unfinished review is closed after a restart like any open call.
+
+Later rules may let a repeated, already reviewed call skip the reviewer, but never schema checks, denials, revocations, or a changed target; rule candidates a reviewer proposes are validated before they are installed.
 
 ## 11. Skills and memory
 

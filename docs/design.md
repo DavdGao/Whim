@@ -138,7 +138,7 @@ Startup applies the same rules when a plugin is missing or fails to activate.
 | Registration    | Purpose                                                                                                             |
 | --------------- | ------------------------------------------------------------------------------------------------------------------- |
 | Credential type | A JSON Schema for one kind of account credential (§6)                                                               |
-| Model adapter   | Implements one model kind (`chat`, later `decision`, `tts`, `asr`, `embedding`) (§7.4)                              |
+| Model adapter   | Implements one model kind (`chat`, `decision`, later `tts`, `asr`, `embedding`) (§7.4)                              |
 | Processor       | Converts an attachment media type into model-deliverable content (§8)                                               |
 | Tool            | A local tool definition and executor ([agent.md §9](agent.md#9-tools)); names are unique across plugins             |
 | Context source  | A prefix-affecting source such as skills or memory ([agent.md §7](agent.md#7-context-sources-and-the-prompt-cache)) |
@@ -197,7 +197,7 @@ Changing a credential is not prompt-affecting: it applies to the next attempt of
 
 ### 6.3 Model slots
 
-A slot is a role in the application that needs a model: `chat` (default for new sessions), `compaction`, `reviewer`, later `tts`, `asr`, `embedding`. A slot value is `{ credentialId, cardId, thinking? }`. The Models page lists, per slot, the credentials whose type an adapter of the slot's kind accepts, then the cards of that adapter.
+A slot is a role in the application that needs a model: `chat` (default for new sessions), `compaction`, `reviewer` (automatic permission review, a Chat or Decision card), later `tts`, `asr`, `embedding`. A slot value is `{ credentialId, cardId, thinking? }`. The Models page lists, per slot, the credentials whose type an adapter of the slot's kind accepts, then the cards of that adapter.
 
 A session copies the `chat` slot when it is created. The user can switch the session's model whenever no run is active; it applies from the next reasoning step ([agent.md §8.1](agent.md#81-model-switch)).
 
@@ -248,6 +248,8 @@ Numeric values in this example are illustrative; seed card values are verified a
 
 Thinking levels use a fixed vocabulary of at most five values: `off`, `low`, `medium`, `high`, `max`. A card lists the subset it supports. Mapping a level to provider parameters is the adapter's job; an adapter may accept a mapping override in `options` for models that deviate.
 
+A **Decision** card (`"kind": "decision"`) describes a model that returns typed, calibrated answers instead of text. It has `id`, `revision`, `kind`, `adapter`, `model`, `name`, optional `icon`, and `options`; the Chat fields (`contextWindow`, `input`, `output`, `thinking`, `nativeTools`) do not apply. Decision cards are not offered as chat models; they serve slots of their kind, such as the reviewer ([agent.md §10.1](agent.md#101-automatic-review)).
+
 Cards contain no pricing, no provider evidence, and no protocol fields that Core would have to interpret. Provider facts and their verification dates live in [providers/](providers/).
 
 ### 7.2 Validation
@@ -290,6 +292,36 @@ interface ChatSession {
     ): Promise<{ output: ToolOutput; usage: Usage }>;
 }
 ```
+
+A Decision adapter has the same `id`, `credentialTypes`, `optionsSchema`, and `open`, with `kind: 'decision'`, and opens a session with one call:
+
+```ts
+interface DecisionSession {
+    /** One provider call; throws ApplicationError on failure and never retries. */
+    decide(request: DecisionRequest, signal: AbortSignal): Promise<DecisionResult>;
+}
+interface DecisionRequest {
+    state: string; // what every question refers to
+    questions: Record<
+        string,
+        { type: 'choice'; instructions: string; options: Record<string, string> }
+    >;
+}
+interface DecisionResult {
+    answers: Record<
+        string,
+        {
+            type: 'choice';
+            choice: string;
+            confidence: number;
+            probabilities: Record<string, number>;
+        }
+    >;
+    usage: Usage;
+}
+```
+
+Only the question types a caller uses are in the contract; the reviewer uses one choice question. An adapter rejects an answer that does not match its question instead of passing it on.
 
 - `stream` yields normalized events: text and reasoning deltas, completed output items (assistant message, function call, provider-executed tool call, opaque continuation), and exactly one terminal event (`completed` with usage, or a thrown `ApplicationError`). End of stream without a terminal event is a protocol failure.
 - Adapters perform no hidden retries; the runtime owns retries ([agent.md §6](agent.md#6-errors-and-retries)).
@@ -406,7 +438,7 @@ The window has no native title bar (`titleBarStyle: 'hiddenInset'`). A draggable
 | Page     | Content                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Chat     | Session list (Pinned / Today / Earlier, rename, pin, delete), conversation with reasoning and tool calls as Trace lines (the latest 60 history entries first; pulling past the top loads earlier pages with a springy pull, no button), a one-line composer that grows and stacks its add/send buttons below the text when it wraps; the add menu attaches files or chooses the chat's folder. A chosen folder (not the default) appears in a bar above the field with its git branch and uncommitted line counts; under the field sit one model-and-thinking button and a context ring that fills toward compaction |
-| Settings | A section list: General (language, what agents call the user, permissions, data); Agent (name, icon, system prompt); Models (credentials, default models, available models with a detail page per model, grouped by model kind as kinds are added); Plugins (grouped by manifest category)                                                                                                                                                                                                                                                                                                                           |
+| Settings | A section list: General (language, what agents call the user, permissions: ask each time or review automatically with a chosen model, data); Agent (name, icon, system prompt); Models (credentials, default models, available models with a detail page per model, grouped by model kind as kinds are added); Plugins (grouped by manifest category)                                                                                                                                                                                                                                                                |
 
 Configuration lives in Settings; the rail is for feature pages. Planned feature pages include ACP (connecting external coding agents) and Music; each is added when its feature exists. The language selector is persistent and every string is in typed en/zh-CN catalogs.
 

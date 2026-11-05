@@ -419,7 +419,11 @@ export function ModelDetail({
                     <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-sm">
                         {provider && <span>{provider}</span>}
                         <Badge variant="secondary" className="rounded-full">
-                            {t('model.kind.chat')}
+                            {t(
+                                card?.kind === 'decision'
+                                    ? 'model.kind.decision'
+                                    : 'model.kind.chat'
+                            )}
                         </Badge>
                         {entry.hidden && (
                             <Badge variant="outline" className="rounded-full">
@@ -440,7 +444,7 @@ export function ModelDetail({
                 </StatusAlert>
             )}
 
-            {card && <Sheet state={state} card={card} />}
+            {card?.kind === 'chat' && <Sheet state={state} card={card} />}
         </div>
     );
 }

@@ -18,6 +18,7 @@ export type {
     PluginAvailability,
     PluginPackage,
     PluginStatus,
+    RegisteredAdapter,
     RegisteredTool,
 } from './plugin-host.js';
 export { Store } from './store.js';
@@ -26,3 +27,5 @@ export type { ToolCredentials, ToolModels } from './tools.js';
 export { evaluate, isInside, rulesFor } from './permissions.js';
 export type { PermissionEnv } from './permissions.js';
 export { storeMedia } from './media.js';
+export { ChatReviewer, DecisionReviewer, decisionConfidence, reviewRequest } from './review.js';
+export type { Review, ReviewRequest, Reviewer } from './review.js';

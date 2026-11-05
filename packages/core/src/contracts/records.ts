@@ -191,6 +191,10 @@ export const accessSchema = z.discriminatedUnion('kind', [
 ]);
 export type Access = z.infer<typeof accessSchema>;
 
+/** What an automatic review concluded. */
+export const reviewOutcomeSchema = z.enum(['allow', 'deny', 'ask']);
+export type ReviewOutcome = z.infer<typeof reviewOutcomeSchema>;
+
 /** A session-scoped permission grant. */
 export const permissionRuleSchema = z.strictObject({
     tool: z.string(),
@@ -333,6 +337,23 @@ export const bodySchema = z.discriminatedUnion('type', [
         callId: idSchema,
         name: z.string(),
         access: z.array(accessSchema),
+        /** Present when the reviewer answers before the user (auto mode). */
+        reviewer: z.strictObject({ cardId: idSchema }).optional(),
+    }),
+    /**
+     * The reviewer's answer. `allow` and `deny` settle the call for this call only; `ask`, and a
+     * failed review, leave it waiting for the user.
+     */
+    z.strictObject({
+        type: z.literal('permission.reviewed'),
+        runId: idSchema,
+        callId: idSchema,
+        outcome: reviewOutcomeSchema,
+        /** Why, for the user and, on a denial, the model. Bounded. */
+        reason: z.string().max(2000),
+        /** Counted in the session's usage, not its context. */
+        usage: usageSchema,
+        failure: failureSchema.optional(),
     }),
     z.strictObject({
         type: z.literal('permission.decided'),
