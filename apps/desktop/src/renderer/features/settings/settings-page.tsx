@@ -1,5 +1,15 @@
-import { BotIcon, BoxesIcon, LanguagesIcon, PuzzleIcon, SlidersHorizontalIcon } from 'lucide-react';
+import {
+    BotIcon,
+    BoxesIcon,
+    LanguagesIcon,
+    PuzzleIcon,
+    SaveIcon,
+    SlidersHorizontalIcon,
+} from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
 
+import { ActionButton } from '../../components/action-button';
 import { ChoiceMenu } from '../../components/choice-menu';
 import { call } from '../../lib/client';
 import { useT } from '../../lib/i18n';
@@ -20,6 +30,7 @@ import {
     FieldGroup,
     FieldLabel,
 } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
@@ -85,7 +96,10 @@ export function SettingsPage({
             <ScrollArea className="min-h-0 flex-1">
                 <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-8">
                     <h2 className="text-2xl font-semibold tracking-tight">{t(current.label)}</h2>
-                    {tab === 'general' && <GeneralSettings state={state} />}
+                    {tab === 'general' && (
+                        // Remount after a save so the name field shows the stored value.
+                        <GeneralSettings key={state.userName ?? ''} state={state} />
+                    )}
                     {tab === 'agent' && (
                         // Remount after a save or reset so the form shows the stored profile.
                         <AgentSettings key={JSON.stringify(state.agent)} state={state} />
@@ -99,7 +113,9 @@ export function SettingsPage({
 }
 
 /**
- * General preferences: language and agent behavior.
+ * General preferences: language, what agents call the user, and agent behavior.
+ * The name is in every agent's system prompt, so like the agent profile it reaches existing
+ * chats at their next model switch or compaction.
  * @param props Application state.
  * @param props.state Application state.
  * @returns The section.
@@ -109,6 +125,7 @@ function GeneralSettings({ state }: { state: AppState }) {
     const resume = useAction((enabled: boolean) =>
         call('settings.resumeAfterRestart', { enabled })
     );
+    const [userName, setUserName] = useState(state.userName ?? '');
     return (
         <Card>
             <CardContent>
@@ -128,6 +145,35 @@ function GeneralSettings({ state }: { state: AppState }) {
                             align="end"
                             onChange={locale => call('settings.locale', { locale })}
                         />
+                    </Field>
+                    <Field orientation="horizontal">
+                        <FieldContent>
+                            <FieldLabel htmlFor="user-name">{t('settings.userName')}</FieldLabel>
+                            <FieldDescription>{t('settings.userNameDescription')}</FieldDescription>
+                        </FieldContent>
+                        <div className="flex items-center gap-2">
+                            <Input
+                                id="user-name"
+                                value={userName}
+                                maxLength={60}
+                                className="w-44"
+                                placeholder={t('settings.userNamePlaceholder')}
+                                onChange={event => setUserName(event.currentTarget.value)}
+                            />
+                            <ActionButton
+                                size="sm"
+                                icon={<SaveIcon />}
+                                disabled={userName.trim() === (state.userName ?? '')}
+                                action={async () => {
+                                    await call('settings.userName', {
+                                        name: userName.trim() || null,
+                                    });
+                                    toast.success(t('settings.userNameSaved'));
+                                }}
+                            >
+                                {t('common.save')}
+                            </ActionButton>
+                        </div>
                     </Field>
                     <Field orientation="horizontal">
                         <FieldContent>

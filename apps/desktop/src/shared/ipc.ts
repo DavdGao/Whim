@@ -31,10 +31,11 @@ export const agentProfileSchema = z.strictObject({
         .max(300_000)
         .regex(/^data:image\/(png|jpeg|webp|svg\+xml);base64,/)
         .optional(),
-    /** How the agent addresses the user; absent when the user set none. */
-    userName: z.string().trim().min(1).max(60).optional(),
 });
 export type AgentProfile = z.infer<typeof agentProfileSchema>;
+
+/** What every agent calls the user; null clears it. */
+export const userNameSchema = z.string().trim().min(1).max(60).nullable();
 
 /** Branch and uncommitted line counts of a folder's git repository. */
 export interface GitStatus {
@@ -64,6 +65,7 @@ export const methodSchemas = {
     'settings.resumeAfterRestart': z.strictObject({ enabled: z.boolean() }),
     'settings.chatSlot': z.strictObject({ slot: chatSlotSchema }),
     'settings.agent': z.strictObject({ profile: agentProfileSchema.nullable() }),
+    'settings.userName': z.strictObject({ name: userNameSchema }),
     'credentials.save': z.strictObject({
         id: idSchema.optional(),
         typeId: idSchema,
@@ -205,6 +207,8 @@ export interface AppState {
     readonly locale: Locale;
     readonly notices: readonly StartupNotice[];
     readonly resumeAfterRestart: boolean;
+    /** What agents call the user, when set. */
+    readonly userName?: string;
     /** The effective profile, and whether it is the default. */
     readonly agent: AgentProfile & { readonly isDefault: boolean };
     readonly chatSlot?: ChatSlot;
@@ -241,6 +245,7 @@ export interface Results {
     'settings.resumeAfterRestart': null;
     'settings.chatSlot': null;
     'settings.agent': null;
+    'settings.userName': null;
     'credentials.save': { id: string };
     'credentials.remove': null;
     'catalog.reload': null;
