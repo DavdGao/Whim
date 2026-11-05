@@ -159,7 +159,7 @@ Revocation is immediate regardless of the cache: a disabled tool fails its call 
 
 ## 8. Compaction
 
-Triggers: the estimated next request exceeds a threshold of the adapter's `inputBudget`, a `context-limit` failure, or an explicit user request.
+Triggers: the estimated next request exceeds the threshold (80% of the card's context window, the point the composer's context ring fills toward), a `context-limit` failure, or an explicit user request.
 
 1. Commit `compaction.started`. The UI shows progress.
 2. Run a summary attempt with the `compaction` slot model over the current history. Its usage is recorded.

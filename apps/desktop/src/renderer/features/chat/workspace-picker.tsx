@@ -58,7 +58,7 @@ export function WorkspacePicker({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="max-w-48"
+                    className="text-muted-foreground hover:text-foreground max-w-48 rounded-full"
                     aria-label={t('chat.workspace')}
                     title={effective}
                 >
