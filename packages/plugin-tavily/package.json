@@ -6,7 +6,7 @@
         "host": "./dist/host.js",
         "category": "tools",
         "locales": "./locales",
-        "icon": "./icons/search.svg"
+        "icon": "./icons/tavily.svg"
     },
     "exports": {
         ".": {
