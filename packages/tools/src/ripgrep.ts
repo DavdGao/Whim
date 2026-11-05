@@ -15,6 +15,12 @@ export interface RipgrepResult {
 const maxStderrChars = 16 * 1024;
 
 /**
+ * The binary to spawn. In a packaged app the resolved path points inside `app.asar`, which only
+ * Electron's fs can read; the executable itself is unpacked next to it (design.md §13.1).
+ */
+const ripgrepPath = rgPath.replace(/\.asar([\\/])/, '.asar.unpacked$1');
+
+/**
  * Run ripgrep with an argument array and collect at most `maxLines` stdout lines.
  * When the limit is reached ripgrep is stopped, so output memory stays bounded.
  * @param args ripgrep arguments (never interpreted by a shell).
@@ -31,7 +37,7 @@ export async function runRipgrep(
     signal: AbortSignal
 ): Promise<RipgrepResult> {
     signal.throwIfAborted();
-    const child = spawn(rgPath, ['--no-config', ...args], {
+    const child = spawn(ripgrepPath, ['--no-config', ...args], {
         cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         signal,
