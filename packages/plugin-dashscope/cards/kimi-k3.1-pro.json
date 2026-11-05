@@ -1,0 +1,20 @@
+{
+    "id": "dashscope/kimi-k3.1-pro",
+    "revision": 1,
+    "kind": "chat",
+    "adapter": "@whimkit/plugin-dashscope#responses",
+    "model": "kimi-k3.1-pro",
+    "name": "Kimi K3.1 Pro",
+    "contextWindow": 1048576,
+    "maxOutputTokens": 1048576,
+    "input": {
+        "text/plain": {}
+    },
+    "output": ["text/plain"],
+    "thinking": {
+        "levels": ["low", "medium", "high", "max"],
+        "default": "max"
+    },
+    "nativeTools": ["web_search", "web_fetch"],
+    "options": {}
+}

@@ -1,6 +1,6 @@
 {
     "id": "dashscope/qwen3.8-max",
-    "revision": 1,
+    "revision": 2,
     "kind": "chat",
     "adapter": "@whimkit/plugin-dashscope#responses",
     "model": "qwen3.8-max",
@@ -11,8 +11,15 @@
         "text/plain": {}
     },
     "output": ["text/plain"],
-    "thinking": { "levels": ["off", "low", "medium", "high", "max"], "default": "medium" },
+    "thinking": {
+        "levels": ["off", "low", "medium", "high"],
+        "default": "high"
+    },
     "nativeTools": ["web_search", "web_fetch"],
-    "options": {},
+    "options": {
+        "effort": {
+            "high": "xhigh"
+        }
+    },
     "icon": "qwen"
 }
