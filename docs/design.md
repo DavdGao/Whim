@@ -14,6 +14,8 @@ The first release ships:
 
 macOS only. Model tokens are tracked; prices and costs are not.
 
+The external coding-agent feature uses a native terminal with local/SSH execution, tmux attachment, and independent event/log collection; it does not depend on ACP. [coding-agents.md](research/coding-agents.md) defines its capabilities, technology choices, persistence and control boundaries, and acceptance criteria. History resume is not a substitute for live attachment. This is a planned feature, not an implementation claim.
+
 ## 2. Principles
 
 - **Core is protocol-agnostic.** Provider wire formats, quirks, and parameter mappings live in plugins. Shared protocol code is a library that plugins import, never a configurable compatibility layer in Core (§7.5).
