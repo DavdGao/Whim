@@ -103,6 +103,42 @@ describe('readResponsesStream', () => {
 });
 
 describe('toResponsesInput', () => {
+    it('sends inline images as data URIs, in user messages and tool results', () => {
+        const image = { type: 'inline_media', mediaType: 'image/png', data: 'AQID' } as const;
+        assert.deepEqual(
+            toResponsesInput(
+                [
+                    { role: 'user', blocks: [{ type: 'text', text: 'look' }, image] },
+                    {
+                        role: 'tool',
+                        callId: 'c',
+                        status: 'success',
+                        content: 'shot',
+                        media: [image],
+                    },
+                ],
+                'a'
+            ),
+            [
+                {
+                    role: 'user',
+                    content: [
+                        { type: 'input_text', text: 'look' },
+                        { type: 'input_image', image_url: 'data:image/png;base64,AQID' },
+                    ],
+                },
+                {
+                    type: 'function_call_output',
+                    call_id: 'c',
+                    output: [
+                        { type: 'input_text', text: 'shot' },
+                        { type: 'input_image', image_url: 'data:image/png;base64,AQID' },
+                    ],
+                },
+            ]
+        );
+    });
+
     it('maps roles and replays only matching continuations', () => {
         assert.deepEqual(
             toResponsesInput(

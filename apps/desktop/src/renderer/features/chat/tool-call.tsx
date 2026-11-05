@@ -19,6 +19,8 @@ import { ActionButton } from '../../components/action-button';
 import { call } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 
+import { MediaView } from './media-view';
+
 import type { MessageKey } from '../../lib/messages';
 import type {
     Access,
@@ -355,6 +357,9 @@ export function ToolCallView({
                                 text={result.content}
                                 error={failed}
                             />
+                        )}
+                        {result.media && (
+                            <MediaView sessionId={sessionId} media={result.media} align="start" />
                         )}
                     </div>
                 )}

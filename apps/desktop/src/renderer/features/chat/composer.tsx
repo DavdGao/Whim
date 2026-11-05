@@ -7,11 +7,20 @@ import { useT } from '../../lib/i18n';
 import { ContextUsage } from './context-usage';
 import { modelChoices } from './model-choices';
 import { ModelPicker } from './model-picker';
+import { useAttachments } from './use-attachments';
 import { WorkspaceBar } from './workspace-bar';
 
+import type { PendingAttachment } from './use-attachments';
 import type { AppState, ChatSlot } from '../../../shared/ipc';
 import type { Usage } from '@whimkit/core/contracts';
 
+import {
+    Attachment,
+    AttachmentInfo,
+    AttachmentPreview,
+    AttachmentRemove,
+    Attachments,
+} from '@/components/ai-elements/attachments';
 import { Button } from '@/components/ui/button';
 import {
     DropdownMenu,
@@ -35,7 +44,10 @@ export interface ComposerProps {
     readonly running: boolean;
     readonly modelLocked: boolean;
     readonly onSlotChange: (slot: ChatSlot) => Promise<void>;
-    readonly onSend: (text: string) => Promise<void>;
+    readonly onSend: (
+        text: string,
+        attachments: readonly { sha256: string; name: string }[]
+    ) => Promise<void>;
     readonly onStop: () => void;
     /** The chat's folder; the default folder is not shown. */
     readonly workspace: string | undefined;
@@ -108,13 +120,27 @@ export function Composer({
         field.style.height = `${field.scrollHeight}px`;
     }, [text, stacked]);
 
+    const attachments = useAttachments();
+    const fileInput = useRef<HTMLInputElement>(null);
+    // An image the current model cannot read blocks sending until removed or the model changes.
+    const unreadable = (item: PendingAttachment) =>
+        item.staged?.mediaType.startsWith('image/') === true &&
+        current !== undefined &&
+        !(item.staged.mediaType in current.card.input);
+    const blocked = attachments.items.some(item => item.status !== 'ready' || unreadable(item));
+    const ready = attachments.items.flatMap(item =>
+        item.staged ? [{ sha256: item.staged.sha256, name: item.name }] : []
+    );
+    const canSend = (text.trim().length > 0 || ready.length > 0) && !blocked;
+
     const send = async () => {
         const message = text.trim();
-        if (!message || !current || sending) return;
+        if (!canSend || !current || sending) return;
         setSending(true);
         try {
-            await onSend(message);
+            await onSend(message, ready);
             setText('');
+            attachments.clear();
         } finally {
             setSending(false);
         }
@@ -139,7 +165,38 @@ export function Composer({
                         if (running) onStop();
                         else void send();
                     }}
+                    onDragOver={event => {
+                        if (event.dataTransfer.types.includes('Files')) event.preventDefault();
+                    }}
+                    onDrop={event => {
+                        if (!event.dataTransfer.files.length) return;
+                        event.preventDefault();
+                        attachments.add([...event.dataTransfer.files]);
+                    }}
                 >
+                    <input
+                        ref={fileInput}
+                        type="file"
+                        multiple
+                        hidden
+                        onChange={event => {
+                            attachments.add([...(event.currentTarget.files ?? [])]);
+                            event.currentTarget.value = '';
+                        }}
+                    />
+                    {attachments.items.length > 0 && (
+                        <Attachments variant="inline" className="px-1 pt-3">
+                            {attachments.items.map(item => (
+                                <PendingChip
+                                    key={item.key}
+                                    item={item}
+                                    unreadable={unreadable(item)}
+                                    modelName={current?.card.name ?? ''}
+                                    onRemove={() => attachments.remove(item.key)}
+                                />
+                            ))}
+                        </Attachments>
+                    )}
                     <div className="relative flex flex-wrap items-end justify-end">
                         <div
                             aria-hidden
@@ -167,6 +224,12 @@ export function Composer({
                                 placeholder={placeholder}
                                 aria-label={placeholder}
                                 onChange={event => setText(event.currentTarget.value)}
+                                onPaste={event => {
+                                    const files = [...event.clipboardData.files];
+                                    if (files.length === 0) return;
+                                    event.preventDefault();
+                                    attachments.add(files);
+                                }}
                                 onKeyDown={event => {
                                     if (
                                         event.key === 'Enter' &&
@@ -204,12 +267,9 @@ export function Composer({
                                     </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end" className="w-60">
-                                    <DropdownMenuItem disabled>
+                                    <DropdownMenuItem onSelect={() => fileInput.current?.click()}>
                                         <PaperclipIcon />
-                                        <span className="flex-1">{t('chat.attach')}</span>
-                                        <span className="text-muted-foreground text-xs">
-                                            {t('chat.soon')}
-                                        </span>
+                                        {t('chat.attach')}
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                         disabled={running}
@@ -228,7 +288,7 @@ export function Composer({
                                 type="submit"
                                 size="icon"
                                 className="rounded-full"
-                                disabled={!running && (!text.trim() || !current || sending)}
+                                disabled={!running && (!canSend || !current || sending)}
                                 aria-label={running ? t('chat.stop') : t('chat.send')}
                             >
                                 {running ? (
@@ -258,5 +318,57 @@ export function Composer({
                 </div>
             </div>
         </div>
+    );
+}
+
+/**
+ * One attachment waiting in the composer: its preview, name, and state.
+ * @param props Chip props.
+ * @param props.item The attachment.
+ * @param props.unreadable Whether the current model cannot read it.
+ * @param props.modelName The current model's name.
+ * @param props.onRemove Take it out of the message.
+ * @returns The chip.
+ */
+function PendingChip({
+    item,
+    unreadable,
+    modelName,
+    onRemove,
+}: {
+    item: PendingAttachment;
+    unreadable: boolean;
+    modelName: string;
+    onRemove: () => void;
+}) {
+    const { t } = useT();
+    const problem =
+        item.status === 'error'
+            ? item.error === 'tooLarge'
+                ? t('attach.tooLarge')
+                : (item.error ?? t('error.generic'))
+            : unreadable
+              ? t('attach.unreadable', { model: modelName })
+              : undefined;
+    return (
+        <Attachment
+            data={{
+                id: item.key,
+                type: 'file',
+                mediaType: item.staged?.mediaType ?? (item.preview ? 'image/*' : 'text/plain'),
+                url: item.preview ?? '',
+                filename: item.name,
+            }}
+            onRemove={onRemove}
+            title={problem ?? item.name}
+            className={cn(
+                'rounded-full',
+                problem && 'border-destructive/40 bg-destructive/5 text-destructive'
+            )}
+        >
+            {item.status === 'staging' ? <Spinner className="size-3.5" /> : <AttachmentPreview />}
+            <AttachmentInfo className="max-w-40" />
+            <AttachmentRemove label={t('attach.remove')} />
+        </Attachment>
     );
 }

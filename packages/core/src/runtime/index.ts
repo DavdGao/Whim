@@ -25,3 +25,4 @@ export { ToolRuntime, maxResultBytes } from './tools.js';
 export type { ToolCredentials, ToolModels } from './tools.js';
 export { evaluate, isInside, rulesFor } from './permissions.js';
 export type { PermissionEnv } from './permissions.js';
+export { storeMedia } from './media.js';

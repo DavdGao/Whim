@@ -56,7 +56,7 @@ There is no shared UI package. shadcn components are installed with the official
 - Main restarts Backend after an unexpected exit with backoff, and shows a recoverable error state in the window meanwhile. Backend recovers unfinished work from the database on start.
 - Renderer talks to Backend over a `MessagePort` brokered by Main. Queries, commands, and subscriptions are separate typed channels validated at both ends.
 - Shutdown order: stop admission → interrupt runs with reason `shutdown` → drain or cancel jobs within a bound → deactivate plugins in reverse dependency order → close the database.
-- Attachments are selected through a Main dialog; Renderer receives an opaque handle and Backend reads the file. File bytes never cross IPC as base64.
+- Attachments come from the composer's file chooser, drag and drop, or paste. Renderer hands each file's bytes to Backend once (`attachment.stage`, as a binary `Uint8Array`, never Base64); Backend decides the type and keeps the file under a content hash until the message is sent. Renderer never names a path for Backend to read.
 
 ## 5. Plugins
 
@@ -326,7 +326,10 @@ A media type is admissible for a session when the card's `input` declares it (na
 - Every file Whim keeps for a session lives under `<userData>/sessions/<sessionId>/`: `media/` (attachments and tool media, content-addressed by SHA-256), `offload/` (truncated tool output), and `jobs/` (background job logs). Deleting a session deletes its folder; files are never shared between sessions. Metadata lives in the session's records. Whim refers to its own files with standard `file:` URIs (`pathToFileURL`, percent-encoded), never bare paths, so a reference can later be opened as a link.
 - Original bytes are immutable once written. Prepared content (extracted text, page images) is snapshotted into SQLite when a reasoning step consumes it, so replay never depends on re-running a processor.
 - Core's PDF processor runs in the PDF helper process with byte, page, time, and memory limits. Pages without extractable text are reported as such instead of failing the whole document. A failed attachment marks only that attachment failed.
-- Renderer duplicates no limits: it asks Backend for the effective admission policy of the session and shows it.
+- The type comes from the content, never the name: PNG, JPEG, WebP, and GIF by signature; text when the bytes decode as UTF-8 without NUL (at most 512 KB). Anything else is refused at staging; PDF waits for its processor. At send, Backend checks each image against the session's card (`input` type and `maxBytes`) and copies it into the session's `media/` folder; Renderer marks images the current model cannot read, but Backend decides.
+- A media block records the identifier the model sees (`img-<hash prefix>`), type, name, `file:` URI, size, and hash; a text file's decoded content is stored in the block, so replay never re-reads it.
+- Requests render media by three rules, depending only on history, the card, and the adapter: a type the card cannot read becomes `<data id uri media_type name/>`; a user message carries readable media inline; a tool result carries readable media inline only when the adapter lists the type in `toolResultMedia`, and otherwise names the identifier while the media follow in one user message after all results of that assistant message, because providers require results to follow their calls directly. A model switch re-renders by the new card's rules.
+- `Read` returns PNG, JPEG, WebP, and GIF files up to 10 MiB as images; tool media are stored like attachments.
 
 ## 9. Storage
 

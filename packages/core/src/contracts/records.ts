@@ -36,8 +36,29 @@ export const nativeToolCallBlockSchema = z.strictObject({
     urls: z.array(z.string()).optional(),
     data: z.unknown(),
 });
+/**
+ * A file the user attached or a tool returned, stored once under the session's `media/` folder.
+ * Text files keep their decoded content here, so replay never re-reads the file; other media
+ * are read from `uri` when a request is prepared.
+ */
+export const mediaBlockSchema = z.strictObject({
+    type: z.literal('media'),
+    /** Stable, model-facing identifier, such as `img-3f9a2c1b`. */
+    id: z.string().min(1).max(64),
+    mediaType: z.string().min(1).max(200),
+    name: z.string().max(500).optional(),
+    /** `file:` URI of the stored bytes. */
+    uri: z.string().startsWith('file:'),
+    bytes: z.number().int().nonnegative(),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    /** Decoded content of a text file. */
+    text: z.string().optional(),
+});
+export type MediaBlock = z.infer<typeof mediaBlockSchema>;
+
 export const blockSchema = z.discriminatedUnion('type', [
     textBlockSchema,
+    mediaBlockSchema,
     reasoningBlockSchema,
     continuationBlockSchema,
     toolCallBlockSchema,
@@ -129,6 +150,8 @@ export const toolResultSchema = z.strictObject({
     jobId: idSchema.optional(),
     /** Where the full output was written when `content` is a preview. */
     offload: z.strictObject({ path: z.string(), bytes: z.number().int().nonnegative() }).optional(),
+    /** Images or other media the tool returned alongside its text. */
+    media: z.array(mediaBlockSchema).optional(),
 });
 export type ToolResult = z.infer<typeof toolResultSchema>;
 

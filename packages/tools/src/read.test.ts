@@ -33,6 +33,21 @@ describe('Read', () => {
         );
     });
 
+    it('returns a PNG as an image', async () => {
+        const ws = await createWorkspace();
+        try {
+            const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
+            await writeFile(join(ws.dir, 'shot.png'), png);
+            const { context } = createContext(ws.dir);
+            assert.deepEqual(await readTool.execute({ path: 'shot.png' }, context), {
+                content: `${join(ws.dir, 'shot.png')} is an image (image/png, 10 bytes); it is attached to this result.`,
+                media: [{ mediaType: 'image/png', data: png, name: 'shot.png' }],
+            });
+        } finally {
+            await ws.cleanup();
+        }
+    });
+
     it('reads a whole small file with numbered lines', async () => {
         const ws = await createWorkspace();
         try {

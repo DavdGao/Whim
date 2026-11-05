@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, rm, stat } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -15,8 +15,10 @@ import {
     PluginHost,
     Store,
     StoreError,
+    storeMedia,
     ToolRuntime,
 } from '@whimkit/core';
+import { decodeText, sniffImage } from '@whimkit/core/contracts';
 import { baseTools } from '@whimkit/tools';
 import { z } from 'zod';
 
@@ -39,9 +41,11 @@ import type {
     Method,
     Results,
     SessionSnapshot,
+    StagedAttachment,
 } from '../shared/ipc.js';
 import type { AgentEvent } from '@whimkit/agent';
 import type { ChatCard, FrozenChatCard, SecretCipher } from '@whimkit/core';
+import type { MediaBlock } from '@whimkit/core/contracts';
 import type { MessagePortMain } from 'electron';
 
 const parentPort = process.parentPort;
@@ -197,6 +201,8 @@ class Backend {
     readonly agent: Agent;
     readonly tools: ToolRuntime;
     readonly #baseTools: ReturnType<typeof baseTools>;
+    /** Attachments wait here between staging and sending; cleared at start. */
+    readonly #stagingDir: string;
 
     /**
      * Wire services together.
@@ -220,6 +226,7 @@ class Backend {
         readonly defaultWorkspace: string
     ) {
         this.#baseTools = baseTools(version);
+        this.#stagingDir = join(userData, 'staging');
         // A finished background job wakes an idle session so the agent can react to it.
         this.tools = new ToolRuntime(
             store,
@@ -358,7 +365,17 @@ class Backend {
             }
             case 'session.send': {
                 const params = methodSchemas[method].parse(raw);
-                return { deliveryId: await this.send(params.sessionId, params.text) };
+                return {
+                    deliveryId: await this.send(params.sessionId, params.text, params.attachments),
+                };
+            }
+            case 'attachment.stage': {
+                const params = methodSchemas[method].parse(raw);
+                return this.stage(params.name, params.data);
+            }
+            case 'media.read': {
+                const params = methodSchemas[method].parse(raw);
+                return this.readMedia(params.sessionId, params.sha256);
             }
             case 'session.stop':
                 await this.stop(methodSchemas[method].parse(raw).sessionId, 'user');
@@ -649,13 +666,23 @@ class Backend {
      * Admit and accept a user message, then make sure a run picks it up.
      * @param sessionId The session.
      * @param text The message text.
+     * @param attachments
      * @returns The delivery id.
      */
-    async send(sessionId: string, text: string): Promise<string> {
+    async send(
+        sessionId: string,
+        text: string,
+        attachments: readonly { sha256: string; name: string }[] = []
+    ): Promise<string> {
         if (!this.#accepting) throw new Error('Whim is shutting down.');
         const view = await this.store.view(sessionId);
         const session = await this.models.open(view.epoch.card, view.credentialId);
-        const estimate = Math.ceil(new TextEncoder().encode(text).length / 3);
+        const media = await this.#admit(sessionId, view.epoch.card, attachments);
+        const estimate = Math.ceil(
+            (new TextEncoder().encode(text).length +
+                media.reduce((sum, block) => sum + (block.text ? block.bytes : 6000), 0)) /
+                3
+        );
         if (estimate > session.inputBudget())
             throw new ApplicationError({
                 category: 'context-limit',
@@ -677,7 +704,7 @@ class Backend {
                 type: 'message',
                 id: randomUUID(),
                 role: 'user',
-                blocks: [{ type: 'text', text }],
+                blocks: [...(text ? [{ type: 'text' as const, text }] : []), ...media],
             },
         });
         if (!view.title)
@@ -685,10 +712,104 @@ class Backend {
                 type: 'update',
                 sessionId,
                 operationId: randomUUID(),
-                title: text.replace(/\s+/g, ' ').slice(0, 60),
+                title: (text || media.map(block => block.name ?? block.id).join(', '))
+                    .replace(/\s+/g, ' ')
+                    .slice(0, 60),
             });
         this.schedule(sessionId, 'user');
         return deliveryId;
+    }
+
+    /**
+     * Keep a file the user attached until it is sent. Its type comes from its content: an image
+     * by signature, text when it decodes as UTF-8; anything else is refused now rather than at
+     * send time.
+     * @param name The file's name.
+     * @param data Its bytes.
+     * @returns The staged attachment.
+     */
+    async stage(name: string, data: Uint8Array): Promise<StagedAttachment> {
+        const mediaType =
+            sniffImage(data) ?? (decodeText(data) !== undefined ? 'text/plain' : undefined);
+        if (!mediaType)
+            throw new StoreError(
+                'invalid',
+                name.toLowerCase().endsWith('.pdf')
+                    ? 'PDF files are not supported yet.'
+                    : 'Only images (PNG, JPEG, WebP, GIF) and text files can be attached.'
+            );
+        if (mediaType === 'text/plain' && data.byteLength > maxTextAttachmentBytes)
+            throw new StoreError('invalid', 'Text files can be at most 512 KB.');
+        const sha256 = createHash('sha256').update(data).digest('hex');
+        await mkdir(this.#stagingDir, { recursive: true });
+        const path = join(this.#stagingDir, sha256);
+        const temporary = `${path}.${randomUUID()}.tmp`;
+        await writeFile(temporary, data);
+        await rename(temporary, path);
+        return { sha256, name, mediaType, bytes: data.byteLength };
+    }
+
+    /**
+     * Check staged attachments against the session's model and move them into the session.
+     * @param sessionId The session.
+     * @param card The model card the next step uses.
+     * @param attachments Staged attachments by hash.
+     * @returns Media blocks for the message.
+     */
+    async #admit(
+        sessionId: string,
+        card: FrozenChatCard,
+        attachments: readonly { sha256: string; name: string }[]
+    ): Promise<MediaBlock[]> {
+        const blocks: MediaBlock[] = [];
+        for (const attachment of attachments) {
+            const data = await readFile(join(this.#stagingDir, attachment.sha256)).catch(() => {
+                throw new StoreError(
+                    'invalid',
+                    `${attachment.name} is no longer available; attach it again.`
+                );
+            });
+            if (createHash('sha256').update(data).digest('hex') !== attachment.sha256)
+                throw new StoreError('invalid', `${attachment.name} changed; attach it again.`);
+            const image = sniffImage(data);
+            const text = image ? undefined : decodeText(data);
+            if (image) {
+                const limits = card.input[image];
+                if (!limits)
+                    throw new StoreError('invalid', `${card.name} cannot read ${attachment.name}.`);
+                const maxBytes = typeof limits.maxBytes === 'number' ? limits.maxBytes : undefined;
+                if (maxBytes !== undefined && data.byteLength > maxBytes)
+                    throw new StoreError(
+                        'invalid',
+                        `${attachment.name} is larger than ${card.name} accepts.`
+                    );
+            } else if (text === undefined)
+                throw new StoreError('invalid', `${attachment.name} cannot be attached.`);
+            blocks.push(
+                await storeMedia(
+                    join(this.tools.sessionDir(sessionId), 'media'),
+                    data,
+                    image ?? 'text/plain',
+                    { name: attachment.name, ...(text !== undefined ? { text } : {}) }
+                )
+            );
+        }
+        return blocks;
+    }
+
+    /**
+     * Read a stored media file of a session for display.
+     * @param sessionId The session.
+     * @param sha256 The file's hash.
+     * @returns Its bytes.
+     */
+    async readMedia(sessionId: string, sha256: string): Promise<Uint8Array> {
+        const dir = join(this.tools.sessionDir(sessionId), 'media');
+        const name = (await readdir(dir).catch(() => [])).find(file =>
+            file.startsWith(`${sha256}.`)
+        );
+        if (!name) throw new StoreError('not-found', 'The file is no longer available.');
+        return new Uint8Array(await readFile(join(dir, name)));
     }
 
     /**
@@ -831,6 +952,9 @@ function bundledPlugins(): { dir: string; source: 'bundled' }[] {
     }));
 }
 
+/** Text attachments are inlined into the prompt, so they stay small. */
+const maxTextAttachmentBytes = 512 * 1024;
+
 const initSchema = z.strictObject({
     type: z.literal('init'),
     userData: z.string().min(1),
@@ -877,6 +1001,8 @@ parentPort.on('message', event => {
  */
 async function start(userData: string, version: string): Promise<void> {
     try {
+        // Staged attachments that were never sent do not outlive the process.
+        await rm(join(userData, 'staging'), { recursive: true, force: true });
         const store = await Store.open(join(userData, 'whim.sqlite'));
         const host = new PluginHost(store, bundledPlugins());
         await host.start();

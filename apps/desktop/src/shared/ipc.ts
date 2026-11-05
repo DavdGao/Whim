@@ -43,6 +43,19 @@ export interface GitStatus {
     readonly deletions: number;
 }
 
+const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
+export const maxAttachments = 10;
+/** No file the app can deliver is larger; bigger ones are refused before reading. */
+export const maxStageBytes = 20 * 1024 * 1024;
+
+/** A staged attachment: its content hash and the type Backend recognized. */
+export interface StagedAttachment {
+    readonly sha256: string;
+    readonly name: string;
+    readonly mediaType: string;
+    readonly bytes: number;
+}
+
 /** Parameters of every Renderer → Backend method; validated in Backend. */
 export const methodSchemas = {
     'app.state': z.strictObject({}),
@@ -70,10 +83,28 @@ export const methodSchemas = {
         decision: z.enum(['allow', 'deny']),
         scope: z.enum(['once', 'session']),
     }),
-    'session.send': z.strictObject({
-        sessionId: idSchema,
-        text: z.string().trim().min(1).max(200_000),
+    'session.send': z
+        .strictObject({
+            sessionId: idSchema,
+            text: z.string().trim().max(200_000),
+            /** Staged attachments by content hash, in the order the user added them. */
+            attachments: z
+                .array(z.strictObject({ sha256: sha256Schema, name: z.string().max(500) }))
+                .max(maxAttachments)
+                .default([]),
+        })
+        .refine(value => value.text.length > 0 || value.attachments.length > 0, {
+            message: 'A message needs text or an attachment.',
+        }),
+    /** Hand over a file the user picked, dropped, or pasted; Backend checks and keeps it. */
+    'attachment.stage': z.strictObject({
+        name: z.string().min(1).max(500),
+        data: z.instanceof(Uint8Array).refine(data => data.byteLength <= maxStageBytes, {
+            message: 'The file is too large.',
+        }),
     }),
+    /** Bytes of a stored media file, for display. */
+    'media.read': z.strictObject({ sessionId: idSchema, sha256: sha256Schema }),
     'session.stop': z.strictObject({ sessionId: idSchema }),
     'session.pin': z.strictObject({ sessionId: idSchema, pinned: z.boolean() }),
     'session.delete': z.strictObject({ sessionId: idSchema }),
@@ -202,6 +233,8 @@ export interface Results {
     'session.create': { sessionId: string };
     'session.decide': null;
     'session.send': { deliveryId: string };
+    'attachment.stage': StagedAttachment;
+    'media.read': Uint8Array;
     'session.stop': null;
     'session.pin': null;
     'session.delete': null;
