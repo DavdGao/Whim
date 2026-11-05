@@ -160,6 +160,9 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                         ) : view ? (
                             <Transcript
                                 view={view}
+                                older={session.older}
+                                hasOlder={session.hasOlder}
+                                onLoadOlder={session.loadOlder}
                                 {...(session.draft ? { draft: session.draft } : {})}
                                 {...(session.discarded ? { discarded: session.discarded } : {})}
                             />

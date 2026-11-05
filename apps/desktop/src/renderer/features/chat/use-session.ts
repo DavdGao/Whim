@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { call, ClientError, subscribe } from '../../lib/client';
 
 import type { SessionSnapshot } from '../../../shared/ipc';
-import type { Failure, SessionView } from '@whimkit/core/contracts';
+import type { Failure, HistoryEntry, SessionView } from '@whimkit/core/contracts';
 
 export interface Draft {
     readonly attemptId: string;
@@ -20,6 +20,10 @@ export interface SessionState {
     readonly error: string | undefined;
     /** The session's own working folder, used while the user has chosen none. */
     readonly defaultWorkspace?: string;
+    /** Earlier history loaded on request, oldest first; `view.history` continues it. */
+    readonly older: readonly HistoryEntry[];
+    /** Whether history before `older` (or before `view.history`) exists. */
+    readonly hasOlder: boolean;
 }
 
 /**
@@ -28,9 +32,20 @@ export interface SessionState {
  * @returns The view.
  */
 function fromSnapshot(snapshot: SessionSnapshot): SessionView {
-    const { pending, defaultWorkspace: _default, ...rest } = snapshot;
+    const { pending, defaultWorkspace: _default, hasOlder: _older, ...rest } = snapshot;
     return { ...rest, inbox: new Map(pending.map(item => [item.deliveryId, item])) };
 }
+
+const historyPageSize = 60;
+
+const empty: SessionState = {
+    view: undefined,
+    draft: undefined,
+    discarded: undefined,
+    error: undefined,
+    older: [],
+    hasOlder: false,
+};
 
 /**
  * Observe one session: load a snapshot, then apply committed records incrementally by sequence
@@ -38,13 +53,10 @@ function fromSnapshot(snapshot: SessionSnapshot): SessionView {
  * @param sessionId The session, or undefined.
  * @returns The live session state.
  */
-export function useSession(sessionId: string | undefined): SessionState {
-    const [state, setState] = useState<SessionState>({
-        view: undefined,
-        draft: undefined,
-        discarded: undefined,
-        error: undefined,
-    });
+export function useSession(
+    sessionId: string | undefined
+): SessionState & { readonly loadOlder: () => Promise<void> } {
+    const [state, setState] = useState<SessionState>(empty);
     const viewRef = useRef<SessionView | undefined>(undefined);
     const pendingDeltas = useRef<{ attemptId: string; part: 'text' | 'reasoning'; text: string }[]>(
         []
@@ -61,6 +73,8 @@ export function useSession(sessionId: string | undefined): SessionState {
                 view,
                 error: undefined,
                 defaultWorkspace: snapshot.defaultWorkspace,
+                older: [],
+                hasOlder: snapshot.hasOlder,
             }));
         } catch (error) {
             setState(current => ({
@@ -72,7 +86,7 @@ export function useSession(sessionId: string | undefined): SessionState {
 
     useEffect(() => {
         viewRef.current = undefined;
-        setState({ view: undefined, draft: undefined, discarded: undefined, error: undefined });
+        setState(empty);
         if (!sessionId) return;
         void load(sessionId);
         const finishedAttempts = new Set<string>();
@@ -150,5 +164,36 @@ export function useSession(sessionId: string | undefined): SessionState {
         };
     }, [sessionId, load]);
 
-    return state;
+    // Earlier pages prepend to what is loaded; one request at a time.
+    const loadingOlder = useRef(false);
+    const loadOlder = useCallback(async () => {
+        const current = stateRef.current;
+        const first = current.older[0] ?? current.view?.history[0];
+        if (!sessionId || !first || !current.hasOlder || loadingOlder.current) return;
+        loadingOlder.current = true;
+        try {
+            const page = await call('session.history', {
+                sessionId,
+                beforeSeq: first.seq,
+                limit: historyPageSize,
+            });
+            setState(latest =>
+                latest.view?.sessionId === sessionId
+                    ? {
+                          ...latest,
+                          older: [...page.entries, ...latest.older],
+                          hasOlder: page.hasOlder,
+                      }
+                    : latest
+            );
+        } finally {
+            loadingOlder.current = false;
+        }
+    }, [sessionId]);
+    const stateRef = useRef(state);
+    useEffect(() => {
+        stateRef.current = state;
+    }, [state]);
+
+    return { ...state, loadOlder };
 }

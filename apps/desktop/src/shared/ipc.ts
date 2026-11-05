@@ -5,6 +5,7 @@ import type {
     AgentRecord,
     ChatCard,
     Failure,
+    HistoryEntry,
     PendingDelivery,
     SessionView,
     ThinkingLevel,
@@ -106,6 +107,12 @@ export const methodSchemas = {
     /** Bytes of a stored media file, for display. */
     'media.read': z.strictObject({ sessionId: idSchema, sha256: sha256Schema }),
     'session.stop': z.strictObject({ sessionId: idSchema }),
+    /** An earlier page of a session's history, before the oldest entry the renderer holds. */
+    'session.history': z.strictObject({
+        sessionId: idSchema,
+        beforeSeq: z.number().int().positive(),
+        limit: z.number().int().min(1).max(200),
+    }),
     'session.pin': z.strictObject({ sessionId: idSchema, pinned: z.boolean() }),
     'session.delete': z.strictObject({ sessionId: idSchema }),
     'session.continue': z.strictObject({ sessionId: idSchema }),
@@ -218,7 +225,15 @@ export type SessionSnapshot = Omit<SessionView, 'inbox'> & {
     readonly pending: readonly PendingDelivery[];
     /** The session's own working folder, used while the user has chosen none. */
     readonly defaultWorkspace: string;
+    /** Whether `history` holds only the latest page; older entries load on request. */
+    readonly hasOlder: boolean;
 };
+
+/** One page of earlier history. */
+export interface HistoryPage {
+    readonly entries: readonly HistoryEntry[];
+    readonly hasOlder: boolean;
+}
 
 export interface Results {
     'app.state': AppState;
@@ -234,6 +249,7 @@ export interface Results {
     'session.create': { sessionId: string };
     'session.decide': null;
     'session.send': { deliveryId: string };
+    'session.history': HistoryPage;
     'attachment.stage': StagedAttachment;
     'media.read': Uint8Array;
     'session.stop': null;

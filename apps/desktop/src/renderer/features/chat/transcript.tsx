@@ -10,6 +10,7 @@ import { useT } from '../../lib/i18n';
 import { FailureNotice } from './failure-notice';
 import { mathPlugin, normalizeMath } from './math';
 import { MediaView } from './media-view';
+import { PullToLoad } from './pull-to-load';
 import { NativeToolView, ToolCallView } from './tool-call';
 
 import type { Draft } from './use-session';
@@ -17,6 +18,7 @@ import type {
     Block,
     Compaction,
     Failure,
+    HistoryEntry,
     MediaBlock,
     Notice,
     SessionView,
@@ -357,16 +359,25 @@ function RetryCountdown({ at, number }: { at: string; number: number }) {
  * The conversation: committed history, queued input, the streaming draft, and run state.
  * @param props Session state.
  * @param props.view The session view.
+ * @param props.older
+ * @param props.hasOlder
+ * @param props.onLoadOlder
  * @param props.draft The streaming draft.
  * @param props.discarded The failure that discarded a draft before a retry.
  * @returns The transcript.
  */
 export function Transcript({
     view,
+    older,
+    hasOlder,
+    onLoadOlder,
     draft,
     discarded,
 }: {
     view: SessionView;
+    older: readonly HistoryEntry[];
+    hasOlder: boolean;
+    onLoadOlder: () => Promise<void>;
     draft?: Draft;
     discarded?: Failure;
 }) {
@@ -378,12 +389,15 @@ export function Transcript({
         !view.run && view.lastRun?.result.outcome === 'failed'
             ? view.lastRun.result.failure
             : undefined;
-    const empty = view.history.length === 0 && pending.length === 0 && !draft;
+    // Earlier pages the user loaded, then the latest page that live records extend.
+    const history = [...older, ...view.history];
+    const empty = history.length === 0 && pending.length === 0 && !draft;
     const results = new Map<string, ToolResult>();
-    for (const entry of view.history)
+    for (const entry of history)
         if (entry.item.type === 'tool_result') results.set(entry.item.callId, entry.item);
     return (
         <Conversation className="min-h-0 flex-1">
+            <PullToLoad enabled={hasOlder} onLoad={onLoadOlder} loaded={older.length} />
             <ConversationContent className="mx-auto w-full max-w-3xl">
                 {empty ? (
                     <ConversationEmptyState
@@ -392,7 +406,7 @@ export function Transcript({
                         description={t('chat.empty.description')}
                     />
                 ) : null}
-                {view.history.map(entry => [
+                {history.map(entry => [
                     // A succeeded compaction sits where the history it summarized ends.
                     ...view.compactions
                         .filter(compaction => compaction.from === entry.seq)
