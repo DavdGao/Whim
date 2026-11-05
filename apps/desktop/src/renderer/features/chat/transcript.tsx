@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import { ActionButton } from '../../components/action-button';
+import { Markdown } from '../../components/markdown';
 import { call } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 
@@ -25,7 +26,6 @@ import {
     MessageAction,
     MessageActions,
     MessageContent,
-    MessageResponse,
 } from '@/components/ai-elements/message';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -138,9 +138,9 @@ function ReasoningLine({
                 </TraceLine>
             </TraceCollapsibleTrigger>
             <TraceCollapsibleContent>
-                <MessageResponse className="text-sm" plugins={{ math: mathPlugin }}>
+                <Markdown className="text-sm" plugins={{ math: mathPlugin }}>
                     {normalizeMath(text)}
-                </MessageResponse>
+                </Markdown>
             </TraceCollapsibleContent>
         </TraceCollapsible>
     );
@@ -200,9 +200,7 @@ function Bubble({
                     </Trace>
                 ) : null}
                 {role === 'assistant' && !text ? null : role === 'assistant' ? (
-                    <MessageResponse plugins={{ math: mathPlugin }}>
-                        {normalizeMath(text)}
-                    </MessageResponse>
+                    <Markdown plugins={{ math: mathPlugin }}>{normalizeMath(text)}</Markdown>
                 ) : (
                     <p className="whitespace-pre-wrap">{text}</p>
                 )}

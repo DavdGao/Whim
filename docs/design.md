@@ -411,7 +411,7 @@ Configuration lives in Settings; the rail is for feature pages. Planned feature 
 
 ### 11.3 Components and style
 
-Use official shadcn/ui components and AI Elements (conversation, message, prompt input, reasoning) from the official registry, installed with the CLI into `apps/desktop/src/components/ui`. Compose and theme them through tokens; do not restyle internals with broad selectors. Keyboard and focus behavior are part of acceptance.
+Use official shadcn/ui components and AI Elements (conversation, message, trace, code block) from the official registry, installed with the CLI into `apps/desktop/src/components/ui`. Compose and theme them through tokens; do not restyle internals with broad selectors. Keyboard and focus behavior are part of acceptance.
 
 Whim is a consumer application. The visual direction is friendly and soft rather than dense and formal:
 
@@ -424,6 +424,7 @@ Whim is a consumer application. The visual direction is friendly and soft rather
 - **Messages.** Assistant actions (copy) appear while the message is hovered or focused. Reasoning shows its duration ("Thought for 12 s") from the reasoning block's recorded `durationMs`.
 - **Icons.** Models and plugins show their plugin-provided icon (§5.1), falling back to a generic glyph. Compact controls such as the model button under the input show text only.
 - **Type.** The platform UI font (SF Pro on macOS) with grayscale antialiasing. Regular weight is the default; `font-medium` marks only titles and labels that must stand out, `font-semibold` only page headings. Selection is shown by surface, not weight. Hierarchy within a control comes from color: the primary value (model name) is darker than its qualifier (thinking level).
+- **Markdown.** Model output renders through `components/markdown.tsx`. Streamdown only parses and lays out text: paragraphs, headings, lists, emphasis, inline links, and math (KaTeX). Anything with chrome is a shadcn component mapped through Streamdown's `components`: fenced code is `CodeBlock` (the filled `radix-rhea` style, highlighted with the CLI's `useHighlightedCode`), tables are `Table`, and the link confirmation is a `Dialog` through `linkSafety.renderModal`. Streamdown's own controls (code, table, image, Mermaid) are turned off. When a new Markdown element needs chrome, map it to a shadcn component the same way; never style or keep Streamdown's widget. Links open in the system browser through Main; the app window never navigates or opens Electron windows.
 - **Status boxes.** Errors, warnings, and notices use `StatusAlert`: border, background, icon, and text share one hue per tone (red, amber, blue), with the border darker than the tinted background. Red text alone is not an error state.
 
 ## 12. Observability

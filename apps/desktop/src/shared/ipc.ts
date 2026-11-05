@@ -30,6 +30,8 @@ export const agentProfileSchema = z.strictObject({
         .max(300_000)
         .regex(/^data:image\/(png|jpeg|webp|svg\+xml);base64,/)
         .optional(),
+    /** How the agent addresses the user; absent when the user set none. */
+    userName: z.string().trim().min(1).max(60).optional(),
 });
 export type AgentProfile = z.infer<typeof agentProfileSchema>;
 
