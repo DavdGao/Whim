@@ -75,6 +75,9 @@ contextBridge.exposeInMainWorld('whim', {
         const path: unknown = await ipcRenderer.invoke('whim:choose-directory');
         return typeof path === 'string' ? path : null;
     },
+    async openDirectory(path: string): Promise<boolean> {
+        return (await ipcRenderer.invoke('whim:open-directory', path)) === true;
+    },
     onStatus(listener: (status: string) => void): () => void {
         statusListeners.add(listener);
         return () => statusListeners.delete(listener);

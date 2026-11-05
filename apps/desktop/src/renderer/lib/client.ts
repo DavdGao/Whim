@@ -5,6 +5,7 @@ interface Bridge {
     onEvent(listener: (event: unknown) => void): () => void;
     onStatus(listener: (status: string) => void): () => void;
     chooseDirectory(): Promise<string | null>;
+    openDirectory(path: string): Promise<boolean>;
 }
 
 declare global {
@@ -87,4 +88,13 @@ export function onStatus(listener: (status: string) => void): () => void {
  */
 export function chooseDirectory(): Promise<string | null> {
     return window.whim.chooseDirectory();
+}
+
+/**
+ * Show a folder in the system file manager.
+ * @param path An absolute folder path.
+ * @returns Whether it opened.
+ */
+export function openDirectory(path: string): Promise<boolean> {
+    return window.whim.openDirectory(path);
 }

@@ -168,7 +168,7 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                                 </div>
                             </div>
                         )}
-                        <div className="flex flex-col gap-2 px-4 pt-2 pb-4">
+                        <div className="flex flex-col gap-2 px-4 pt-2 pb-1.5">
                             {view &&
                                 !view.run &&
                                 view.lastRun?.result.outcome === 'interrupted' && (

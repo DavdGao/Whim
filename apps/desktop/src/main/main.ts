@@ -1,4 +1,5 @@
-import { dirname, join } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -8,6 +9,7 @@ import {
     ipcMain,
     MessageChannelMain,
     safeStorage,
+    shell,
     utilityProcess,
 } from 'electron';
 
@@ -153,6 +155,15 @@ if (!app.requestSingleInstanceLock()) {
                 properties: ['openDirectory', 'createDirectory'],
             });
             return result.canceled ? null : (result.filePaths[0] ?? null);
+        });
+        // Shows a chat's folder in the file manager. Only absolute paths to existing directories
+        // are opened, so the window cannot launch files or applications through it.
+        ipcMain.handle('whim:open-directory', async (event, path: unknown) => {
+            if (!window || event.sender !== window.webContents) return false;
+            if (typeof path !== 'string' || !isAbsolute(path)) return false;
+            const info = await stat(path).catch(() => undefined);
+            if (!info?.isDirectory()) return false;
+            return (await shell.openPath(path)) === '';
         });
         startBackend();
         createWindow();
