@@ -26,7 +26,7 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [ ] Run on macOS and against live DashScope; verify Keychain-backed `safeStorage`
 - [ ] Live plugin disable/removal sequence (design.md §5.4); today enabling/disabling applies after restart
 - [ ] Credential "Test" action (`verify`)
-- [ ] Load history in bounded pages instead of the whole session
+- [ ] Load history in bounded pages instead of the whole session; older pages load when the transcript is pulled past its top, without a button
 - [ ] Validate IPC results in Renderer with schemas, not only envelopes
 - [ ] Warn about unreadable attachments before a model switch (with attachments)
 - [ ] Verify seed card limits and per-model thinking levels
@@ -45,7 +45,7 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [x] Chat list: Pinned / Today / Earlier groups, time on the right, hover menu with rename, pin, delete
 - [x] Settings with a section list: General, Agent (name, icon, system prompt), Models (list and Bailian-style detail), Plugins grouped by manifest `category`
 - [x] One model button with grouped models and a draggable thinking-level track; context usage ring with breakdown
-- [ ] Model naming of chats by a model call
+- [x] Answers take the full width; the chat's token total (including tool-internal calls) shows under the latest answer only
 - [ ] Model kinds beyond chat (Decision, TTS) as groups in Settings → Models when they exist
 
 ## PR 4 — Attachments
@@ -56,7 +56,7 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 
 ## PR 5 — Context
 
-- [ ] Compaction records, epochs, UI feedback
+- [ ] Automatic compaction (no manual trigger): records, epochs, UI feedback
 - [ ] Context-source tracking and notices
 - [ ] Skills
 - [ ] MEMORY.md plugin
@@ -69,7 +69,7 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [x] Responses function calling; DashScope native `web_search`/`web_extractor`
 - [x] `@whimkit/tools` (base tools, part of the harness): Bash, Read, Write, Edit, Glob, Grep (ripgrep via `@vscode/ripgrep`), local WebFetch
 - [x] Default workspace `~/Whim` so every new chat has the base tools
-- [ ] Local WebSearch through a keyed search API (provider to be chosen); scraping a search engine's HTML was dropped because it is challenged as a bot and goes against the engine's intent
+- [ ] Local WebSearch through Tavily (a plugin with an API-key credential), for models without provider search; scraping a search engine's HTML was dropped because it is challenged as a bot and goes against the engine's intent
 - [ ] Package the ripgrep binary outside the asar archive when building the macOS app
 - [ ] Live DashScope check of function calling with thinking models (reasoning item replay)
 - [ ] Persistent permission rules in Settings; auto mode with a reviewer model
