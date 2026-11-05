@@ -45,7 +45,8 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [x] Chat list: Pinned / Today / Earlier groups, time on the right, hover menu with rename, pin, delete
 - [x] Settings with a section list: General, Agent (name, icon, system prompt), Models (list and Bailian-style detail), Plugins grouped by manifest `category`
 - [x] One model button with grouped models and a draggable thinking-level track; context usage ring with breakdown
-- [x] Answers take the full width; the chat's token total (including tool-internal calls) shows under the latest answer only
+- [x] Answers take the full width
+- [ ] Show the chat's token total (recorded, including tool-internal calls); presentation to be decided
 - [ ] Model kinds beyond chat (Decision, TTS) as groups in Settings → Models when they exist
 
 ## PR 4 — Attachments
