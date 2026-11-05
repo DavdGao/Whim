@@ -24,6 +24,8 @@ export default [
             'apps/desktop/src/renderer/components/ui/**',
             'apps/desktop/src/renderer/components/ai-elements/**',
             'apps/desktop/src/renderer/hooks/use-mobile.ts',
+            'apps/desktop/src/renderer/hooks/use-highlighted-code.ts',
+            'apps/desktop/src/renderer/lib/highlighter.tsx',
         ],
     },
     {

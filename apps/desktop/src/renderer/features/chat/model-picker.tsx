@@ -1,5 +1,5 @@
 import { selectableLevels } from '@whimkit/core/contracts';
-import { BoxIcon, BrainIcon, CheckIcon, ChevronDownIcon } from 'lucide-react';
+import { BoxIcon, CheckIcon, ChevronDownIcon } from 'lucide-react';
 import { useState } from 'react';
 
 import { EntityIcon } from '../../components/entity-icon';
@@ -127,7 +127,7 @@ export function ModelPicker({
                     variant="ghost"
                     size="sm"
                     aria-label={t('chat.model')}
-                    className="max-w-72"
+                    className="text-muted-foreground hover:text-foreground max-w-72 rounded-full"
                 >
                     {apply.pending ? (
                         <Spinner />
@@ -138,12 +138,7 @@ export function ModelPicker({
                         />
                     )}
                     <span className="truncate">{current?.card.name ?? t('chat.model')}</span>
-                    {summary && (
-                        <span className="text-muted-foreground flex items-center gap-1">
-                            <BrainIcon className="size-3.5" />
-                            {summary}
-                        </span>
-                    )}
+                    {summary && <span className="text-muted-foreground">{summary}</span>}
                     <ChevronDownIcon className="text-muted-foreground" />
                 </Button>
             </PopoverTrigger>
@@ -197,10 +192,7 @@ export function ModelPicker({
                 )}
                 <Separator className="my-2" />
                 <div className="flex flex-col gap-3 px-2 pt-1 pb-2">
-                    <p className="flex items-center gap-1.5 text-xs font-medium">
-                        <BrainIcon className="size-3.5" />
-                        {t('chat.thinking')}
-                    </p>
+                    <p className="text-xs font-medium">{t('chat.thinking')}</p>
                     {thinking && 'fixed' in thinking ? (
                         <p className="text-muted-foreground text-xs">{t('chat.thinking.fixed')}</p>
                     ) : levels.length > 1 && slot ? (

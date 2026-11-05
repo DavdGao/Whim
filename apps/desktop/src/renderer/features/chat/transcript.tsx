@@ -33,9 +33,16 @@ import {
     MessageContent,
     MessageResponse,
 } from '@/components/ai-elements/message';
-import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
-import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Badge } from '@/components/ui/badge';
+import {
+    Trace,
+    TraceCollapsible,
+    TraceCollapsibleContent,
+    TraceCollapsibleTrigger,
+    TraceDescription,
+    TraceLine,
+    TraceTitle,
+} from '@/components/ui/trace';
 
 /**
  * Join the text of blocks of one type.
@@ -94,6 +101,56 @@ function CopyAction({ text }: { text: string }) {
 }
 
 /**
+ * Whether a node list renders anything.
+ * @param node Children, possibly an array with nulls.
+ * @returns True when something is present.
+ */
+function hasContent(node: ReactNode): boolean {
+    return Array.isArray(node)
+        ? node.some(hasContent)
+        : node !== null && node !== undefined && node !== false;
+}
+
+/**
+ * The model's thinking as a trace line: "Thinking" while it streams, then "Thought" with its
+ * duration. It opens while thinking and closes after; the user's choice wins.
+ * @param props Line props.
+ * @param props.text The reasoning text.
+ * @param props.running Whether the model is still thinking.
+ * @param props.seconds Recorded duration in seconds.
+ * @returns The line.
+ */
+function ReasoningLine({
+    text,
+    running,
+    seconds,
+}: {
+    text: string;
+    running: boolean;
+    seconds?: number;
+}) {
+    const { t } = useT();
+    const [open, setOpen] = useState<boolean>();
+    return (
+        <TraceCollapsible open={open ?? running} onOpenChange={setOpen}>
+            <TraceCollapsibleTrigger>
+                <TraceLine status={running ? 'running' : undefined}>
+                    <TraceTitle>{running ? t('chat.thinkingNow') : t('chat.thought')}</TraceTitle>
+                    {!running && seconds !== undefined && (
+                        <TraceDescription>{t('chat.seconds', { seconds })}</TraceDescription>
+                    )}
+                </TraceLine>
+            </TraceCollapsibleTrigger>
+            <TraceCollapsibleContent>
+                <MessageResponse className="text-sm" plugins={{ math: mathPlugin }}>
+                    {normalizeMath(text)}
+                </MessageResponse>
+            </TraceCollapsibleContent>
+        </TraceCollapsible>
+    );
+}
+
+/**
  * One assistant or user message.
  * @param props Message parts.
  * @param props.role Who wrote it.
@@ -132,29 +189,20 @@ function Bubble({
     return (
         <Message from={role}>
             <MessageContent>
-                {reasoning ? (
-                    <Reasoning
-                        isStreaming={Boolean(streaming && !text)}
-                        defaultOpen={false}
-                        {...(reasoningMs !== undefined
-                            ? { duration: Math.max(1, Math.ceil(reasoningMs / 1000)) }
-                            : {})}
-                    >
-                        <ReasoningTrigger
-                            getThinkingMessage={(active, seconds) =>
-                                active || seconds === 0 ? (
-                                    <Shimmer duration={1}>{t('chat.thinkingNow')}</Shimmer>
-                                ) : seconds === undefined ? (
-                                    <span>{t('chat.thought')}</span>
-                                ) : (
-                                    <span>{t('chat.thoughtFor', { seconds })}</span>
-                                )
-                            }
-                        />
-                        <ReasoningContent>{reasoning}</ReasoningContent>
-                    </Reasoning>
+                {reasoning || hasContent(leading) ? (
+                    <Trace>
+                        {reasoning ? (
+                            <ReasoningLine
+                                text={reasoning}
+                                running={Boolean(streaming && !text)}
+                                {...(reasoningMs !== undefined
+                                    ? { seconds: Math.max(1, Math.ceil(reasoningMs / 1000)) }
+                                    : {})}
+                            />
+                        ) : null}
+                        {leading}
+                    </Trace>
                 ) : null}
-                {leading}
                 {role === 'assistant' && !text ? null : role === 'assistant' ? (
                     <MessageResponse plugins={{ math: mathPlugin }}>
                         {normalizeMath(text)}
@@ -162,7 +210,7 @@ function Bubble({
                 ) : (
                     <p className="whitespace-pre-wrap">{text}</p>
                 )}
-                {children}
+                {hasContent(children) ? <Trace>{children}</Trace> : null}
                 {role === 'assistant' && !streaming && text && <CopyAction text={text} />}
                 {(badge || onRemove) && (
                     <div className="flex items-center gap-2">

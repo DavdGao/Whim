@@ -1,4 +1,19 @@
-import { CheckIcon, GlobeIcon, ShieldCheckIcon, XIcon } from 'lucide-react';
+import {
+    CheckIcon,
+    CircleStopIcon,
+    FilePenIcon,
+    FilePlusIcon,
+    FileSearchIcon,
+    FileTextIcon,
+    FolderSearchIcon,
+    GlobeIcon,
+    ListIcon,
+    SearchIcon,
+    ShieldCheckIcon,
+    TerminalIcon,
+    WrenchIcon,
+    XIcon,
+} from 'lucide-react';
 
 import { ActionButton } from '../../components/action-button';
 import { call } from '../../lib/client';
@@ -12,62 +27,119 @@ import type {
     ToolCallBlock,
     ToolResult,
 } from '@whimkit/core/contracts';
-import type { ToolUIPart } from 'ai';
+import type { LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 import {
-    Confirmation,
-    ConfirmationActions,
-    ConfirmationRequest,
-    ConfirmationTitle,
-} from '@/components/ai-elements/confirmation';
+    CodeBlock,
+    CodeBlockContent,
+    CodeBlockHeader,
+    CodeBlockTitle,
+} from '@/components/ui/code-block';
 import {
-    Tool,
-    ToolContent,
-    ToolHeader,
-    ToolInput,
-    ToolOutput,
-} from '@/components/ai-elements/tool';
+    Item,
+    ItemActions,
+    ItemContent,
+    ItemDescription,
+    ItemMedia,
+    ItemTitle,
+} from '@/components/ui/item';
+import {
+    TraceCollapsible,
+    TraceCollapsibleContent,
+    TraceCollapsibleTrigger,
+    TraceDescription,
+    TraceIcon,
+    TraceLine,
+    TraceTitle,
+} from '@/components/ui/trace';
 
-type Display = { state: ToolUIPart['state']; label: MessageKey };
+type Phase = 'running' | 'done' | 'failed';
+
+/** Icon and title keys of the base tools; other tools use the generic titles. */
+const known: Record<string, { icon: LucideIcon; titles: Record<Phase, MessageKey> }> = {
+    Bash: {
+        icon: TerminalIcon,
+        titles: {
+            running: 'tool.Bash.running',
+            done: 'tool.Bash.done',
+            failed: 'tool.Bash.failed',
+        },
+    },
+    Read: {
+        icon: FileTextIcon,
+        titles: {
+            running: 'tool.Read.running',
+            done: 'tool.Read.done',
+            failed: 'tool.Read.failed',
+        },
+    },
+    Write: {
+        icon: FilePlusIcon,
+        titles: {
+            running: 'tool.Write.running',
+            done: 'tool.Write.done',
+            failed: 'tool.Write.failed',
+        },
+    },
+    Edit: {
+        icon: FilePenIcon,
+        titles: {
+            running: 'tool.Edit.running',
+            done: 'tool.Edit.done',
+            failed: 'tool.Edit.failed',
+        },
+    },
+    Glob: {
+        icon: FolderSearchIcon,
+        titles: {
+            running: 'tool.Glob.running',
+            done: 'tool.Glob.done',
+            failed: 'tool.Glob.failed',
+        },
+    },
+    Grep: {
+        icon: FileSearchIcon,
+        titles: {
+            running: 'tool.Grep.running',
+            done: 'tool.Grep.done',
+            failed: 'tool.Grep.failed',
+        },
+    },
+    WebFetch: {
+        icon: GlobeIcon,
+        titles: {
+            running: 'tool.WebFetch.running',
+            done: 'tool.WebFetch.done',
+            failed: 'tool.WebFetch.failed',
+        },
+    },
+    JobOutput: {
+        icon: ListIcon,
+        titles: {
+            running: 'tool.JobOutput.running',
+            done: 'tool.JobOutput.done',
+            failed: 'tool.JobOutput.failed',
+        },
+    },
+    JobStop: {
+        icon: CircleStopIcon,
+        titles: {
+            running: 'tool.JobStop.running',
+            done: 'tool.JobStop.done',
+            failed: 'tool.JobStop.failed',
+        },
+    },
+};
+
+const generic: Record<Phase, MessageKey> = {
+    running: 'tool.generic.running',
+    done: 'tool.generic.done',
+    failed: 'tool.generic.failed',
+};
 
 /**
- * Map a call's progress to the Tool component's state and a translated label.
- * @param open The open call, when it has no result yet.
- * @param result Its result.
- * @param jobRunning Whether its background job is still running.
- * @returns The display state.
- */
-function display(
-    open: OpenCall | undefined,
-    result: ToolResult | undefined,
-    jobRunning: boolean
-): Display {
-    if (result)
-        switch (result.status) {
-            case 'success':
-                return { state: 'output-available', label: 'tool.status.success' };
-            case 'error':
-                return { state: 'output-error', label: 'tool.status.error' };
-            case 'lost':
-                return { state: 'output-error', label: 'tool.status.lost' };
-            case 'denied':
-                return { state: 'output-denied', label: 'tool.status.denied' };
-            case 'cancelled':
-                return { state: 'output-denied', label: 'tool.status.cancelled' };
-            case 'background':
-                return jobRunning
-                    ? { state: 'input-available', label: 'tool.status.background' }
-                    : { state: 'output-available', label: 'tool.status.backgroundEnded' };
-        }
-    if (open?.state === 'asking')
-        return { state: 'approval-requested', label: 'tool.status.asking' };
-    if (open?.state === 'running')
-        return { state: 'input-available', label: 'tool.status.running' };
-    return { state: 'input-available', label: 'tool.status.pending' };
-}
-
-/**
- * Parse call arguments for display, keeping the raw text when they are not JSON.
+ * Parse call arguments for display, keeping the raw text when they are not a JSON object.
  * @param text The arguments.
  * @returns Parsed input.
  */
@@ -77,6 +149,123 @@ function parseArguments(text: string): unknown {
     } catch {
         return text;
     }
+}
+
+/**
+ * The short subject of a call shown in its title: the command, path, pattern, or URL.
+ * @param name The tool name.
+ * @param input Parsed arguments.
+ * @returns The subject.
+ */
+function subject(name: string, input: unknown): string {
+    if (typeof input !== 'object' || input === null) return name;
+    const fields = input as Record<string, unknown>;
+    for (const key of ['command', 'path', 'pattern', 'url', 'jobId']) {
+        const value = fields[key];
+        if (typeof value === 'string' && value)
+            return key === 'url' ? value.replace(/^https?:\/\//, '') : value;
+    }
+    return name;
+}
+
+/**
+ * Where a call stands, for its line.
+ * @param open The open call, when it has no result yet.
+ * @param result Its result.
+ * @param jobRunning Whether its background job is still running.
+ * @returns The phase and an optional status note.
+ */
+function progress(
+    open: OpenCall | undefined,
+    result: ToolResult | undefined,
+    jobRunning: boolean
+): { phase: Phase; note?: MessageKey; active: boolean } {
+    if (!result)
+        return open?.state === 'running'
+            ? { phase: 'running', active: true }
+            : {
+                  phase: 'running',
+                  active: false,
+                  note: open?.state === 'asking' ? 'tool.status.asking' : 'tool.status.pending',
+              };
+    switch (result.status) {
+        case 'success':
+            return { phase: 'done', active: false };
+        case 'error':
+            return { phase: 'failed', active: false };
+        case 'lost':
+            return { phase: 'failed', active: false, note: 'tool.status.lost' };
+        case 'denied':
+            return { phase: 'running', active: false, note: 'tool.status.denied' };
+        case 'cancelled':
+            return { phase: 'running', active: false, note: 'tool.status.cancelled' };
+        case 'background':
+            return jobRunning
+                ? { phase: 'running', active: true, note: 'tool.status.background' }
+                : { phase: 'done', active: false, note: 'tool.status.backgroundEnded' };
+    }
+}
+
+/**
+ * One activity line, expandable when it has details.
+ * @param props Line props.
+ * @param props.icon Leading icon.
+ * @param props.title Title text.
+ * @param props.note Trailing status text.
+ * @param props.status Line status.
+ * @param props.children Details shown when expanded.
+ * @returns The line.
+ */
+function ActivityLine({
+    icon: Icon,
+    title,
+    note,
+    status,
+    children,
+}: {
+    icon: LucideIcon;
+    title: string;
+    note?: string | undefined;
+    status?: 'running' | 'error' | undefined;
+    children?: ReactNode;
+}) {
+    const line = (
+        <TraceLine status={status}>
+            <TraceIcon>
+                <Icon />
+            </TraceIcon>
+            <TraceTitle>{title}</TraceTitle>
+            {note && <TraceDescription>{note}</TraceDescription>}
+        </TraceLine>
+    );
+    if (!children) return line;
+    return (
+        <TraceCollapsible>
+            <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+            <TraceCollapsibleContent>{children}</TraceCollapsibleContent>
+        </TraceCollapsible>
+    );
+}
+
+/**
+ * A labelled code block for a call's input or output.
+ * @param props Block props.
+ * @param props.label Header label.
+ * @param props.text Content.
+ * @param props.error Whether it is an error.
+ * @returns The block.
+ */
+function Details({ label, text, error }: { label: string; text: string; error?: boolean }) {
+    return (
+        <CodeBlock size="sm" variant={error ? 'destructive' : 'default'}>
+            <CodeBlockHeader>
+                <CodeBlockTitle>{label}</CodeBlockTitle>
+            </CodeBlockHeader>
+            <CodeBlockContent wrap className="max-h-64">
+                {text}
+            </CodeBlockContent>
+        </CodeBlock>
+    );
 }
 
 /**
@@ -94,22 +283,22 @@ function AccessLine({ access }: { access: Access }) {
               ? ['tool.access.network', access.url]
               : [access.kind === 'read' ? 'tool.access.read' : 'tool.access.write', access.path];
     return (
-        <li className="flex min-w-0 gap-2">
-            <span className="text-muted-foreground shrink-0">{t(key)}</span>
-            <code className="min-w-0 truncate">{value}</code>
-        </li>
+        <span className="flex min-w-0 gap-2">
+            <span className="shrink-0">{t(key)}</span>
+            <code className="text-foreground min-w-0 truncate">{value}</code>
+        </span>
     );
 }
 
 /**
- * A local tool call with its arguments, approval request, and result.
+ * A local tool call as a trace line, with an approval prompt while it waits for the user.
  * @param props The call.
  * @param props.sessionId The session.
  * @param props.block The call block.
  * @param props.open Its open state, when it has no result yet.
  * @param props.result Its result.
  * @param props.jobRunning Whether its background job is still running.
- * @returns The tool card.
+ * @returns The line.
  */
 export function ToolCallView({
     sessionId,
@@ -125,57 +314,56 @@ export function ToolCallView({
     jobRunning: boolean;
 }) {
     const { t } = useT();
-    const shown = display(open, result, jobRunning);
+    const input = parseArguments(block.arguments);
+    const target = subject(block.name, input);
+    const tool = known[block.name];
+    const Icon = tool?.icon ?? WrenchIcon;
+    const shown = progress(open, result, jobRunning);
+    const title = t((tool?.titles ?? generic)[shown.phase], { target, name: block.name });
     const decide = (decision: 'allow' | 'deny', scope: 'once' | 'session') =>
         call('session.decide', { sessionId, callId: block.callId, decision, scope });
+    const failed = result !== undefined && !['success', 'background'].includes(result.status);
+    const inputText =
+        block.name === 'Bash' && typeof input === 'object' && input !== null
+            ? `$ ${target}`
+            : typeof input === 'string'
+              ? input
+              : JSON.stringify(input, null, 2);
     return (
-        <Tool defaultOpen={open?.state === 'asking'} className="mb-0 rounded-2xl">
-            <ToolHeader
-                type={`tool-${block.name}`}
-                title={block.name}
-                state={shown.state}
-                statusLabel={t(shown.label)}
-            />
-            <ToolContent>
-                <ToolInput input={parseArguments(block.arguments)} label={t('tool.input')} />
+        <>
+            <ActivityLine
+                icon={Icon}
+                title={title}
+                note={shown.note && t(shown.note)}
+                status={shown.active ? 'running' : shown.phase === 'failed' ? 'error' : undefined}
+            >
                 {result && (
-                    <ToolOutput
-                        label={
-                            result.status === 'success' ? t('tool.output') : t('tool.status.error')
-                        }
-                        output={
-                            result.status === 'success' || result.status === 'background'
-                                ? result.content
-                                : undefined
-                        }
-                        errorText={
-                            result.status === 'success' || result.status === 'background'
-                                ? undefined
-                                : result.content
-                        }
-                    />
+                    <div className="flex flex-col gap-2">
+                        <Details label={t('tool.input')} text={inputText} />
+                        {result.content && (
+                            <Details
+                                label={failed ? t('tool.status.error') : t('tool.output')}
+                                text={result.content}
+                                error={failed}
+                            />
+                        )}
+                    </div>
                 )}
-            </ToolContent>
+            </ActivityLine>
             {open?.state === 'asking' && (
-                <Confirmation
-                    approval={{ id: block.callId }}
-                    state="approval-requested"
-                    className="m-3 mt-0 w-auto rounded-xl"
-                >
-                    <ConfirmationTitle>
-                        <span className="flex items-center gap-2 font-medium">
-                            <ShieldCheckIcon className="size-4" />
-                            {t('tool.ask.title', { name: block.name })}
-                        </span>
-                    </ConfirmationTitle>
-                    <ConfirmationRequest>
-                        <ul className="mt-1 flex flex-col gap-1 text-xs">
+                <Item variant="outline" size="sm" className="rounded-2xl">
+                    <ItemMedia variant="icon">
+                        <Icon />
+                    </ItemMedia>
+                    <ItemContent className="min-w-0">
+                        <ItemTitle>{t('tool.ask.title', { name: block.name })}</ItemTitle>
+                        <ItemDescription className="flex flex-col gap-0.5 text-xs">
                             {(open.access ?? []).map((access, index) => (
                                 <AccessLine key={index} access={access} />
                             ))}
-                        </ul>
-                    </ConfirmationRequest>
-                    <ConfirmationActions>
+                        </ItemDescription>
+                    </ItemContent>
+                    <ItemActions className="flex-wrap justify-end">
                         <ActionButton
                             size="sm"
                             variant="ghost"
@@ -199,49 +387,47 @@ export function ToolCallView({
                         >
                             {t('tool.ask.once')}
                         </ActionButton>
-                    </ConfirmationActions>
-                </Confirmation>
+                    </ItemActions>
+                </Item>
             )}
-        </Tool>
+        </>
     );
 }
 
 /**
- * A call the provider executed, such as a web search.
+ * A call the provider executed, such as a web search, as a trace line listing the pages.
  * @param props The block.
  * @param props.block The native call.
- * @returns A compact tool card.
+ * @returns The line.
  */
 export function NativeToolView({ block }: { block: NativeToolCallBlock }) {
     const { t } = useT();
-    const title =
-        block.tool === 'web_search'
-            ? t('tool.native.search')
-            : block.tool === 'web_fetch'
-              ? t('tool.native.fetch')
-              : block.tool;
+    const search = block.tool === 'web_search';
+    const failed = block.status !== 'completed';
+    const target = search
+        ? (block.query ?? '')
+        : (block.urls?.[0]?.replace(/^https?:\/\//, '') ?? '');
+    const title = search
+        ? t(failed ? 'tool.search.failed' : 'tool.search.done', { target })
+        : t(failed ? 'tool.WebFetch.failed' : 'tool.WebFetch.done', { target });
     return (
-        <Tool className="mb-0 rounded-2xl">
-            <ToolHeader
-                type={`tool-${block.tool}`}
-                title={block.query ? `${title}: ${block.query}` : title}
-                state={block.status === 'completed' ? 'output-available' : 'output-error'}
-                statusLabel={
-                    block.status === 'completed' ? t('tool.status.success') : t('tool.status.error')
-                }
-            />
-            {block.urls?.length ? (
-                <ToolContent>
-                    <ul className="flex flex-col gap-1 p-4 text-xs">
-                        {block.urls.map(url => (
-                            <li key={url} className="flex min-w-0 items-center gap-2">
-                                <GlobeIcon className="text-muted-foreground size-3.5 shrink-0" />
-                                <span className="truncate">{url}</span>
-                            </li>
-                        ))}
-                    </ul>
-                </ToolContent>
+        <ActivityLine
+            icon={search ? SearchIcon : GlobeIcon}
+            title={title}
+            status={failed ? 'error' : undefined}
+        >
+            {search && block.urls?.length ? (
+                <div className="flex flex-col gap-1.5">
+                    {block.urls.map(url => (
+                        <TraceLine key={url}>
+                            <TraceIcon>
+                                <GlobeIcon />
+                            </TraceIcon>
+                            <TraceTitle>{url.replace(/^https?:\/\//, '')}</TraceTitle>
+                        </TraceLine>
+                    ))}
+                </div>
             ) : null}
-        </Tool>
+        </ActivityLine>
     );
 }

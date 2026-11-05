@@ -2,47 +2,27 @@ import { useT } from '../../lib/i18n';
 
 import type { Usage } from '@whimkit/core/contracts';
 
-import { Button } from '@/components/ui/button';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Progress } from '@/components/ui/progress';
+import { cn } from '@/lib/utils';
+
+/** Compaction starts at this share of the context window (agent.md §5). */
+const compactionShare = 0.8;
 
 /**
- * A small ring showing a fraction.
- * @param props Ring props.
- * @param props.percent 0–100.
- * @returns The SVG ring.
+ * The ring's tone as the conversation nears compaction.
+ * @param fraction Used share of the compaction threshold, 0–1.
+ * @returns A stroke class.
  */
-function Ring({ percent }: { percent: number }) {
-    const radius = 7;
-    const circumference = 2 * Math.PI * radius;
-    return (
-        <svg viewBox="0 0 18 18" className="size-4 -rotate-90" aria-hidden="true">
-            <circle
-                cx="9"
-                cy="9"
-                r={radius}
-                fill="none"
-                strokeWidth="2.5"
-                className="stroke-muted"
-            />
-            <circle
-                cx="9"
-                cy="9"
-                r={radius}
-                fill="none"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeDasharray={circumference}
-                strokeDashoffset={circumference * (1 - percent / 100)}
-                className={percent >= 80 ? 'stroke-destructive' : 'stroke-primary'}
-            />
-        </svg>
-    );
+function tone(fraction: number): string {
+    if (fraction >= 0.9) return 'stroke-destructive';
+    if (fraction >= 0.7) return 'stroke-amber-500';
+    return 'stroke-foreground/70';
 }
 
 /**
- * How much of the model's context window the conversation uses, from the latest reported
- * usage. Hover shows the breakdown; unknown fields stay unknown.
+ * How close the conversation is to compaction, as a ring that fills and changes colour near
+ * the threshold. Hover shows the numbers; unknown fields stay unknown.
  * @param props Usage props.
  * @param props.usage The latest attempt's usage, if reported.
  * @param props.contextWindow The model's context window in tokens.
@@ -58,8 +38,12 @@ export function ContextUsage({
     const { t, locale } = useT();
     if (!usage || usage.inputTokens === undefined) return null;
     const used = usage.inputTokens + (usage.outputTokens ?? 0);
-    const percent = Math.min(100, Math.round((used / contextWindow) * 100));
+    const threshold = Math.floor(contextWindow * compactionShare);
+    const fraction = Math.min(1, used / threshold);
+    const percent = Math.round(fraction * 100);
     const format = new Intl.NumberFormat(locale, { notation: 'compact' });
+    const radius = 7;
+    const circumference = 2 * Math.PI * radius;
     const rows: [string, number | undefined][] = [
         [t('context.input'), usage.inputTokens],
         [t('context.cached'), usage.cachedInputTokens],
@@ -69,22 +53,43 @@ export function ContextUsage({
     return (
         <HoverCard openDelay={10} closeDelay={100}>
             <HoverCardTrigger asChild>
-                <Button type="button" variant="ghost" size="sm" aria-label={t('context.title')}>
-                    <Ring percent={percent} />
-                    <span className="text-muted-foreground tabular-nums">
-                        {used > 0 && percent === 0 ? '<1' : percent}%
-                    </span>
-                </Button>
+                <button
+                    type="button"
+                    aria-label={t('context.label', { percent })}
+                    className="hover:bg-accent focus-visible:ring-ring/50 flex size-7 items-center justify-center rounded-full outline-none focus-visible:ring-3"
+                >
+                    <svg viewBox="0 0 18 18" className="size-[18px] -rotate-90" aria-hidden="true">
+                        <circle
+                            cx="9"
+                            cy="9"
+                            r={radius}
+                            fill="none"
+                            strokeWidth="3"
+                            className="stroke-muted-foreground/30"
+                        />
+                        <circle
+                            cx="9"
+                            cy="9"
+                            r={radius}
+                            fill="none"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeDasharray={circumference}
+                            strokeDashoffset={circumference * (1 - Math.max(fraction, 0.02))}
+                            className={cn('transition-[stroke-dashoffset]', tone(fraction))}
+                        />
+                    </svg>
+                </button>
             </HoverCardTrigger>
-            <HoverCardContent align="end" className="flex w-64 flex-col gap-3 rounded-2xl">
-                <div className="flex items-center justify-between gap-3 text-sm">
-                    <span className="font-medium">{t('context.title')}</span>
-                    <span className="text-muted-foreground tabular-nums">
-                        {format.format(used)} / {format.format(contextWindow)}
+            <HoverCardContent align="end" className="flex w-72 flex-col gap-4 rounded-2xl p-5">
+                <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-sm font-medium">{t('context.title')}</span>
+                    <span className="text-muted-foreground text-xs tabular-nums">
+                        {format.format(used)} / {format.format(threshold)}
                     </span>
                 </div>
                 <Progress value={percent} aria-label={t('context.title')} />
-                <dl className="flex flex-col gap-1 text-xs">
+                <dl className="flex flex-col gap-1.5 text-xs">
                     {rows.map(([label, value]) => (
                         <div key={label} className="flex justify-between">
                             <dt className="text-muted-foreground">{label}</dt>
@@ -94,7 +99,9 @@ export function ContextUsage({
                         </div>
                     ))}
                 </dl>
-                <p className="text-muted-foreground text-xs">{t('context.hint')}</p>
+                <p className="text-muted-foreground text-xs leading-relaxed">
+                    {t('context.hint', { window: format.format(contextWindow) })}
+                </p>
             </HoverCardContent>
         </HoverCard>
     );
