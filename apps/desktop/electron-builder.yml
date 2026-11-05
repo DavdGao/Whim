@@ -1,0 +1,22 @@
+# macOS packaging (design.md §13.1). Run `pnpm build` at the repository root first.
+appId: com.whimkit.desktop
+productName: Whim
+directories:
+    output: release
+files:
+    - dist/**/*
+    - package.json
+    - '!**/node_modules/@whimkit/*/{src,tsconfig.json}'
+    - '!**/node_modules/@whimkit/*/dist/**/*.test.*'
+    # Keep only the ripgrep binary of the architecture being built.
+    - '!**/node_modules/@vscode/ripgrep-!(${platform}-${arch})/**'
+# Spawned executables cannot run from inside the archive.
+asarUnpack:
+    - '**/node_modules/@vscode/ripgrep-*/bin/**'
+mac:
+    category: public.app-category.developer-tools
+    target:
+        - target: dmg
+          arch: [arm64, x64]
+        - target: zip
+          arch: [arm64, x64]

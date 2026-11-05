@@ -3,6 +3,12 @@ packages:
     - 'apps/*'
 allowBuilds:
     electron: true
+    # Windows installer tooling pulled in by electron-builder; never needed on macOS.
+    electron-winstaller: false
     esbuild: true
+# Install both macOS architectures' native packages (ripgrep), so either app can be built on any Mac.
+supportedArchitectures:
+    os: [current, darwin]
+    cpu: [current, arm64, x64]
 minimumReleaseAgeExclude:
     - electron@45.2.2

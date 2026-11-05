@@ -480,6 +480,15 @@ Instrument agent steps, model attempts, tool calls, compaction, and commits with
 
 Application, Core, agent, libraries, and first-party plugins release at one shared version. Database schema versions, record versions, and card revisions are independent of it. A binary rollback does not imply the database can be downgraded.
 
+### 13.1 Packaging
+
+- The macOS app is built with electron-builder from `apps/desktop` (`pnpm --filter @whimkit/desktop package`), one app per architecture (arm64 and x64), as `dmg` and `zip`. Signing and notarization are added with the release pipeline; until then the builds are unsigned.
+- Main, Backend, the DB worker, the renderer, workspace packages, and bundled plugins run from the `app.asar` archive. A file another process executes cannot run from the archive, so it is listed in `asarUnpack` and placed in `app.asar.unpacked`; the code that spawns it maps the path. Today that is only ripgrep: `@vscode/ripgrep` resolves the binary from its per-platform package, and `@whimkit/tools` rewrites `app.asar/` to `app.asar.unpacked/` before spawning.
+- Only `@whimkit/*` packages are `dependencies` of `apps/desktop`, because they are loaded at runtime from `node_modules`; everything Vite or esbuild bundles is a `devDependency`, so it is not copied into the archive a second time.
+- `electron-builder-squirrel-windows` is a direct `devDependency` although Whim builds no Windows installer: it and `app-builder-lib` are peers of each other, and pnpm hangs while auto-installing that cycle. `electron-winstaller`'s install script is denied in `allowBuilds` for the same reason.
+- Each app carries only its own architecture's ripgrep. The workspace installs both darwin binaries (`supportedArchitectures` in `pnpm-workspace.yaml`), so either architecture can be built on any Mac.
+- The packaged build is checked by running Grep in it: a path left inside the archive fails with `ENOTDIR` only in the packaged app, never in development.
+
 ## 14. Verification
 
 - Store, migrations, idempotency, and projection rebuilds run against real temporary SQLite databases. Crash safety is tested by killing real processes.
