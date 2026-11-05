@@ -84,6 +84,13 @@ export default {
             validateCard: card => (card.model === 'forbidden' ? [{ path: 'model', message: 'Forbidden model.' }] : []),
             open() { throw new Error('not used'); },
         });
+        context.models.registerAdapter({
+            id: 'fixture-plugin#decide',
+            kind: 'decision',
+            credentialTypes: ['fixture-plugin#key'],
+            optionsSchema: { type: 'object', additionalProperties: false },
+            open() { throw new Error('not used'); },
+        });
     },
 };`;
 
@@ -132,7 +139,7 @@ describe('PluginHost, Catalog, and CredentialService', () => {
         const catalog = new Catalog(host, userDir);
         await catalog.start();
         catalog.stop();
-        const patched = catalog.card('fixture/model');
+        const patched = catalog.chatCard('fixture/model');
         assert.equal(patched?.name, 'Renamed');
         assert.equal(patched?.thinking, undefined);
         const mine = catalog.entries().find(entry => entry.id === 'user/model');
@@ -143,6 +150,40 @@ describe('PluginHost, Catalog, and CredentialService', () => {
                 .entries()
                 .some(entry => entry.files[0].endsWith('broken.json') && entry.issues.length === 1)
         );
+        await store.close();
+    });
+
+    it('validates Decision cards against an adapter of their kind', async () => {
+        const root = join(dir, 'decision');
+        const pkg = await writePlugin(root, hostSource);
+        const store = await Store.open(join(root, 'db.sqlite'));
+        const host = new PluginHost(store, [{ dir: pkg, source: 'bundled' }]);
+        await host.start();
+        const userDir = join(root, 'models');
+        await mkdir(userDir, { recursive: true });
+        const decision = {
+            id: 'user/judge',
+            revision: 1,
+            kind: 'decision',
+            adapter: 'fixture-plugin#decide',
+            model: 'judge',
+            name: 'Judge',
+        };
+        await writeFile(join(userDir, 'judge.json'), JSON.stringify(decision));
+        await writeFile(
+            join(userDir, 'wrong.json'),
+            JSON.stringify({ ...decision, id: 'user/wrong', adapter: 'fixture-plugin#chat' })
+        );
+        const catalog = new Catalog(host, userDir);
+        await catalog.start();
+        catalog.stop();
+        assert.deepEqual(catalog.decisionCard('user/judge'), { ...decision, options: {} });
+        assert.equal(catalog.chatCard('user/judge'), undefined);
+        assert.equal(catalog.decisionCard('fixture/model'), undefined);
+        assert.deepEqual(catalog.entries().find(entry => entry.id === 'user/wrong')?.issues, [
+            'Adapter fixture-plugin#chat serves chat models.',
+        ]);
+        await host.stop();
         await store.close();
     });
 

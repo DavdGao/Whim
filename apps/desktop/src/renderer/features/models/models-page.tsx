@@ -363,10 +363,13 @@ export function ModelSettings({ state }: { state: AppState }) {
                                 <span className="text-muted-foreground truncate text-xs">
                                     {[
                                         entry.card?.model,
-                                        entry.card &&
-                                            t('models.context', {
-                                                tokens: formatter.format(entry.card.contextWindow),
-                                            }),
+                                        entry.card?.kind === 'chat'
+                                            ? t('models.context', {
+                                                  tokens: formatter.format(
+                                                      entry.card.contextWindow
+                                                  ),
+                                              })
+                                            : entry.card && t('model.kind.decision'),
                                         entry.layer !== 'upstream' &&
                                             t(`models.layer.${entry.layer}`),
                                     ]

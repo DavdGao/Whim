@@ -8,6 +8,7 @@ import type {
     EpochContext,
     FileVersion,
     PermissionRule,
+    ReviewOutcome,
     ToolDeclaration,
     Usage,
 } from './records.js';
@@ -66,8 +67,20 @@ export interface OpenCall {
     readonly state: 'pending' | 'asking' | 'running';
     /** Set while asking: what the call touches. */
     readonly access?: readonly Access[];
+    /** Set while asking in auto mode: the review in progress, or the answer that left it to the user. */
+    readonly review?: CallReview;
     readonly jobId?: string;
 }
+
+export type CallReview =
+    | { readonly state: 'running'; readonly cardId: string }
+    | {
+          readonly state: 'done';
+          readonly cardId: string;
+          readonly outcome: ReviewOutcome;
+          readonly reason: string;
+          readonly failure?: Failure;
+      };
 
 /** A job that moved to the background and has not ended. */
 export interface BackgroundJob {
@@ -380,17 +393,48 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
             const call = requireCall(view, body.callId, 'pending', record.seq);
             return {
                 ...base,
-                calls: replaceCall(view, { ...call, state: 'asking', access: body.access }),
+                calls: replaceCall(view, {
+                    ...call,
+                    state: 'asking',
+                    access: body.access,
+                    ...(body.reviewer
+                        ? { review: { state: 'running', cardId: body.reviewer.cardId } }
+                        : {}),
+                }),
+            };
+        }
+        case 'permission.reviewed': {
+            requireRun(view, body.runId, record.seq);
+            const call = requireCall(view, body.callId, 'asking', record.seq);
+            if (call.review?.state !== 'running')
+                throw new InvalidJournalError('A review needs a running review.', record.seq);
+            const usage = addUsage(view.usage, body.usage);
+            if (body.outcome !== 'ask' && !body.failure) {
+                const { access: _access, review: _review, ...rest } = call;
+                return { ...base, usage, calls: replaceCall(view, { ...rest, state: 'pending' }) };
+            }
+            return {
+                ...base,
+                usage,
+                calls: replaceCall(view, {
+                    ...call,
+                    review: {
+                        state: 'done',
+                        cardId: call.review.cardId,
+                        outcome: body.outcome,
+                        reason: body.reason,
+                        ...(body.failure ? { failure: body.failure } : {}),
+                    },
+                }),
             };
         }
         case 'permission.decided': {
             requireRun(view, body.runId, record.seq);
-            const { access: _access, ...call } = requireCall(
-                view,
-                body.callId,
-                'asking',
-                record.seq
-            );
+            const {
+                access: _access,
+                review: _review,
+                ...call
+            } = requireCall(view, body.callId, 'asking', record.seq);
             return {
                 ...base,
                 calls: replaceCall(view, { ...call, state: 'pending' }),

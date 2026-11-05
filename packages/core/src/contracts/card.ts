@@ -60,7 +60,22 @@ export const chatCardSchema = z.strictObject({
 });
 export type ChatCard = z.infer<typeof chatCardSchema>;
 
-export const cardSchema = z.discriminatedUnion('kind', [chatCardSchema]);
+/** A Decision model card: a model that returns typed, calibrated answers instead of text. */
+export const decisionCardSchema = z.strictObject({
+    $schema: z.string().optional(),
+    id: idSchema,
+    revision: positiveInt,
+    kind: z.literal('decision'),
+    adapter: idSchema,
+    model: idSchema,
+    name: z.string().min(1).max(200),
+    options: z.record(z.string(), z.unknown()).default({}),
+    /** Key into the `icons` of the adapter's plugin; display only. */
+    icon: z.string().min(1).max(100).optional(),
+});
+export type DecisionCard = z.infer<typeof decisionCardSchema>;
+
+export const cardSchema = z.discriminatedUnion('kind', [chatCardSchema, decisionCardSchema]);
 export type Card = z.infer<typeof cardSchema>;
 
 /**

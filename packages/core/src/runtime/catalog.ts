@@ -2,12 +2,12 @@ import { watch } from 'node:fs';
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { chatCardSchema } from '../contracts/card.js';
+import { cardSchema } from '../contracts/card.js';
 
 import { describeError } from './plugin-host.js';
 
 import type { PluginHost } from './plugin-host.js';
-import type { ChatCard } from '../contracts/card.js';
+import type { Card, ChatCard, DecisionCard } from '../contracts/card.js';
 
 export interface CatalogEntry {
     readonly id: string;
@@ -16,8 +16,8 @@ export interface CatalogEntry {
     readonly pluginId?: string;
     readonly files: readonly string[];
     readonly hidden: boolean;
-    /** Present when the card is valid and its adapter is available. */
-    readonly card?: ChatCard;
+    /** Present when the card is valid and an adapter of its kind is available. */
+    readonly card?: Card;
     readonly issues: readonly string[];
 }
 
@@ -109,9 +109,29 @@ export class Catalog {
      * @param id Card id.
      * @returns The valid card, or undefined.
      */
-    card(id: string): ChatCard | undefined {
+    card(id: string): Card | undefined {
         const entry = this.#entries.get(id);
         return entry && !entry.hidden ? entry.card : undefined;
+    }
+
+    /**
+     * A selectable Chat card by id.
+     * @param id Card id.
+     * @returns The valid Chat card, or undefined.
+     */
+    chatCard(id: string): ChatCard | undefined {
+        const card = this.card(id);
+        return card?.kind === 'chat' ? card : undefined;
+    }
+
+    /**
+     * A selectable Decision card by id.
+     * @param id Card id.
+     * @returns The valid Decision card, or undefined.
+     */
+    decisionCard(id: string): DecisionCard | undefined {
+        const card = this.card(id);
+        return card?.kind === 'decision' ? card : undefined;
     }
 
     /**
@@ -214,8 +234,8 @@ export class Catalog {
         const entries = new Map<string, CatalogEntry>();
         for (const [id, item] of raw) {
             const issues = [...item.issues];
-            const parsed = chatCardSchema.safeParse(item.value);
-            let card: ChatCard | undefined;
+            const parsed = cardSchema.safeParse(item.value);
+            let card: Card | undefined;
             if (!parsed.success) {
                 issues.push(
                     ...parsed.error.issues.map(
@@ -223,21 +243,25 @@ export class Catalog {
                     )
                 );
             } else {
-                const adapter = this.host.chatAdapters.get(parsed.data.adapter);
-                if (!adapter) issues.push(`Adapter ${parsed.data.adapter} is not available.`);
+                const data = parsed.data;
+                const adapter = this.host.adapters.get(data.adapter);
+                if (!adapter) issues.push(`Adapter ${data.adapter} is not available.`);
+                else if (adapter.adapter.kind !== data.kind)
+                    issues.push(`Adapter ${data.adapter} serves ${adapter.adapter.kind} models.`);
                 else {
                     issues.push(
                         ...adapter.optionsSchema
-                            .issues(parsed.data.options)
+                            .issues(data.options)
                             .map(issue => `options${issue.path}: ${issue.message}`)
                     );
-                    issues.push(
-                        ...(adapter.adapter.validateCard?.(parsed.data) ?? []).map(
-                            issue => `${issue.path}: ${issue.message}`
-                        )
-                    );
+                    if (adapter.adapter.kind === 'chat' && data.kind === 'chat')
+                        issues.push(
+                            ...(adapter.adapter.validateCard?.(data) ?? []).map(
+                                issue => `${issue.path}: ${issue.message}`
+                            )
+                        );
                 }
-                if (issues.length === 0) card = parsed.data;
+                if (issues.length === 0) card = data;
             }
             entries.set(id, {
                 id,

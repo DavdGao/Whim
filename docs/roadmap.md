@@ -77,7 +77,9 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [x] Local WebSearch through Tavily (a plugin with an API-key credential), for models without provider search; scraping a search engine's HTML was dropped because it is challenged as a bot and goes against the engine's intent
 - [ ] Package the ripgrep binary outside the asar archive when building the macOS app
 - [ ] Live DashScope check of function calling with thinking models (reasoning item replay)
-- [ ] Persistent permission rules in Settings; auto mode with a reviewer model
+- [x] Auto mode: a reviewer (Chat with a `decide` tool, or a Decision model) answers asks first, falling back to the user; recorded with usage
+- [ ] Decision provider plugin (TypeSafe System One)
+- [ ] Persistent permission rules in Settings, with a Bash parser that matches each simple command of a compound one
 
 ## Later
 

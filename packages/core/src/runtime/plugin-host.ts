@@ -9,7 +9,7 @@ import { CompiledSchema } from './json-schema.js';
 
 import type { Store } from './store.js';
 import type {
-    ChatAdapter,
+    ModelAdapter,
     CredentialType,
     Disposer,
     PluginContext,
@@ -141,9 +141,9 @@ export interface RegisteredCredentialType {
     readonly schema: CompiledSchema;
 }
 
-export interface RegisteredChatAdapter {
+export interface RegisteredAdapter {
     readonly pluginId: string;
-    readonly adapter: ChatAdapter;
+    readonly adapter: ModelAdapter;
     readonly optionsSchema: CompiledSchema;
 }
 
@@ -202,7 +202,8 @@ export function describeError(error: unknown): string {
 /** Loads plugin packages, tracks installation and availability, and owns their registrations. */
 export class PluginHost {
     readonly credentialTypes = new Map<string, RegisteredCredentialType>();
-    readonly chatAdapters = new Map<string, RegisteredChatAdapter>();
+    /** Model adapters of every kind, keyed by id. */
+    readonly adapters = new Map<string, RegisteredAdapter>();
     /** Tools in registration order, keyed by model-facing name. */
     readonly tools = new Map<string, RegisteredTool>();
     readonly #statuses = new Map<string, PluginStatus>();
@@ -347,7 +348,7 @@ export class PluginHost {
         const disposers: Disposer[] = [];
         const staged: {
             credentialTypes: RegisteredCredentialType[];
-            adapters: RegisteredChatAdapter[];
+            adapters: RegisteredAdapter[];
             tools: RegisteredTool[];
         } = {
             credentialTypes: [],
@@ -378,14 +379,14 @@ export class PluginHost {
                 registerAdapter: adapter => {
                     if (!adapter.id.startsWith(prefix))
                         throw new Error(`Adapter ids must start with ${prefix}.`);
-                    if (this.chatAdapters.has(adapter.id))
+                    if (this.adapters.has(adapter.id))
                         throw new Error(`Adapter ${adapter.id} exists.`);
                     staged.adapters.push({
                         pluginId: id,
                         adapter,
                         optionsSchema: new CompiledSchema(adapter.optionsSchema),
                     });
-                    return () => this.chatAdapters.delete(adapter.id);
+                    return () => this.adapters.delete(adapter.id);
                 },
             },
             tools: {
@@ -427,8 +428,8 @@ export class PluginHost {
                 disposers.push(() => this.credentialTypes.delete(entry.type.id));
             }
             for (const entry of staged.adapters) {
-                this.chatAdapters.set(entry.adapter.id, entry);
-                disposers.push(() => this.chatAdapters.delete(entry.adapter.id));
+                this.adapters.set(entry.adapter.id, entry);
+                disposers.push(() => this.adapters.delete(entry.adapter.id));
             }
             for (const entry of staged.tools) {
                 this.tools.set(entry.tool.name, entry);

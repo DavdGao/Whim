@@ -12,7 +12,7 @@ import { ApplicationError, knownFiles } from '@whimkit/core/contracts';
 import { Agent } from './agent.js';
 
 import type { AgentEvent } from './agent.js';
-import type { ToolModels } from '@whimkit/core';
+import type { Review, ReviewRequest, Reviewer, ToolModels } from '@whimkit/core';
 import type { FrozenChatCard } from '@whimkit/core/contracts';
 import type { ChatEvent, ChatRequest, ChatSession, ToolDefinition } from '@whimkit/core/plugin';
 
@@ -402,13 +402,15 @@ describe('Agent', () => {
          * A tool runtime over a host holding the given tools.
          * @param tools Tool definitions.
          * @param toolModels Bindings for provider-run tools.
+         * @param reviewer The auto-mode reviewer, if any.
          * @returns The runtime, its declarations, and sessions whose jobs ended.
          */
         function runtimeWith(
             tools: ToolDefinition<{ text: string }>[],
             toolModels: ToolModels = {
                 open: () => Promise.reject(new Error('No provider tools here.')),
-            }
+            },
+            reviewer?: Reviewer
         ) {
             const host = new PluginHost(store, []);
             for (const tool of tools)
@@ -429,7 +431,8 @@ describe('Agent', () => {
                 [],
                 join(dir, 'sessions'),
                 undefined,
-                id => ended.push(id)
+                id => ended.push(id),
+                async () => reviewer
             );
             return { runtime, declarations: runtime.declarations(undefined, []), ended };
         }
@@ -714,6 +717,155 @@ describe('Agent', () => {
             assert.deepEqual((await store.view(sessionId)).permissionRules, [
                 { tool: 'Write', kind: 'execute', pattern: 'ls' },
             ]);
+        });
+
+        describe('automatic review', () => {
+            const writer = {
+                ...echo,
+                name: 'Write',
+                readOnly: false,
+                concurrencySafe: false,
+                access: () => [{ kind: 'write' as const, path: '/tmp/x' }],
+            };
+
+            /**
+             * A reviewer with a fixed answer that records what it was asked.
+             * @param answer The review, or an error to throw.
+             * @returns The reviewer and its requests.
+             */
+            function fixedReviewer(answer: Review | Error) {
+                const requests: ReviewRequest[] = [];
+                const reviewer: Reviewer = {
+                    cardId: 'test/reviewer',
+                    review: async request => {
+                        requests.push(request);
+                        if (answer instanceof Error) throw answer;
+                        return answer;
+                    },
+                };
+                return { reviewer, requests };
+            }
+
+            /**
+             * Run one turn that calls Write and collect the permission records.
+             * @param reviewer The reviewer.
+             * @param onAsk Answers a call left to the user.
+             * @returns The session, its transcript tail, and the permission record bodies.
+             */
+            async function turn(
+                reviewer: Reviewer,
+                onAsk?: (runtime: ToolRuntime, sessionId: string, callId: string) => void
+            ) {
+                const { runtime, declarations } = runtimeWith([writer], undefined, reviewer);
+                const { models } = callingModel('Write', '{"text":"x"}');
+                const sessionId = await sessionWith('write it', declarations);
+                const bodies: unknown[] = [];
+                const stop = store.onCommit(records => {
+                    for (const { body } of records) {
+                        if (body.type.startsWith('permission.')) bodies.push(body);
+                        if (body.type === 'permission.reviewed' && body.outcome === 'ask')
+                            onAsk?.(runtime, sessionId, body.callId);
+                    }
+                });
+                await drain(
+                    new Agent(store, models, runtime, { sleep: noSleep }).run(
+                        sessionId,
+                        'user',
+                        new AbortController().signal
+                    )
+                );
+                stop();
+                const view = await store.view(sessionId);
+                return { view, tail: (await transcript(sessionId)).slice(2), bodies };
+            }
+
+            it('runs an allowed call without asking and counts the review usage', async () => {
+                const { reviewer, requests } = fixedReviewer({
+                    outcome: 'allow',
+                    reason: 'The user asked to write.',
+                    usage: { inputTokens: 40, outputTokens: 5 },
+                });
+                const { view, tail, bodies } = await turn(reviewer);
+                assert.deepEqual(tail, [
+                    ['tool', 'success', 'echo: x'],
+                    ['assistant', 'saw success', 'completed'],
+                ]);
+                assert.deepEqual(bodies, [
+                    {
+                        type: 'permission.requested',
+                        runId: view.lastRun?.runId,
+                        callId: 'call-1',
+                        name: 'Write',
+                        access: [{ kind: 'write', path: '/tmp/x' }],
+                        reviewer: { cardId: 'test/reviewer' },
+                    },
+                    {
+                        type: 'permission.reviewed',
+                        runId: view.lastRun?.runId,
+                        callId: 'call-1',
+                        outcome: 'allow',
+                        reason: 'The user asked to write.',
+                        usage: { inputTokens: 40, outputTokens: 5 },
+                    },
+                ]);
+                assert.deepEqual(requests, [
+                    {
+                        tool: { name: 'Write', description: 'Echo text.' },
+                        input: { text: 'x' },
+                        access: [{ kind: 'write', path: '/tmp/x' }],
+                        requests: ['write it'],
+                    },
+                ]);
+                assert.equal(view.usage.inputTokens, 40);
+                assert.deepEqual(view.permissionRules, []);
+            });
+
+            it("gives the model the reviewer's reason for a denial", async () => {
+                const { reviewer } = fixedReviewer({
+                    outcome: 'deny',
+                    reason: 'Nobody asked for this file.',
+                    usage: {},
+                });
+                const { tail } = await turn(reviewer);
+                assert.deepEqual(tail, [
+                    [
+                        'tool',
+                        'denied',
+                        'The automatic reviewer denied this tool call: Nobody asked for this file. Do not retry the same call; choose another way or ask the user.',
+                    ],
+                    ['assistant', 'saw denied', 'completed'],
+                ]);
+            });
+
+            it('leaves the call to the user when the review fails', async () => {
+                const { reviewer } = fixedReviewer(
+                    new ApplicationError({
+                        category: 'rate-limited',
+                        retry: { kind: 'backoff' },
+                        outcome: 'rejected',
+                        detail: { provider: 'test', message: 'Slow down.' },
+                    })
+                );
+                const { tail, bodies } = await turn(reviewer, (runtime, sessionId, callId) => {
+                    void runtime.decide(sessionId, callId, 'allow', 'once');
+                });
+                assert.deepEqual(bodies.at(1), {
+                    type: 'permission.reviewed',
+                    runId: (bodies[0] as { runId: string }).runId,
+                    callId: 'call-1',
+                    outcome: 'ask',
+                    reason: 'Slow down.',
+                    usage: {},
+                    failure: {
+                        category: 'rate-limited',
+                        retry: { kind: 'backoff' },
+                        outcome: 'rejected',
+                        detail: { provider: 'test', message: 'Slow down.' },
+                    },
+                });
+                assert.equal((bodies.at(2) as { type: string }).type, 'permission.decided');
+                assert.deepEqual(tail[0], ['tool', 'success', 'echo: x']);
+            });
         });
 
         it('cancels an open ask on Stop and closes the call', async () => {
