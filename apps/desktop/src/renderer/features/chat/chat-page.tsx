@@ -15,6 +15,7 @@ import { useSession } from './use-session';
 
 import type { AppState, ChatSlot } from '../../../shared/ipc';
 
+import { StatusAlert } from '@/components/status-alert';
 import { Button } from '@/components/ui/button';
 import {
     Empty,
@@ -23,7 +24,6 @@ import {
     EmptyHeader,
     EmptyTitle,
 } from '@/components/ui/empty';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 
 /**
@@ -107,7 +107,9 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                         <PlusIcon />
                     </Button>
                 </div>
-                <ScrollArea className="min-h-0 flex-1">
+                {/* A plain scroller: Radix ScrollArea lays content out as a table, so long titles
+                    widened rows and pushed the time and menu out of view. */}
+                <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
                     <nav className="flex flex-col px-2 pb-3" aria-label={t('chat.sessions')}>
                         <SessionList
                             sessions={state.sessions}
@@ -120,7 +122,7 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                             }
                         />
                     </nav>
-                </ScrollArea>
+                </div>
             </aside>
             <section className="flex min-w-0 flex-1 flex-col">
                 {!hasModels ? (
@@ -138,9 +140,11 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                 ) : (
                     <>
                         {session.error ? (
-                            <p className="text-destructive p-6 text-sm">
-                                {t('chat.unreadable')} {session.error}
-                            </p>
+                            <div className="mx-auto w-full max-w-3xl p-6">
+                                <StatusAlert tone="error" title={t('chat.unreadable')}>
+                                    {session.error}
+                                </StatusAlert>
+                            </div>
                         ) : selected && !view ? (
                             <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 p-6">
                                 <Skeleton className="h-6 w-1/2" />

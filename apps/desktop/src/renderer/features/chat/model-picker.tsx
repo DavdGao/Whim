@@ -64,9 +64,7 @@ function ThinkingTrack({
                         onClick={() => level !== value && onChange(level)}
                         className={cn(
                             'hover:text-foreground focus-visible:ring-ring rounded-full px-1.5 text-xs outline-none focus-visible:ring-2',
-                            position === index
-                                ? 'text-foreground font-medium'
-                                : 'text-muted-foreground'
+                            position === index ? 'text-foreground' : 'text-muted-foreground'
                         )}
                     >
                         {t(`level.${level}`)}
@@ -127,11 +125,11 @@ export function ModelPicker({
                     variant="ghost"
                     size="xs"
                     aria-label={t('chat.model')}
-                    className="text-muted-foreground hover:text-foreground max-w-72 rounded-full"
+                    className="text-foreground/85 hover:text-foreground max-w-72 rounded-full font-normal"
                 >
                     {apply.pending && <Spinner />}
                     <span className="truncate">{current?.card.name ?? t('chat.model')}</span>
-                    {summary && <span className="text-muted-foreground">{summary}</span>}
+                    {summary && <span className="text-muted-foreground/80">{summary}</span>}
                     <ChevronDownIcon className="text-muted-foreground" />
                 </Button>
             </PopoverTrigger>
@@ -139,7 +137,7 @@ export function ModelPicker({
                 <div className="flex max-h-72 flex-col gap-0.5 overflow-y-auto">
                     {providers.map(provider => (
                         <div key={provider} className="flex flex-col gap-0.5">
-                            <p className="text-muted-foreground px-2 pt-2 pb-1 text-xs font-medium">
+                            <p className="text-muted-foreground px-2 pt-2 pb-1 text-xs">
                                 {provider}
                             </p>
                             {choices

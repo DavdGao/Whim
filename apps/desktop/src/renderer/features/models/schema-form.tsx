@@ -8,6 +8,7 @@ import { readSchema } from './schema';
 
 import type { FormValue } from './schema';
 
+import { StatusAlert } from '@/components/status-alert';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -45,7 +46,7 @@ export function SchemaForm({
 }: SchemaFormProps) {
     const { t, locale } = useT();
     const parsed = readSchema(schema);
-    if ('error' in parsed) return <p className="text-destructive text-sm">{parsed.error}</p>;
+    if ('error' in parsed) return <StatusAlert tone="error">{parsed.error}</StatusAlert>;
     return (
         <FieldGroup>
             {parsed.properties.map(property => {

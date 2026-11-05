@@ -30,7 +30,7 @@ import type { ChatCard } from '@whimkit/core/contracts';
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { StatusAlert } from '@/components/status-alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -431,16 +431,13 @@ export function ModelDetail({
             </div>
 
             {entry.issues.length > 0 && (
-                <Alert variant="destructive" className="rounded-2xl">
-                    <AlertTitle>{t('models.invalid')}</AlertTitle>
-                    <AlertDescription>
-                        <ul className="list-disc pl-4">
-                            {entry.issues.map(issue => (
-                                <li key={issue}>{issue}</li>
-                            ))}
-                        </ul>
-                    </AlertDescription>
-                </Alert>
+                <StatusAlert tone="error" title={t('models.invalid')}>
+                    <ul className="list-disc pl-4">
+                        {entry.issues.map(issue => (
+                            <li key={issue}>{issue}</li>
+                        ))}
+                    </ul>
+                </StatusAlert>
             )}
 
             {card && <Sheet state={state} card={card} />}

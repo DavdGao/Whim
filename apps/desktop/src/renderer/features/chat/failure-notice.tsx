@@ -1,11 +1,9 @@
-import { AlertCircleIcon } from 'lucide-react';
-
 import { useT } from '../../lib/i18n';
 
 import type { Failure } from '@whimkit/core/contracts';
 import type { ReactNode } from 'react';
 
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { StatusAlert } from '@/components/status-alert';
 
 /**
  * Show a failure: translated category first, provider detail beneath.
@@ -32,10 +30,8 @@ export function FailureNotice({
           )
         : [];
     return (
-        <Alert variant="destructive">
-            <AlertCircleIcon />
-            <AlertTitle>{title}</AlertTitle>
-            <AlertDescription>
+        <StatusAlert tone="error" title={title}>
+            <div className="flex flex-col gap-1">
                 <p>{t(`failure.${failure.category}`)}</p>
                 {parts.length > 0 && (
                     <p className="font-mono text-xs break-all opacity-80">
@@ -43,8 +39,8 @@ export function FailureNotice({
                         {detail?.requestId ? ` · ${detail.requestId}` : ''}
                     </p>
                 )}
-                {action && <div className="mt-2 flex gap-2">{action}</div>}
-            </AlertDescription>
-        </Alert>
+            </div>
+            {action && <div className="mt-2 flex gap-2">{action}</div>}
+        </StatusAlert>
     );
 }

@@ -207,10 +207,7 @@ function SessionRow({
                 type="button"
                 onClick={onSelect}
                 aria-current={selected ? 'page' : undefined}
-                className={cn(
-                    'focus-visible:ring-ring flex min-w-0 flex-1 items-center gap-2 rounded-xl py-2 pr-2 pl-3 text-left text-sm outline-none focus-visible:ring-2',
-                    selected && 'font-medium'
-                )}
+                className="focus-visible:ring-ring flex min-w-0 flex-1 items-center gap-2 rounded-xl py-2 pr-2 pl-3 text-left text-sm outline-none focus-visible:ring-2"
             >
                 <span className="min-w-0 flex-1 truncate">
                     {session.title || t('chat.untitled')}
@@ -288,7 +285,7 @@ export function SessionList({
         <>
             {groupSessions(sessions, new Date()).map(group => (
                 <section key={group.label} className="flex flex-col gap-0.5">
-                    <h3 className="text-muted-foreground px-3 pt-3 pb-1 text-xs font-medium">
+                    <h3 className="text-muted-foreground px-3 pt-3 pb-1 text-xs">
                         {t(group.label)}
                     </h3>
                     {group.sessions.map(session => (

@@ -72,7 +72,7 @@ export function SettingsPage({
                         variant="ghost"
                         className={cn(
                             'h-9 justify-start gap-2.5 rounded-xl px-3',
-                            item.id === tab && 'bg-accent text-accent-foreground font-medium'
+                            item.id === tab && 'bg-accent text-accent-foreground'
                         )}
                         aria-current={item.id === tab ? 'page' : undefined}
                         onClick={() => onTabChange(item.id)}

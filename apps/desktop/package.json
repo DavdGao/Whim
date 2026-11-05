@@ -11,7 +11,6 @@
         "start": "electron ."
     },
     "dependencies": {
-        "@fontsource-variable/geist": "^5.3.0",
         "@streamdown/math": "^1.0.3",
         "@whimkit/agent": "workspace:*",
         "@whimkit/core": "workspace:*",
