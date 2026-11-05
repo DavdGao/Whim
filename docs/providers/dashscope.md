@@ -4,11 +4,14 @@ Verified facts used by `@whimkit/plugin-dashscope`. Re-verify before changing th
 
 ## Sources
 
-| Source                                                                                           | Page updated | Checked    |
-| ------------------------------------------------------------------------------------------------ | ------------ | ---------- |
-| [Responses API](https://www.alibabacloud.com/help/zh/model-studio/qwen-api-via-openai-responses) | 2026-10-29   | 2026-11-04 |
-| [Error codes](https://www.alibabacloud.com/help/zh/model-studio/error-code)                      | 2026-11-04   | 2026-11-04 |
-| [Web extractor](https://help.aliyun.com/zh/model-studio/web-extractor)                           | —            | 2026-11-05 |
+| Source                                                                                                | Page updated | Checked    |
+| ----------------------------------------------------------------------------------------------------- | ------------ | ---------- |
+| [Responses API](https://www.alibabacloud.com/help/zh/model-studio/qwen-api-via-openai-responses)      | 2026-10-29   | 2026-11-04 |
+| [Error codes](https://www.alibabacloud.com/help/zh/model-studio/error-code)                           | 2026-11-04   | 2026-11-04 |
+| [GLM-5.3](https://docs.bailian.console.aliyun.com/zh/model-studio/glm-5-3.md)                         | —            | 2026-11-05 |
+| [Kimi-K3.1-Pro](https://docs.bailian.console.aliyun.com/zh/model-studio/kimi-k3-1-pro.md)             | —            | 2026-11-05 |
+| [DeepSeek-V4.1-Flash](https://docs.bailian.console.aliyun.com/zh/model-studio/deepseek-v4-1-flash.md) | —            | 2026-11-05 |
+| [Web extractor](https://help.aliyun.com/zh/model-studio/web-extractor)                                | —            | 2026-11-05 |
 
 ## Endpoint
 
@@ -23,7 +26,17 @@ Listed with full Responses support (built-in tools): `qwen3.8-max`, `qwen3.8-fla
 ## Thinking
 
 - `reasoning.effort`: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; supported levels and defaults vary by model. It takes precedence over `enable_thinking`, which is deprecated.
-- Default mapping from Whim levels: `off→none`, `low→low`, `medium→medium`, `high→high`, `max→max`. Per-model supported levels are not verified yet.
+- Default mapping from Whim levels: `off→none`, `low→low`, `medium→medium`, `high→high`, `max→max`. Cards override it through `options.effort` where a model's levels differ.
+- Supported `reasoning.effort` per model (Responses API reference, checked 2026-11-05); unlisted values are mapped by the service to a neighbouring level:
+
+| Model                          | Levels                                     | Whim card levels                                                                    |
+| ------------------------------ | ------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `qwen3.8-max`, `qwen3.8-flash` | `none`, `low`, `medium`, `xhigh` (default) | `off`, `low`, `medium`, `high` (sent as `xhigh`)                                    |
+| `deepseek-v4.1-flash`          | `none`, `low`, `high` (default), `max`     | `off`, `low`, `high`, `max`                                                         |
+| `glm-5.3`                      | `low`, `high`, `max` (default)             | `low`, `high`, `max`; thinking cannot be turned off                                 |
+| `kimi-k3.1-pro`                | `low`, `medium`, `high`, `max` (default)   | `low`, `medium`, `high`, `max`; turning thinking off is discouraged and not offered |
+
+- `deepseek-v4.1-flash-1017` is not listed in the effort table; it is assumed to follow `deepseek-v4.1-flash` (unverified).
 
 ## Input
 
@@ -73,7 +86,15 @@ Codes are compared case-insensitively; snake_case aliases map identically. `resp
 
 ## Seed cards
 
-`qwen3.8-max` and `qwen3.8-flash` ship with conservative, unverified limits (262144-token context, 32768 output tokens) and all five thinking levels, because the official model list did not state their limits on 2026-11-04. Only text input is declared until image and PDF delivery are implemented. Users can correct values with a patch file in the `models` directory. The adapter's input budget is 75% of `contextWindow`, below the silent-truncation point.
+`qwen3.8-max` and `qwen3.8-flash` ship with conservative, unverified limits (262144-token context, 32768 output tokens), because the official model list did not state their limits on 2026-11-04.
+
+| Card                       | Context   | Output    | Native tools                              | Documented input (declared: text only) |
+| -------------------------- | --------- | --------- | ----------------------------------------- | -------------------------------------- |
+| `deepseek-v4.1-flash-1017` | 1,000,000 | 393,216   | `web_search`, `web_extractor`             | text, image                            |
+| `kimi-k3.1-pro`            | 1,048,576 | 1,048,576 | `web_search`, `web_extractor`             | text, image                            |
+| `glm-5.3`                  | 1,048,576 | 131,072   | none (model page: web search unsupported) | text                                   |
+
+`code_interpreter`, which DeepSeek and Kimi also support, is not mapped yet. Only text input is declared until image and PDF delivery are implemented. Users can correct values with a patch file in the `models` directory. The adapter's input budget is 75% of `contextWindow`, below the silent-truncation point.
 
 ## Icons
 

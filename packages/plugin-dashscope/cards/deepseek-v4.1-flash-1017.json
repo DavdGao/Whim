@@ -1,0 +1,20 @@
+{
+    "id": "dashscope/deepseek-v4.1-flash-1017",
+    "revision": 1,
+    "kind": "chat",
+    "adapter": "@whimkit/plugin-dashscope#responses",
+    "model": "deepseek-v4.1-flash-1017",
+    "name": "DeepSeek V4.1 Flash",
+    "contextWindow": 1000000,
+    "maxOutputTokens": 393216,
+    "input": {
+        "text/plain": {}
+    },
+    "output": ["text/plain"],
+    "thinking": {
+        "levels": ["off", "low", "high", "max"],
+        "default": "high"
+    },
+    "nativeTools": ["web_search", "web_fetch"],
+    "options": {}
+}

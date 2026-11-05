@@ -1,0 +1,20 @@
+{
+    "id": "dashscope/glm-5.3",
+    "revision": 1,
+    "kind": "chat",
+    "adapter": "@whimkit/plugin-dashscope#responses",
+    "model": "glm-5.3",
+    "name": "GLM-5.3",
+    "contextWindow": 1048576,
+    "maxOutputTokens": 131072,
+    "input": {
+        "text/plain": {}
+    },
+    "output": ["text/plain"],
+    "thinking": {
+        "levels": ["low", "high", "max"],
+        "default": "max"
+    },
+    "nativeTools": [],
+    "options": {}
+}
