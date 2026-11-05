@@ -7,8 +7,8 @@ import { Markdown } from '../../components/markdown';
 import { call } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 
-import { formatDuration } from './duration';
 import { FailureNotice } from './failure-notice';
+import { formatDuration, formatSentAt } from './format';
 import { mathPlugin, normalizeMath } from './math';
 import { MediaView } from './media-view';
 import { PullToLoad } from './pull-to-load';
@@ -49,6 +49,7 @@ import {
     TraceLine,
     TraceTitle,
 } from '@/components/ui/trace';
+import { cn } from '@/lib/utils';
 
 /**
  * Join the text of blocks of one type.
@@ -85,14 +86,12 @@ function mediaOf(blocks: readonly Block[]): MediaBlock[] {
 }
 
 /**
- * The footer under a finished turn: copy its answers and how long it took. Secondary to the
- * answer, so it is muted and small.
- * @param props Footer props.
- * @param props.text Markdown of the turn's answers.
- * @param props.ms How long the turn took, when known.
- * @returns The footer.
+ * A small muted copy button for a message footer.
+ * @param props The text.
+ * @param props.text What to copy.
+ * @returns The button.
  */
-function TurnFooter({ text, ms }: { text: string; ms?: number }) {
+function CopyButton({ text }: { text: string }) {
     const { t } = useT();
     const [copied, setCopied] = useState(false);
     useEffect(() => {
@@ -101,31 +100,41 @@ function TurnFooter({ text, ms }: { text: string; ms?: number }) {
         return () => clearTimeout(timer);
     }, [copied]);
     return (
-        <MessageActions className="text-muted-foreground -ml-1.5 text-xs">
-            {text && (
-                <MessageAction
-                    size="icon-xs"
-                    className="text-muted-foreground"
-                    tooltip={copied ? t('common.copied') : t('common.copy')}
-                    onClick={() =>
-                        void navigator.clipboard.writeText(text).then(
-                            () => setCopied(true),
-                            () => toast.error(t('error.generic'))
-                        )
-                    }
-                >
-                    {copied ? (
-                        <CheckIcon className="size-3.5" />
-                    ) : (
-                        <CopyIcon className="size-3.5" />
-                    )}
-                </MessageAction>
+        <MessageAction
+            size="icon-xs"
+            className="text-muted-foreground"
+            tooltip={copied ? t('common.copied') : t('common.copy')}
+            onClick={() =>
+                void navigator.clipboard.writeText(text).then(
+                    () => setCopied(true),
+                    () => toast.error(t('error.generic'))
+                )
+            }
+        >
+            {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+        </MessageAction>
+    );
+}
+
+/**
+ * A message footer: secondary, so it is muted and small, and it appears only while the
+ * message is hovered or focused.
+ * @param props Footer props.
+ * @param props.text What the copy button copies; no button when empty.
+ * @param props.note Text after the button, such as a time.
+ * @param props.end Whether it sits at the end of the row, under a user message.
+ * @returns The footer.
+ */
+function MessageFooter({ text, note, end }: { text: string; note?: string; end?: boolean }) {
+    return (
+        <MessageActions
+            className={cn(
+                'text-muted-foreground text-xs opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100',
+                end ? 'flex-row-reverse self-end' : '-ml-1.5'
             )}
-            {ms !== undefined && (
-                <span className="px-1">
-                    {t('chat.turnTime', { duration: formatDuration(ms, t) })}
-                </span>
-            )}
+        >
+            {text && <CopyButton text={text} />}
+            {note && <span className="px-1 tabular-nums">{note}</span>}
         </MessageActions>
     );
 }
@@ -182,6 +191,7 @@ function ReasoningLine({ text, running, ms }: { text: string; running: boolean; 
  * @param props.media Files attached to the message, with the session that stores them.
  * @param props.media.sessionId Session that stores the files.
  * @param props.media.blocks The attachments.
+ * @param props.at When it was sent.
  * @param props.badge Optional status badge.
  * @param props.onRemove Optional remove action.
  * @returns The message.
@@ -189,15 +199,17 @@ function ReasoningLine({ text, running, ms }: { text: string; running: boolean; 
 function UserBubble({
     text,
     media,
+    at,
     badge,
     onRemove,
 }: {
     text: string;
     media: { sessionId: string; blocks: readonly MediaBlock[] };
+    at: string;
     badge?: string;
     onRemove?: () => Promise<unknown>;
 }) {
-    const { t } = useT();
+    const { t, locale } = useT();
     return (
         <>
             {media.blocks.length > 0 && (
@@ -222,6 +234,7 @@ function UserBubble({
                         </div>
                     )}
                 </MessageContent>
+                <MessageFooter text={text} note={formatSentAt(at, locale, t)} end />
             </Message>
         </>
     );
@@ -512,6 +525,7 @@ export function Transcript({
                 key={entry.item.id}
                 text={textOf(entry.item.blocks, 'text')}
                 media={{ sessionId: view.sessionId, blocks: mediaOf(entry.item.blocks) }}
+                at={entry.at}
             />
         ) : entry.item.type === 'message' ? (
             <AssistantOutput
@@ -569,10 +583,15 @@ export function Transcript({
                             key={row.entries[0]?.seq ?? 'working'}
                             footer={
                                 over && row.entries.length > 0 ? (
-                                    <TurnFooter
+                                    <MessageFooter
                                         text={turnText(row.entries)}
                                         {...(first && last
-                                            ? { ms: Date.parse(last) - Date.parse(first) }
+                                            ? {
+                                                  note: formatDuration(
+                                                      Date.parse(last) - Date.parse(first),
+                                                      t
+                                                  ),
+                                              }
                                             : {})}
                                     />
                                 ) : undefined
@@ -619,6 +638,7 @@ export function Transcript({
                             key={item.deliveryId}
                             text={textOf(item.item.blocks, 'text')}
                             media={{ sessionId: view.sessionId, blocks: mediaOf(item.item.blocks) }}
+                            at={item.at}
                             badge={t('chat.pending')}
                             onRemove={() =>
                                 call('session.withdraw', {

@@ -14,7 +14,10 @@ import type {
 export interface HistoryEntry {
     readonly seq: number;
     readonly item: ContextItem;
-    /** When the record that added it was committed. */
+    /**
+     * When it entered the session: for delivered input, when the delivery was accepted (the
+     * user's send time); for output and results, when they were committed.
+     */
     readonly at: string;
     /** Set for assistant output: whether the attempt completed or was interrupted. */
     readonly status?: 'completed' | 'interrupted';
@@ -25,6 +28,8 @@ export interface PendingDelivery {
     readonly deliveryId: string;
     readonly placement: 'next-step' | 'next-run';
     readonly item: ContextItem;
+    /** When the delivery was accepted. */
+    readonly at: string;
 }
 
 export interface Epoch {
@@ -248,6 +253,7 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
                 deliveryId: body.deliveryId,
                 placement: body.placement,
                 item: body.item,
+                at: record.createdAt,
             });
             return { ...base, inbox };
         }
@@ -270,7 +276,7 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
                 if (!pending)
                     throw new InvalidJournalError('Consumed delivery is not pending.', record.seq);
                 inbox.delete(id);
-                history.push({ seq: record.seq, at: record.createdAt, item: pending.item });
+                history.push({ seq: record.seq, at: pending.at, item: pending.item });
             }
             return {
                 ...base,
