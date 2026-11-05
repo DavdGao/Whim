@@ -1,4 +1,4 @@
-import { FolderIcon, FolderOpenIcon, FolderXIcon } from 'lucide-react';
+import { FolderIcon, FolderOpenIcon, HouseIcon } from 'lucide-react';
 
 import { chooseDirectory } from '../../lib/client';
 import { useT } from '../../lib/i18n';
@@ -25,18 +25,22 @@ function folderName(path: string): string {
  * The chat's workspace folder: a picker before the chat starts, read-only afterwards.
  * @param props Picker props.
  * @param props.workspace The chosen folder.
+ * @param props.fallback The folder used when none is chosen.
  * @param props.onChange Set or clear the folder; absent once the chat exists.
  * @returns The picker.
  */
 export function WorkspacePicker({
     workspace,
+    fallback,
     onChange,
 }: {
     workspace: string | undefined;
+    fallback: string;
     onChange?: (workspace: string | undefined) => void;
 }) {
     const { t } = useT();
-    const label = workspace ? folderName(workspace) : t('chat.workspace.none');
+    const effective = onChange ? (workspace ?? fallback) : workspace;
+    const label = effective ? folderName(effective) : t('chat.workspace.none');
     if (!onChange)
         return (
             <span
@@ -56,7 +60,7 @@ export function WorkspacePicker({
                     size="sm"
                     className="max-w-48"
                     aria-label={t('chat.workspace')}
-                    title={workspace}
+                    title={effective}
                 >
                     <FolderIcon />
                     <span className="truncate">{label}</span>
@@ -74,7 +78,7 @@ export function WorkspacePicker({
                 </DropdownMenuItem>
                 {workspace && (
                     <DropdownMenuItem onSelect={() => onChange(undefined)}>
-                        <FolderXIcon />
+                        <HouseIcon />
                         {t('chat.workspace.clear')}
                     </DropdownMenuItem>
                 )}

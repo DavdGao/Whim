@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { after, before, describe, it } from 'node:test';
 
-import { createWebTools } from './tools.js';
+import { createFetchTool } from './fetch-tool.js';
 
 import type { FetchLike } from './http.js';
 import type { ToolContext } from '@whimkit/core/plugin';
@@ -88,8 +88,8 @@ describe('WebFetch', () => {
      * Build the tool with the real fetch.
      * @returns The WebFetch tool.
      */
-    function tool(): ReturnType<typeof createWebTools>['webFetch'] {
-        return createWebTools({ fetch, version: '9.9.9' }).webFetch;
+    function tool(): ReturnType<typeof createFetchTool> {
+        return createFetchTool({ fetch, version: '9.9.9' });
     }
 
     it('declares network access and the standard id', () => {
@@ -171,11 +171,11 @@ describe('WebFetch', () => {
     });
 
     it('times out and honors cancellation', async () => {
-        const webFetch = createWebTools({
+        const webFetch = createFetchTool({
             fetch: hangingFetch,
             version: '1',
             timeoutMs: 20,
-        }).webFetch;
+        });
         const timedOut = await webFetch.execute({ url: 'https://slow.test/' }, contextWith());
         assert.deepEqual(timedOut, {
             content: 'Request timed out after 20 ms: https://slow.test/',

@@ -24,7 +24,7 @@ Whim is a macOS Electron workspace built with TypeScript, React, and pnpm worksp
 
 ## Package and module boundaries
 
-Keep the foundational packages `@whimkit/core` and `@whimkit/agent`, plus protocol libraries such as `@whimkit/openai-protocol`, assembled by `apps/desktop`. Everything outside Core is a plugin: providers, credential types, processors, tools, and context sources. Application pages belong in feature directories of `apps/desktop`.
+Keep the foundational packages `@whimkit/core`, `@whimkit/agent`, and `@whimkit/tools` (the base tools every agent has), plus protocol libraries such as `@whimkit/openai-protocol`, assembled by `apps/desktop`. Everything else is a plugin: providers, credential types, processors, additional tools (such as an MCP bridge), and context sources. Application pages belong in feature directories of `apps/desktop`.
 
 - Keep contracts in core. Use public subpath exports for browser-safe types, clients, plugin interfaces, and the Node runtime. Do not create a package for every internal module.
 - Model contracts live in `@whimkit/core/contracts` and must not depend on Electron or the core runtime. Agent accesses persistence and capabilities through ports; core must not import agent. Desktop selects and injects implementations.
