@@ -203,14 +203,20 @@ class DashScopeSession implements ChatSession {
             adjustable && request.thinking
                 ? (this.#effort[request.thinking] ?? defaultEffort[request.thinking])
                 : undefined;
+        // The service rejects web_extractor in non-thinking mode ("Normal mode does not support
+        // web_extractor"), so a request with thinking off searches without extraction.
+        const nativeTools =
+            effort === 'none'
+                ? request.nativeTools.filter(id => id !== 'web_fetch')
+                : request.nativeTools;
         const body = JSON.stringify({
             model: this.card.model,
             instructions: request.system,
             input: toResponsesInput(request.messages, adapterId, { replayNative }),
-            ...(request.tools.length || request.nativeTools.length
+            ...(request.tools.length || nativeTools.length
                 ? {
                       tools: [
-                          ...request.nativeTools.flatMap(id =>
+                          ...nativeTools.flatMap(id =>
                               nativeToolTypes[id] ? [{ type: nativeToolTypes[id] }] : []
                           ),
                           ...toResponsesTools(request.tools),

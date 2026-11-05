@@ -36,6 +36,9 @@ Listed with full Responses support (built-in tools): `qwen3.8-max`, `qwen3.8-fla
 
 Whim mapping: `web_search → web_search`, `web_fetch → web_extractor`. `code_interpreter` is a plugin-namespaced native tool.
 
+- The documentation states only that `web_extractor` requires `web_search`. The live service also rejects it in non-thinking mode: with `reasoning.effort: none`, `qwen3.8-max` returned `400 InternalError.Algo.InvalidParameter: Normal mode does not support web_extractor. Please set enable_thinking to true.` (observed 2026-11-05). The adapter omits `web_extractor` from requests whose thinking level maps to `none`; web search stays available.
+- The documentation requires thinking mode for `code_interpreter` on `qwen3.8-max`, `qwen3.8-flash`, and `qwen3.7-max` variants.
+
 ## Streaming and state
 
 - Events include `response.output_text.delta`, `response.reasoning_text.delta`, `response.output_item.added|done`, tool progress events (`web_search_call.*`, `code_interpreter_call.*`, …), `response.incomplete`, and `response.completed` as the terminal event. Web extraction has no progress events; it is observed through output items.

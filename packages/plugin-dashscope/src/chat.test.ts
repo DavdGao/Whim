@@ -253,6 +253,33 @@ describe('DashScope Responses adapter', () => {
         ]);
     });
 
+    it('drops web_extractor when thinking is off', async () => {
+        const { transport, requests } = fakeFetch(() =>
+            sse([{ type: 'response.completed', response: { status: 'completed' } }])
+        );
+        const messages: ChatRequest['messages'] = [
+            { role: 'user', blocks: [{ type: 'text', text: 'hi' }] },
+        ];
+        const base = {
+            system: 'sys',
+            messages,
+            tools: [],
+            nativeTools: ['web_search', 'web_fetch'],
+        };
+        await run(transport, undefined, { ...base, thinking: 'off' });
+        await run(transport, undefined, { ...base, thinking: 'low' });
+        assert.deepEqual(
+            requests.map(request => {
+                const body = request.body as { reasoning: unknown; tools: unknown };
+                return [body.reasoning, body.tools];
+            }),
+            [
+                [{ effort: 'none' }, [{ type: 'web_search' }]],
+                [{ effort: 'low' }, [{ type: 'web_search' }, { type: 'web_extractor' }]],
+            ]
+        );
+    });
+
     it('maps HTTP failures with provider detail', async () => {
         const unauthorized = await run(
             fakeFetch(
