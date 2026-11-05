@@ -28,6 +28,7 @@ import {
     localeSchema,
     methodSchemas,
     requestEnvelopeSchema,
+    userNameSchema,
 } from '../shared/ipc.js';
 
 import { gitStatus } from './git.js';
@@ -52,6 +53,10 @@ import type { MessagePortMain } from 'electron';
 const parentPort = process.parentPort;
 const maxConcurrentRuns = 4;
 /** History entries sent with a session snapshot and per earlier page. */
+/** A saved profile, which may still hold the user name it carried before that moved to General. */
+const legacyProfileSchema = agentProfileSchema.extend({
+    userName: z.string().trim().min(1).max(60).optional(),
+});
 const historyPageSize = 60;
 const defaultProfile: AgentProfile = {
     name: 'Whim',
@@ -63,6 +68,7 @@ const defaultProfile: AgentProfile = {
  * the session's life), and the environment as observed now, including the working folder. Frozen
  * with the epoch; later folder changes reach the model as notices, so the prefix stays intact.
  * @param profile The agent profile; `{name}` in its prompt becomes the agent's name.
+ * @param userName What the user asked agents to call them, if anything.
  * @param sessionDir The session's own folder.
  * @param workspace The session's working folder.
  * @param tools Whether any tools are offered.
@@ -70,6 +76,7 @@ const defaultProfile: AgentProfile = {
  */
 function systemPrompt(
     profile: AgentProfile,
+    userName: string | undefined,
     sessionDir: string,
     workspace: string | undefined,
     tools: boolean
@@ -77,7 +84,7 @@ function systemPrompt(
     const now = new Date();
     const lines = [
         profile.systemPrompt.replaceAll('{name}', profile.name),
-        ...(profile.userName ? ['', `Address the user as ${profile.userName}.`] : []),
+        ...(userName ? ['', `Address the user as ${userName}.`] : []),
         '',
         `<session-folder uri="${pathToFileURL(`${sessionDir}/`).href}">`,
         "Whim keeps this chat's files here:",
@@ -354,10 +361,17 @@ class Backend {
                 return null;
             case 'settings.agent': {
                 const { profile } = methodSchemas[method].parse(raw);
+                // Keep a user name the old profile carried before overwriting it.
+                if ((await this.store.getSetting('user.name')) === undefined)
+                    await this.store.setSetting('user.name', (await this.#userName()) ?? null);
                 await this.store.setSetting('agent.profile', profile);
                 this.#emit({ type: 'state' });
                 return null;
             }
+            case 'settings.userName':
+                await this.store.setSetting('user.name', methodSchemas[method].parse(raw).name);
+                this.#emit({ type: 'state' });
+                return null;
             case 'settings.chatSlot':
                 await this.store.setSetting('slot.chat', methodSchemas[method].parse(raw).slot);
                 this.#emit({ type: 'state' });
@@ -487,10 +501,11 @@ class Backend {
     async state(): Promise<AppState> {
         const locale = localeSchema.safeParse(await this.store.getSetting('locale'));
         const slot = chatSlotSchema.safeParse(await this.store.getSetting('slot.chat'));
-        const savedProfile = agentProfileSchema.safeParse(
+        const savedProfile = legacyProfileSchema.safeParse(
             await this.store.getSetting('agent.profile')
         ).success;
         const profile = await this.#profile();
+        const userName = await this.#userName();
         const pinned = await this.#pinned();
         return {
             locale: locale.success ? locale.data : 'en',
@@ -498,6 +513,7 @@ class Backend {
                 ? [{ kind: 'database-moved', path: this.store.movedAside }]
                 : [],
             resumeAfterRestart: (await this.store.getSetting('agent.resumeAfterRestart')) === true,
+            ...(userName ? { userName } : {}),
             ...(slot.success ? { chatSlot: slot.data } : {}),
             userCardsDir: this.catalog.userDir,
             baseTools: this.#baseTools.map(tool => tool.name),
@@ -600,8 +616,22 @@ class Backend {
      * @returns The profile.
      */
     async #profile(): Promise<AgentProfile> {
-        const saved = agentProfileSchema.safeParse(await this.store.getSetting('agent.profile'));
-        return saved.success ? saved.data : defaultProfile;
+        const saved = legacyProfileSchema.safeParse(await this.store.getSetting('agent.profile'));
+        if (!saved.success) return defaultProfile;
+        const { userName: _userName, ...profile } = saved.data;
+        return profile;
+    }
+
+    /**
+     * What agents call the user. Before it became a general setting it was part of the agent
+     * profile, which is read when the general setting was never saved.
+     * @returns The name, or undefined when none is set.
+     */
+    async #userName(): Promise<string | undefined> {
+        const saved = await this.store.getSetting('user.name');
+        if (saved !== undefined) return userNameSchema.safeParse(saved).data ?? undefined;
+        const legacy = legacyProfileSchema.safeParse(await this.store.getSetting('agent.profile'));
+        return legacy.data?.userName;
     }
 
     /**
@@ -637,6 +667,7 @@ class Backend {
             epochId: randomUUID(),
             system: systemPrompt(
                 profile,
+                await this.#userName(),
                 this.tools.sessionDir(sessionId),
                 workspace,
                 tools.length + nativeTools.length > 0
