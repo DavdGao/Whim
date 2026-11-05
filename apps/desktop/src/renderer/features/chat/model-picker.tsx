@@ -19,6 +19,23 @@ import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
 /**
+ * The Thinking heading with the current choice on the same line. The label is muted and the
+ * choice uses the primary color, so a theme's accent marks what is selected.
+ * @param props Header props.
+ * @param props.value The current choice, as text.
+ * @returns The header.
+ */
+function ThinkingHeader({ value }: { value: string }) {
+    const { t } = useT();
+    return (
+        <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">{t('chat.thinking')}</span>
+            <span className="text-primary font-medium">{value}</span>
+        </div>
+    );
+}
+
+/**
  * A segmented track for thinking levels: click a label or drag the thumb; the change is sent
  * when the thumb is released.
  * @param props Track props.
@@ -41,7 +58,8 @@ function ThinkingTrack({
     const [dragging, setDragging] = useState<number | undefined>();
     const index = dragging ?? committed;
     return (
-        <div className="flex flex-col gap-3 px-1">
+        <div className="flex flex-col gap-3">
+            <ThinkingHeader value={t(`level.${levels[index] ?? 'off'}`)} />
             <Slider
                 min={0}
                 max={levels.length - 1}
@@ -56,7 +74,7 @@ function ThinkingTrack({
                     if (level && level !== value) onChange(level);
                 }}
             />
-            <div className="flex justify-between">
+            <div className="-mx-1.5 flex justify-between">
                 {levels.map((level, position) => (
                     <button
                         key={level}
@@ -64,7 +82,7 @@ function ThinkingTrack({
                         onClick={() => level !== value && onChange(level)}
                         className={cn(
                             'hover:text-foreground focus-visible:ring-ring rounded-full px-1.5 text-xs outline-none focus-visible:ring-2',
-                            position === index ? 'text-foreground' : 'text-muted-foreground'
+                            position === index ? 'text-primary' : 'text-muted-foreground'
                         )}
                     >
                         {t(`level.${level}`)}
@@ -182,10 +200,9 @@ export function ModelPicker({
                     </p>
                 )}
                 <Separator className="my-2" />
-                <div className="flex flex-col gap-3 px-2 pt-1 pb-2">
-                    <p className="text-xs font-medium">{t('chat.thinking')}</p>
+                <div className="px-2 pt-1 pb-2">
                     {thinking && 'fixed' in thinking ? (
-                        <p className="text-muted-foreground text-xs">{t('chat.thinking.fixed')}</p>
+                        <ThinkingHeader value={t('chat.thinking.fixed')} />
                     ) : levels.length > 1 && slot ? (
                         <ThinkingTrack
                             levels={levels}
@@ -193,11 +210,13 @@ export function ModelPicker({
                             onChange={next => void apply.run({ ...slot, thinking: next })}
                         />
                     ) : (
-                        <p className="text-muted-foreground text-xs">
-                            {levels.length === 1 && levels[0]
-                                ? t(`level.${levels[0]}`)
-                                : t('model.none')}
-                        </p>
+                        <ThinkingHeader
+                            value={
+                                levels.length === 1 && levels[0]
+                                    ? t(`level.${levels[0]}`)
+                                    : t('model.none')
+                            }
+                        />
                     )}
                 </div>
             </PopoverContent>
