@@ -51,6 +51,8 @@ export interface ComposerProps {
     readonly onStop: () => void;
     /** The chat's folder; the default folder is not shown. */
     readonly workspace: string | undefined;
+    /** The chat's own working folder, shown as no choice. */
+    readonly defaultWorkspace?: string;
     /** The latest reported usage, for the context indicator. */
     readonly usage: Usage | undefined;
     /** The agent's display name, used in the placeholder. */
@@ -74,6 +76,7 @@ export interface ComposerProps {
  * @param props.onSend Send a message.
  * @param props.onStop Stop the running agent.
  * @param props.workspace The chat's folder.
+ * @param props.defaultWorkspace The chat's own working folder.
  * @param props.onWorkspaceChange Choose or reset the folder; not while running.
  * @param props.gitRefresh Changes when the folder's git status may have changed.
  * @param props.usage Latest usage.
@@ -89,6 +92,7 @@ export function Composer({
     onSend,
     onStop,
     workspace,
+    defaultWorkspace,
     onWorkspaceChange,
     usage,
     agentName,
@@ -104,7 +108,7 @@ export function Composer({
     const current = choices.find(choice => choice.card.id === slot?.cardId);
     const placeholder = t('chat.placeholder', { name: agentName });
     const chosen =
-        workspace !== undefined && workspace !== state.defaultWorkspace ? workspace : undefined;
+        workspace !== undefined && workspace !== defaultWorkspace ? workspace : undefined;
 
     // Measured on a ghost laid out beside the buttons: measuring the textarea itself would flip
     // between layouts, since stacking widens it.

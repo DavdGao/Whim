@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { Agent, rendererVersion } from '@whimkit/agent';
 import {
@@ -56,15 +56,18 @@ const defaultProfile: AgentProfile = {
 };
 
 /**
- * The system prompt of a new epoch: the profile's instructions plus the environment as
- * observed now. Frozen with the epoch; it changes only at compaction or a model switch.
+ * The system prompt of a new epoch: the profile's instructions, the session's folder (fixed for
+ * the session's life), and the environment as observed now, including the working folder. Frozen
+ * with the epoch; later folder changes reach the model as notices, so the prefix stays intact.
  * @param profile The agent profile; `{name}` in its prompt becomes the agent's name.
- * @param workspace The session's workspace.
+ * @param sessionDir The session's own folder.
+ * @param workspace The session's working folder.
  * @param tools Whether any tools are offered.
  * @returns The prompt.
  */
 function systemPrompt(
     profile: AgentProfile,
+    sessionDir: string,
     workspace: string | undefined,
     tools: boolean
 ): string {
@@ -73,12 +76,21 @@ function systemPrompt(
         profile.systemPrompt.replaceAll('{name}', profile.name),
         ...(profile.userName ? ['', `Address the user as ${profile.userName}.`] : []),
         '',
+        `<session-folder uri="${pathToFileURL(`${sessionDir}/`).href}">`,
+        "Whim keeps this chat's files here:",
+        '- workspace/ is your working folder while the user has not chosen one: create files and scripts there.',
+        '- media/ holds files the user attached and media tools returned.',
+        '- offload/ holds the full output of long tool results.',
+        '- jobs/ holds the output of background jobs.',
+        'Whim manages media/, offload/, and jobs/; read them, but do not change them. The whole folder is deleted with the chat, so put anything the user wants to keep in a folder they chose.',
+        '</session-folder>',
+        '',
         `<environment observed-at="${now.toISOString()}">`,
         `Date: ${now.toISOString().slice(0, 10)}`,
         `Platform: ${process.platform}`,
         workspace
-            ? `Workspace: ${workspace} (relative paths resolve here)`
-            : 'Workspace: none; file and shell tools are not available in this chat.',
+            ? `Working folder: ${workspace} (relative paths resolve here; the user may change it later, and you will be told)`
+            : 'Working folder: none; file and shell tools are not available in this chat.',
         '</environment>',
     ];
     if (tools)
@@ -213,7 +225,6 @@ class Backend {
      * @param models Adapter binding.
      * @param userData The application data directory; session files live in `sessions/`.
      * @param version Application version.
-     * @param defaultWorkspace The folder a chat works in when the user picks none.
      */
     constructor(
         readonly store: Store,
@@ -222,8 +233,7 @@ class Backend {
         readonly credentials: CredentialService,
         readonly models: ModelService,
         userData: string,
-        version: string,
-        readonly defaultWorkspace: string
+        version: string
     ) {
         this.#baseTools = baseTools(version);
         this.#stagingDir = join(userData, 'staging');
@@ -462,7 +472,6 @@ class Backend {
             resumeAfterRestart: (await this.store.getSetting('agent.resumeAfterRestart')) === true,
             ...(slot.success ? { chatSlot: slot.data } : {}),
             userCardsDir: this.catalog.userDir,
-            defaultWorkspace: this.defaultWorkspace,
             baseTools: this.#baseTools.map(tool => tool.name),
             plugins: this.host.statuses().map(status => ({
                 id: status.id,
@@ -518,7 +527,11 @@ class Backend {
      */
     async snapshot(sessionId: string): Promise<SessionSnapshot> {
         const { inbox, ...view } = await this.store.view(sessionId);
-        return { ...view, pending: [...inbox.values()] };
+        return {
+            ...view,
+            pending: [...inbox.values()],
+            defaultWorkspace: this.defaultWorkspace(sessionId),
+        };
     }
 
     /**
@@ -558,10 +571,11 @@ class Backend {
     /**
      * The tool set and prompt of a new epoch.
      * @param card The card the epoch uses.
+     * @param sessionId
      * @param workspace The session's workspace.
      * @returns Epoch fields.
      */
-    async #epoch(card: ChatCard, workspace: string | undefined) {
+    async #epoch(card: ChatCard, sessionId: string, workspace: string | undefined) {
         // Provider tools the adapter runs as separate calls keep the local tool's declaration, so
         // the tool list depends only on the card and never on per-request options like thinking.
         const separate = this.host.chatAdapters.get(card.adapter)?.adapter.separateTools ?? [];
@@ -576,7 +590,12 @@ class Backend {
         const profile = await this.#profile();
         return {
             epochId: randomUUID(),
-            system: systemPrompt(profile, workspace, tools.length + nativeTools.length > 0),
+            system: systemPrompt(
+                profile,
+                this.tools.sessionDir(sessionId),
+                workspace,
+                tools.length + nativeTools.length > 0
+            ),
             card: freeze(card),
             renderer: rendererVersion,
             tools,
@@ -591,7 +610,8 @@ class Backend {
      * @param workspace An absolute, existing directory.
      */
     async setWorkspace(sessionId: string, workspace: string): Promise<void> {
-        if (workspace === this.defaultWorkspace) await mkdir(workspace, { recursive: true });
+        if (workspace === this.defaultWorkspace(sessionId))
+            await mkdir(workspace, { recursive: true });
         const info = isAbsolute(workspace) ? await stat(workspace).catch(() => null) : null;
         if (!info?.isDirectory())
             throw new StoreError('invalid', 'The workspace folder does not exist.');
@@ -607,6 +627,15 @@ class Backend {
     }
 
     /**
+     * The working folder of a session whose user chose none: `workspace/` in its own folder.
+     * @param sessionId The session.
+     * @returns The absolute folder path.
+     */
+    defaultWorkspace(sessionId: string): string {
+        return join(this.tools.sessionDir(sessionId), 'workspace');
+    }
+
+    /**
      * Create a session from a chat slot.
      * @param slot Credential, card, and thinking level.
      * @param chosen Absolute directory the session works in; the default folder when absent.
@@ -618,9 +647,10 @@ class Backend {
             const info = isAbsolute(chosen) ? await stat(chosen).catch(() => null) : null;
             if (!info?.isDirectory())
                 throw new StoreError('invalid', 'The workspace folder does not exist.');
-        } else await mkdir(this.defaultWorkspace, { recursive: true });
-        const workspace = chosen ?? this.defaultWorkspace;
+        }
         const sessionId = randomUUID();
+        const workspace = chosen ?? this.defaultWorkspace(sessionId);
+        if (chosen === undefined) await mkdir(workspace, { recursive: true });
         await this.store.execute({
             type: 'create',
             sessionId,
@@ -629,7 +659,7 @@ class Backend {
             credentialId: slot.credentialId,
             ...(slot.thinking ? { thinking: slot.thinking } : {}),
             workspace,
-            epoch: await this.#epoch(card, workspace),
+            epoch: await this.#epoch(card, sessionId, workspace),
         });
         await this.store.setSetting('slot.chat', slot);
         return sessionId;
@@ -651,7 +681,7 @@ class Backend {
             sessionId,
             operationId: randomUUID(),
             // The prefix changes with the model anyway, so the tool set and environment refresh.
-            epoch: await this.#epoch(card, view.workspace),
+            epoch: await this.#epoch(card, sessionId, view.workspace),
         });
         if (credentialId !== view.credentialId)
             await this.store.execute({
@@ -1016,8 +1046,7 @@ async function start(userData: string, version: string): Promise<void> {
             credentials,
             new ModelService(host, credentials),
             userData,
-            version,
-            join(homedir(), 'Whim')
+            version
         );
         await backend.recover();
         for (const port of pendingPorts.splice(0)) backend.attach(port);

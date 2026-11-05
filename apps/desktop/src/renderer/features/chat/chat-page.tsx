@@ -77,7 +77,7 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
         if (!view) return setWorkspace(next);
         void call('session.setWorkspace', {
             sessionId: view.sessionId,
-            workspace: next ?? state.defaultWorkspace,
+            workspace: next ?? session.defaultWorkspace ?? view.workspace ?? '',
         }).catch(error => notify(error, t('error.generic')));
     };
     const send = async (text: string, attachments: readonly { sha256: string; name: string }[]) => {
@@ -206,6 +206,9 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                                 onSlotChange={changeSlot}
                                 onSend={send}
                                 workspace={view ? view.workspace : workspace}
+                                {...(session.defaultWorkspace
+                                    ? { defaultWorkspace: session.defaultWorkspace }
+                                    : {})}
                                 usage={view?.lastUsage}
                                 agentName={state.agent.name}
                                 onWorkspaceChange={changeWorkspace}
