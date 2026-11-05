@@ -1133,10 +1133,12 @@ class Backend {
  */
 function bundledPlugins(): { dir: string; source: 'bundled' }[] {
     const require = createRequire(import.meta.url);
-    return ['@whimkit/plugin-dashscope', '@whimkit/plugin-tavily'].map(name => ({
-        dir: dirname(require.resolve(`${name}/package.json`)),
-        source: 'bundled' as const,
-    }));
+    return ['@whimkit/plugin-dashscope', '@whimkit/plugin-tavily', '@whimkit/plugin-typesafe'].map(
+        name => ({
+            dir: dirname(require.resolve(`${name}/package.json`)),
+            source: 'bundled' as const,
+        })
+    );
 }
 
 /** Text attachments are inlined into the prompt, so they stay small. */

@@ -16,6 +16,7 @@
         "@whimkit/core": "workspace:*",
         "@whimkit/plugin-dashscope": "workspace:*",
         "@whimkit/plugin-tavily": "workspace:*",
+        "@whimkit/plugin-typesafe": "workspace:*",
         "@whimkit/tools": "workspace:*",
         "ai": "^7.0.162",
         "class-variance-authority": "^0.7.1",
