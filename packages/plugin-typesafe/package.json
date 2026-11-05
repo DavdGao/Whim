@@ -1,0 +1,40 @@
+{
+    "name": "@whimkit/plugin-typesafe",
+    "version": "0.1.0",
+    "type": "module",
+    "whim": {
+        "host": "./dist/host.js",
+        "category": "models",
+        "cards": "./cards",
+        "locales": "./locales",
+        "icon": "./icons/typesafe.svg"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/host.d.ts",
+            "import": "./dist/host.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "dist",
+        "cards",
+        "locales",
+        "icons"
+    ],
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "test": "node --test \"dist/**/*.test.js\""
+    },
+    "dependencies": {
+        "zod": "^4.1.12"
+    },
+    "peerDependencies": {
+        "@whimkit/core": "0.1.0"
+    },
+    "devDependencies": {
+        "@whimkit/core": "workspace:*",
+        "@types/node": "^24.10.0"
+    }
+}

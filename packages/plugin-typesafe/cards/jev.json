@@ -1,0 +1,8 @@
+{
+    "id": "typesafe/jev",
+    "revision": 1,
+    "kind": "decision",
+    "adapter": "@whimkit/plugin-typesafe#system-one",
+    "model": "jev-latest",
+    "name": "Jev"
+}

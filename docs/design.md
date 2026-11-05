@@ -8,7 +8,7 @@ Everything outside Core and the base tools (`@whimkit/tools`, part of the harnes
 
 The first release ships:
 
-- One model provider plugin, DashScope (Alibaba Cloud Model Studio), with a Chat adapter over the Responses API. A Decision adapter (TypeSafe System One) follows for automatic tool review.
+- One model provider plugin, DashScope (Alibaba Cloud Model Studio), with a Chat adapter over the Responses API. One Decision provider plugin, TypeSafe, with a System One adapter for automatic tool review ([providers/typesafe.md](providers/typesafe.md)).
 - A conversation agent with streaming, Stop-and-continue, error classification and retries, compaction, prompt-cache-preserving context sources, skills, file memory, local tools, background jobs, and permissions. Delivery order is in [roadmap.md](roadmap.md).
 - An application shell with Chat, Models, Plugins, and Settings pages in English and Simplified Chinese.
 

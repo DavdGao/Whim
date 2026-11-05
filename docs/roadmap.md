@@ -78,7 +78,8 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [ ] Package the ripgrep binary outside the asar archive when building the macOS app
 - [ ] Live DashScope check of function calling with thinking models (reasoning item replay)
 - [x] Auto mode: a reviewer (Chat with a `decide` tool, or a Decision model) answers asks first, falling back to the user; recorded with usage
-- [ ] Decision provider plugin (TypeSafe System One)
+- [x] Decision provider plugin (TypeSafe System One): `typesafe/jev`, verified against the OpenAPI contract with fixtures and a mock server
+- [ ] Live TypeSafe check once an account is available
 - [ ] Persistent permission rules in Settings, with a Bash parser that matches each simple command of a compound one
 
 ## Later

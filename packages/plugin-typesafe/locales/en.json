@@ -1,0 +1,8 @@
+{
+    "plugin.name": "TypeSafe",
+    "plugin.description": "Decision models that return calibrated choices, used to review tool calls automatically.",
+    "credential.@whimkit/plugin-typesafe#api-key": "TypeSafe API key",
+    "schema.@whimkit/plugin-typesafe#api-key./apiKey.title": "API key",
+    "schema.@whimkit/plugin-typesafe#api-key./baseUrl.title": "Base URL",
+    "schema.@whimkit/plugin-typesafe#api-key./baseUrl.description": "Leave empty for https://api.typesafe.ai."
+}
