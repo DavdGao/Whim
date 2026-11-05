@@ -229,9 +229,11 @@ A completed attempt may end with `tool_call` blocks `{ callId, name, arguments }
 1. **Validate.** Unknown tool, unparsable arguments, or schema errors produce an error result without running anything.
 2. **Permit** (§10). An ask commits `permission.requested`, and the run waits for `permission.decided`.
 3. **Start.** `tool.started { callId, jobId }` is committed before execution.
-4. **Finish.** `tool.finished { callId, result }` appends a `tool_result` context item: `status` (`success`, `error`, `denied`, `cancelled`, `background`, `lost`), text `content`, and optional `jobId` and `offload`.
+4. **Finish.** `tool.finished { callId, result }` appends a `tool_result` context item: `status` (`success`, `error`, `denied`, `cancelled`, `background`, `lost`), text `content`, and optional `jobId`, `offload`, `media`, and `files`.
 
 Every call gets exactly one result. When a run ends or recovery finds an unfinished call, the missing results are written as `cancelled` (not started) or `lost` (started, outcome unknown), so provider history stays valid. After the results, the step loop continues: a history that ends with tool results needs a response.
+
+**Read before change.** A tool result may list `files`: the version (`path`, `mtimeMs`, `size`) of each file the call read or wrote, as it was afterwards. Read records the file it opened; Edit and Write record the file they wrote. No separate cache is stored: the versions the model has in context are derived from the tool results since the last compaction (`knownFiles`, latest per path), because the summary replaced the earlier results and the model no longer has their content. The runtime passes them to every call as `context.knownFiles`, read fresh for each call, so a mutation barrier sees the previous call's result. Edit, and Write over an existing file, refuse when the file has no known version (it was never read in the current context) or its current `mtimeMs` or `size` differ (it changed through Bash, another program, or the user); the model reads it again. A new file needs no Read. The file's version is compared, not its read time, so clock skew and coarse timestamps cannot let a stale read through.
 
 Provider-executed calls (web search on DashScope) arrive as `native_tool_call` blocks with the adapter id, the standard tool id, the query or URLs, and the opaque provider item for replay. Core never executes them.
 

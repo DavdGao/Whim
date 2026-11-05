@@ -7,7 +7,7 @@ import { after, before, describe, it } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { CompiledSchema, PluginHost, Store, ToolRuntime } from '@whimkit/core';
-import { ApplicationError } from '@whimkit/core/contracts';
+import { ApplicationError, knownFiles } from '@whimkit/core/contracts';
 
 import { Agent } from './agent.js';
 
@@ -545,6 +545,80 @@ describe('Agent', () => {
             assert.deepEqual(result.offload, { path, bytes: big.length });
             assert.ok(result.content.includes(pathToFileURL(path).href));
             assert.equal(await readFile(path, 'utf8'), big);
+        });
+
+        it('gives later calls the files read before and forgets them after compaction', async () => {
+            const version = { path: '/w/a.txt', mtimeMs: 1, size: 3 };
+            const touch: ToolDefinition<{ text: string }> = {
+                ...echo,
+                name: 'Touch',
+                execute: async () => ({ content: 'read a.txt', files: [version] }),
+            };
+            const check: ToolDefinition<{ text: string }> = {
+                ...echo,
+                name: 'Check',
+                execute: async (_input, context) => ({
+                    content: `known: ${JSON.stringify(context.knownFiles.get(version.path) ?? null)}`,
+                }),
+            };
+            const { runtime, declarations } = runtimeWith([touch, check]);
+            const long = (letter: string) => letter.repeat(4000);
+            const call = (name: string) =>
+                ({
+                    type: 'tool-call',
+                    callId: randomUUID(),
+                    name,
+                    arguments: '{"text":"x"}',
+                }) as const;
+            let compacted = false;
+            const { models } = scripted(async function* (request) {
+                const last = request.messages.at(-1);
+                if (request.system.startsWith('You compact')) {
+                    compacted = true;
+                    yield { type: 'text-delta', text: 'SUMMARY' };
+                } else if (last?.role === 'user') yield call(compacted ? 'Check' : 'Touch');
+                else if (last?.role === 'tool' && last.content === 'read a.txt')
+                    yield call('Check');
+                else yield { type: 'text-delta', text: long('a') };
+                yield { type: 'completed', usage: {} };
+            }, 2000);
+            const agent = new Agent(store, models, runtime, {
+                sleep: noSleep,
+                compaction: {
+                    transcriptPath: (sessionId, compactionId) =>
+                        join(dir, 'transcripts', sessionId, `${compactionId}.md`),
+                    epoch: async view => ({
+                        epochId: randomUUID(),
+                        system: view.epoch.system,
+                        card: view.epoch.card,
+                        renderer: view.epoch.renderer,
+                        tools: [...view.epoch.tools],
+                        nativeTools: [...view.epoch.nativeTools],
+                        providerTools: [...view.epoch.providerTools],
+                    }),
+                },
+            });
+            const sessionId = await sessionWith('read it', declarations);
+            await drain(agent.run(sessionId, 'user', new AbortController().signal));
+            const before = await store.view(sessionId);
+            assert.deepEqual([...knownFiles(before).values()], [version]);
+            assert.deepEqual(
+                before.history.flatMap(entry =>
+                    entry.item.type === 'tool_result' ? [entry.item.content] : []
+                ),
+                ['read a.txt', `known: ${JSON.stringify(version)}`]
+            );
+
+            await say(sessionId, long('v'));
+            await drain(agent.run(sessionId, 'user', new AbortController().signal));
+            const after = await store.view(sessionId);
+            assert.equal(after.epoch.reason, 'compaction');
+            assert.equal(knownFiles(after).size, 0);
+            // The call after the compaction no longer sees the earlier read.
+            const results = after.history.flatMap(entry =>
+                entry.item.type === 'tool_result' ? [entry.item.content] : []
+            );
+            assert.equal(results.at(-1), 'known: null');
         });
 
         it('reports invalid arguments to the model without running the tool', async () => {

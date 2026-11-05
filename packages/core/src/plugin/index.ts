@@ -2,6 +2,7 @@ import type { ChatCard, FrozenChatCard, ThinkingLevel } from '../contracts/card.
 import type {
     Access,
     Block,
+    FileVersion,
     NativeToolCallBlock,
     ToolDeclaration,
     ToolResult,
@@ -155,6 +156,12 @@ export interface ToolContext extends ToolEnv {
     output(chunk: string): void;
     /** The credential a tool with `credentialType` runs with, decrypted. */
     readonly credential?: ResolvedCredential;
+    /**
+     * The latest version of each file the model has in context: what tools recorded in `files`
+     * since the last compaction, by absolute path. A tool that changes a file requires the file
+     * to be unchanged since then, so the model never edits content it has not seen.
+     */
+    readonly knownFiles: ReadonlyMap<string, FileVersion>;
 }
 
 export interface ToolOutput {
@@ -166,6 +173,8 @@ export interface ToolOutput {
         readonly data: Uint8Array;
         readonly name?: string;
     }[];
+    /** Files the call read or wrote, as they were afterwards (see `ToolContext.knownFiles`). */
+    readonly files?: readonly FileVersion[];
 }
 
 /**

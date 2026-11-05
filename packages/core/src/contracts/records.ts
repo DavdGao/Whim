@@ -140,6 +140,14 @@ export const toolResultStatusSchema = z.enum([
 ]);
 
 /** The one result of a tool call. */
+/** A file's version as a tool observed it: enough to tell whether it changed since. */
+export const fileVersionSchema = z.strictObject({
+    path: z.string().min(1),
+    mtimeMs: z.number().nonnegative(),
+    size: z.number().int().nonnegative(),
+});
+export type FileVersion = z.infer<typeof fileVersionSchema>;
+
 export const toolResultSchema = z.strictObject({
     type: z.literal('tool_result'),
     id: idSchema,
@@ -152,6 +160,8 @@ export const toolResultSchema = z.strictObject({
     offload: z.strictObject({ path: z.string(), bytes: z.number().int().nonnegative() }).optional(),
     /** Images or other media the tool returned alongside its text. */
     media: z.array(mediaBlockSchema).optional(),
+    /** Files the call read or wrote, as they were afterwards; Edit and Write check against them. */
+    files: z.array(fileVersionSchema).optional(),
 });
 export type ToolResult = z.infer<typeof toolResultSchema>;
 

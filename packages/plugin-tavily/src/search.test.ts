@@ -28,6 +28,7 @@ const context = {
     sessionId: 's',
     callId: 'c',
     output: () => {},
+    knownFiles: new Map(),
     credential: { id: 'k', typeId: credentialTypeId, values: { apiKey: 'tvly-test' } },
 };
 
