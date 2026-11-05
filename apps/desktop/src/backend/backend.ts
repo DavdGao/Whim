@@ -28,6 +28,8 @@ import {
     requestEnvelopeSchema,
 } from '../shared/ipc.js';
 
+import { gitStatus } from './git.js';
+
 import type {
     AgentProfile,
     AppState,
@@ -395,6 +397,16 @@ class Backend {
                 await this.store.execute({ type: 'update', operationId: randomUUID(), ...params });
                 return null;
             }
+            case 'session.setWorkspace': {
+                const params = methodSchemas[method].parse(raw);
+                await this.setWorkspace(params.sessionId, params.workspace);
+                return null;
+            }
+            case 'workspace.git': {
+                const params = methodSchemas[method].parse(raw);
+                if (!isAbsolute(params.path)) return null;
+                return gitStatus(params.path, AbortSignal.timeout(8000));
+            }
             case 'session.switchModel': {
                 const params = methodSchemas[method].parse(raw);
                 await this.switchModel(params.sessionId, params.cardId, params.credentialId);
@@ -533,6 +545,27 @@ class Backend {
             tools,
             nativeTools: [...card.nativeTools],
         };
+    }
+
+    /**
+     * Move a chat to another folder between runs; the model is told through a notice.
+     * @param sessionId The session.
+     * @param workspace An absolute, existing directory.
+     */
+    async setWorkspace(sessionId: string, workspace: string): Promise<void> {
+        if (workspace === this.defaultWorkspace) await mkdir(workspace, { recursive: true });
+        const info = isAbsolute(workspace) ? await stat(workspace).catch(() => null) : null;
+        if (!info?.isDirectory())
+            throw new StoreError('invalid', 'The workspace folder does not exist.');
+        await this.store.execute({
+            type: 'set-workspace',
+            sessionId,
+            operationId: randomUUID(),
+            workspace,
+            deliveryId: randomUUID(),
+            noticeId: randomUUID(),
+            observedAt: new Date().toISOString(),
+        });
     }
 
     /**

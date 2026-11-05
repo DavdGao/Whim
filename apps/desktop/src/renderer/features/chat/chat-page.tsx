@@ -73,6 +73,13 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                 thinking: next.thinking,
             });
     };
+    const changeWorkspace = (next: string | undefined) => {
+        if (!view) return setWorkspace(next);
+        void call('session.setWorkspace', {
+            sessionId: view.sessionId,
+            workspace: next ?? state.defaultWorkspace,
+        }).catch(error => notify(error, t('error.generic')));
+    };
     const send = async (text: string) => {
         try {
             let sessionId = selected;
@@ -201,7 +208,8 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                                 workspace={view ? view.workspace : workspace}
                                 usage={view?.lastUsage}
                                 agentName={state.agent.name}
-                                {...(selected ? {} : { onWorkspaceChange: setWorkspace })}
+                                onWorkspaceChange={changeWorkspace}
+                                gitRefresh={running ? 'running' : view?.head}
                                 onStop={() =>
                                     view &&
                                     void call('session.stop', { sessionId: view.sessionId }).catch(

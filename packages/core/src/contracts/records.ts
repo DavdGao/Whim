@@ -100,6 +100,12 @@ export const noticeSchema = z.discriminatedUnion('kind', [
         kind: z.literal('job-lost'),
         payload: z.strictObject({ jobId: idSchema, callId: idSchema, tool: z.string() }),
     }),
+    /** The user moved the chat to another folder between runs. */
+    z.strictObject({
+        ...noticeBase,
+        kind: z.literal('workspace-changed'),
+        payload: z.strictObject({ from: z.string().min(1), to: z.string().min(1) }),
+    }),
 ]);
 export type Notice = z.infer<typeof noticeSchema>;
 
@@ -198,6 +204,7 @@ export const bodySchema = z.discriminatedUnion('type', [
         title: z.string().max(200).optional(),
         credentialId: idSchema.optional(),
         thinking: thinkingLevelSchema.nullable().optional(),
+        workspace: z.string().min(1).optional(),
     }),
     z.strictObject({
         type: z.literal('epoch.started'),
