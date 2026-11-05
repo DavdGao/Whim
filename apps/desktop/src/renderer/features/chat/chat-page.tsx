@@ -159,6 +159,7 @@ export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModel
                             </div>
                         ) : view ? (
                             <Transcript
+                                key={view.sessionId}
                                 view={view}
                                 older={session.older}
                                 hasOlder={session.hasOlder}

@@ -412,6 +412,10 @@ Configuration lives in Settings; the rail is for feature pages. Planned feature 
 
 ### 11.2 Data flow
 
+Chat scrolling uses the official shadcn MessageScroller: user messages are stable `scrollAnchor` rows, including while queued, so sending starts a turn at the top of the viewport. Streamed replies fill the space below before following the live edge; scrolling away releases automatic following. Loading earlier history preserves the visible row. The viewport uses shadcn's scroll-aware `scroll-fade` utility at both vertical edges, with no fade where no further content exists. Running sessions display the existing Spinner with a localized accessible label instead of a pulsing dot.
+
+Acceptance: verify sending from both the live edge and older history, queued-to-consumed message identity, streaming, manual scroll and return to latest, prepended history, session switching, and empty/short transcripts. The running indicator must animate only while the session is running; its status and the return-to-latest control must be accessible in English and Simplified Chinese.
+
 - Renderer loads a session with a query returning a bounded page of history plus the current head seq, then subscribes with `afterSeq`. Backend pushes committed records in batches after each commit; Renderer folds them into its presentation state. No full snapshots per token.
 - Streaming deltas are transient events delivered on the same subscription, coalesced to a short interval, and not stored; the attempt's output is committed when it ends ([agent.md §5.1](agent.md#51-streaming-output)). An `attempt.discarded` event tells the frontend to drop a failed attempt's text before a retry.
 - Commands return acceptance, not completion. The UI shows queued, included, running, retrying, interrupted, failed, and completed states from committed records.
@@ -419,7 +423,7 @@ Configuration lives in Settings; the rail is for feature pages. Planned feature 
 
 ### 11.3 Components and style
 
-Use official shadcn/ui components and AI Elements (conversation, message, trace, code block) from the official registry, installed with the CLI into `apps/desktop/src/components/ui`. Compose and theme them through tokens; do not restyle internals with broad selectors. Vendored files change only through the CLI, except for small edits marked with a `Whim:` comment in the file and listed here: the slider thumb is a primary ring inside a background-colored edge, so it stays distinct over the primary range. Keyboard and focus behavior are part of acceptance.
+Use official shadcn/ui components and AI Elements (conversation, message, trace, code block) from the official registry, installed with the CLI into `apps/desktop/src/components/ui`. Compose and theme them through tokens; do not restyle internals with broad selectors. Vendored files change only through the CLI, except for small edits marked with a `Whim:` comment in the file and listed here: the slider thumb is a primary ring inside a background-colored edge, so it stays distinct over the primary range. The MessageScroller viewport uses `scroll-fade-y` instead of the registry default `scroll-fade-b` to fade both vertical edges; combining both utilities leaves the bottom-only mask active. Keyboard and focus behavior are part of acceptance.
 
 Whim is a consumer application. The visual direction is friendly and soft rather than dense and formal:
 
