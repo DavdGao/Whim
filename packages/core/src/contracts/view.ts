@@ -33,6 +33,7 @@ export interface Epoch {
     readonly renderer: number;
     readonly tools: readonly ToolDeclaration[];
     readonly nativeTools: readonly string[];
+    readonly providerTools: readonly string[];
 }
 
 /** A tool call of the current step that has no result yet. */
@@ -161,6 +162,7 @@ function epochOf(body: BodyOf<'epoch.started'>): Omit<Epoch, 'seq'> {
         renderer: body.renderer,
         tools: body.tools,
         nativeTools: body.nativeTools,
+        providerTools: body.providerTools,
     };
 }
 
@@ -347,6 +349,8 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
                 calls: replaceCall(view, { ...call, state: 'running', jobId: body.jobId }),
             };
         }
+        case 'tool.usage':
+            return { ...base, usage: addUsage(view.usage, body.usage) };
         case 'tool.finished': {
             const result = body.result;
             const call = requireCall(view, result.callId, undefined, record.seq);

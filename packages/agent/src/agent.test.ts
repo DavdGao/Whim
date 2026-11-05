@@ -11,6 +11,7 @@ import { ApplicationError } from '@whimkit/core/contracts';
 import { Agent } from './agent.js';
 
 import type { AgentEvent } from './agent.js';
+import type { ToolModels } from '@whimkit/core';
 import type { FrozenChatCard } from '@whimkit/core/contracts';
 import type { ChatEvent, ChatRequest, ChatSession, ToolDefinition } from '@whimkit/core/plugin';
 
@@ -67,12 +68,14 @@ after(async () => {
 /**
  * Create a session and accept one user message.
  * @param text The message.
- * @param tools
+ * @param tools Declared tools.
+ * @param providerTools Standard tool ids the adapter runs as separate calls.
  * @returns The session id.
  */
 async function sessionWith(
     text: string,
-    tools: { name: string; description: string; inputSchema: Record<string, unknown> }[] = []
+    tools: { name: string; description: string; inputSchema: Record<string, unknown> }[] = [],
+    providerTools: string[] = []
 ): Promise<string> {
     const sessionId = randomUUID();
     await store.execute({
@@ -88,6 +91,7 @@ async function sessionWith(
             renderer: 1,
             tools,
             nativeTools: [],
+            providerTools,
         },
     });
     await say(sessionId, text);
@@ -331,9 +335,15 @@ describe('Agent', () => {
         /**
          * A tool runtime over a host holding the given tools.
          * @param tools Tool definitions.
+         * @param toolModels Bindings for provider-run tools.
          * @returns The runtime, its declarations, and sessions whose jobs ended.
          */
-        function runtimeWith(tools: ToolDefinition<{ text: string }>[]) {
+        function runtimeWith(
+            tools: ToolDefinition<{ text: string }>[],
+            toolModels: ToolModels = {
+                open: () => Promise.reject(new Error('No provider tools here.')),
+            }
+        ) {
             const host = new PluginHost(store, []);
             for (const tool of tools)
                 host.tools.set(tool.name, {
@@ -342,8 +352,13 @@ describe('Agent', () => {
                     inputSchema: new CompiledSchema(tool.inputSchema),
                 });
             const ended: string[] = [];
-            const runtime = new ToolRuntime(store, host, [], join(dir, 'artifacts'), id =>
-                ended.push(id)
+            const runtime = new ToolRuntime(
+                store,
+                host,
+                toolModels,
+                [],
+                join(dir, 'artifacts'),
+                id => ended.push(id)
             );
             return { runtime, declarations: runtime.declarations(undefined, []), ended };
         }
@@ -401,6 +416,40 @@ describe('Agent', () => {
                 ['Echo', 'JobOutput', 'JobStop']
             );
             assert.equal((await store.view(sessionId)).lastRun?.result.outcome, 'completed');
+        });
+
+        it('runs a provider tool through the adapter and counts its tokens apart from context', async () => {
+            const calls: unknown[] = [];
+            const fetcher = { ...echo, name: 'WebFetch', standard: 'web_fetch' as const };
+            const { runtime, declarations } = runtimeWith([fetcher], {
+                open: async () => ({
+                    inputBudget: () => 1000,
+                    stream: () => {
+                        throw new Error('unused');
+                    },
+                    runTool: async (tool, input, options) => {
+                        calls.push([tool, input, options.thinking]);
+                        return {
+                            output: { content: 'page text' },
+                            usage: { inputTokens: 40, outputTokens: 5 },
+                        };
+                    },
+                }),
+            });
+            const { models } = callingModel('WebFetch', '{"text":"https://a.example"}');
+            const sessionId = await sessionWith('fetch it', declarations, ['web_fetch']);
+            await drain(
+                new Agent(store, models, runtime, { sleep: noSleep }).run(
+                    sessionId,
+                    'user',
+                    new AbortController().signal
+                )
+            );
+            assert.deepEqual(calls, [['web_fetch', { text: 'https://a.example' }, 'high']]);
+            assert.deepEqual((await transcript(sessionId))[2], ['tool', 'success', 'page text']);
+            const view = await store.view(sessionId);
+            assert.deepEqual(view.usage, { inputTokens: 40, outputTokens: 5 });
+            assert.equal(view.lastUsage, undefined);
         });
 
         it('reports invalid arguments to the model without running the tool', async () => {

@@ -49,7 +49,7 @@ export interface ChatRequest {
     readonly thinking?: ThinkingLevel;
     /** Local tools the model may call. */
     readonly tools: readonly ToolDeclaration[];
-    /** Native tool ids the provider executes; a subset of the card's `nativeTools`. */
+    /** Provider tools executed inside this call; the card's `nativeTools` minus separate ones. */
     readonly nativeTools: readonly string[];
 }
 
@@ -80,6 +80,23 @@ export interface ChatSession {
      * without completion. Never retries internally.
      */
     stream(request: ChatRequest, signal: AbortSignal): AsyncIterable<ChatEvent>;
+    /**
+     * Run one of the adapter's `separateTools` as its own provider call with this card and
+     * credential. Its context is independent of the chat; its usage is the session's. Throws
+     * `ApplicationError` on failure. Never retries internally.
+     */
+    runTool?(
+        tool: string,
+        input: Readonly<Record<string, unknown>>,
+        options: { readonly thinking?: ThinkingLevel; readonly signal: AbortSignal }
+    ): Promise<ProviderToolResult>;
+}
+
+/** The outcome of a provider-run tool call. */
+export interface ProviderToolResult {
+    readonly output: ToolOutput;
+    /** Reported usage of the provider call; absent fields stay unknown. */
+    readonly usage: Usage;
 }
 
 export interface ChatAdapter {
@@ -90,6 +107,12 @@ export interface ChatAdapter {
     readonly credentialTypes: readonly string[];
     /** JSON Schema for card `options`. */
     readonly optionsSchema: JsonSchema;
+    /**
+     * Standard tool ids from a card's `nativeTools` that this adapter runs as separate provider
+     * calls through `ChatSession.runTool` rather than inside `stream`. The model sees them as the
+     * local tool with the same standard id; Core owns permissions, results, and records.
+     */
+    readonly separateTools?: readonly string[];
     /** Cross-field card rules beyond the schemas. */
     validateCard?(card: ChatCard): readonly CardIssue[];
     /** Bind a frozen card and credential. Throws `ApplicationError` when the pair is unusable. */

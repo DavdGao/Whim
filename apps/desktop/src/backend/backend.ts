@@ -220,8 +220,13 @@ class Backend {
     ) {
         this.#baseTools = baseTools(version);
         // A finished background job wakes an idle session so the agent can react to it.
-        this.tools = new ToolRuntime(store, host, this.#baseTools, artifactsDir, sessionId =>
-            this.schedule(sessionId, 'job')
+        this.tools = new ToolRuntime(
+            store,
+            host,
+            models,
+            this.#baseTools,
+            artifactsDir,
+            sessionId => this.schedule(sessionId, 'job')
         );
         this.agent = new Agent(store, models, this.tools);
         store.onCommit(records => {
@@ -535,15 +540,21 @@ class Backend {
      * @returns Epoch fields.
      */
     async #epoch(card: ChatCard, workspace: string | undefined) {
-        const tools = this.tools.declarations(workspace, card.nativeTools);
+        // Provider tools the adapter runs as separate calls keep the local tool's declaration, so
+        // the tool list depends only on the card and never on per-request options like thinking.
+        const separate = this.host.chatAdapters.get(card.adapter)?.adapter.separateTools ?? [];
+        const nativeTools = card.nativeTools.filter(tool => !separate.includes(tool));
+        const providerTools = card.nativeTools.filter(tool => separate.includes(tool));
+        const tools = this.tools.declarations(workspace, nativeTools);
         const profile = await this.#profile();
         return {
             epochId: randomUUID(),
-            system: systemPrompt(profile, workspace, tools.length + card.nativeTools.length > 0),
+            system: systemPrompt(profile, workspace, tools.length + nativeTools.length > 0),
             card: freeze(card),
             renderer: rendererVersion,
             tools,
-            nativeTools: [...card.nativeTools],
+            nativeTools,
+            providerTools,
         };
     }
 

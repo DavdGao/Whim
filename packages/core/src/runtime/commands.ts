@@ -46,6 +46,7 @@ const epochInput = {
     renderer: z.number().int().positive(),
     tools: z.array(toolDeclarationSchema),
     nativeTools: z.array(z.string()),
+    providerTools: z.array(z.string()).default([]),
 };
 
 export const commandSchema = z.discriminatedUnion('type', [
@@ -148,6 +149,12 @@ export const commandSchema = z.discriminatedUnion('type', [
         jobId: idSchema,
     }),
     z.strictObject({ ...base, type: z.literal('finish-tool'), result: toolResultSchema }),
+    z.strictObject({
+        ...base,
+        type: z.literal('record-tool-usage'),
+        callId: idSchema,
+        usage: usageSchema,
+    }),
     z.strictObject({
         ...base,
         type: z.literal('end-job'),
@@ -384,6 +391,8 @@ export function decide(view: SessionView | null, command: Command): Body[] {
                 },
             ];
         }
+        case 'record-tool-usage':
+            return [{ type: 'tool.usage', callId: command.callId, usage: command.usage }];
         case 'finish-tool':
             if (!view.calls.some(item => item.callId === command.result.callId))
                 throw new StoreError('conflict', 'The tool call already has a result.');

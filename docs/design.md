@@ -280,6 +280,12 @@ interface ChatSession {
     inputBudget(): number;
     countTokens?(request: ChatRequest, signal: AbortSignal): Promise<number>;
     stream(request: ChatRequest, signal: AbortSignal): AsyncIterable<ChatEvent>;
+    /** Run one of the adapter's `separateTools` as its own provider call (§7.6). */
+    runTool?(
+        tool: string,
+        input: object,
+        options: { thinking?: ThinkingLevel; signal: AbortSignal }
+    ): Promise<{ output: ToolOutput; usage: Usage }>;
 }
 ```
 
@@ -298,11 +304,14 @@ interface ChatSession {
 
 ### 7.6 Native and local tools
 
-Core defines standard tool ids with Core-owned semantics, initially `web_search` and `web_fetch`. For each id, at epoch creation:
+Core defines standard tool ids with Core-owned semantics, initially `web_search` and `web_fetch`. A card's `nativeTools` lists the standard ids its provider can serve for that model; the adapter decides how each is executed. For each id, at epoch creation:
 
-1. If the card lists it in `nativeTools` and the user has not disabled native execution, the adapter receives it as a native tool. The provider executes it during the response; Core records the provider-executed call for display and replay and never executes it again.
-2. Otherwise, if a plugin registers a local implementation, the tool is an ordinary local tool subject to permissions.
-3. Otherwise the tool is not offered to the model.
+1. If the card lists it and the adapter executes it **inside the chat call**, the adapter receives it as a native tool. The provider executes it during the response; Core records the provider-executed call for display and replay and never executes it again.
+2. If the card lists it and the adapter declares it in `separateTools`, the model sees the local tool with that standard id (same name, schema, and permissions), but Core runs each call through `ChatSession.runTool` with the session's card and credential: a provider call of its own, with a context independent of the chat. The epoch records these ids in `providerTools`. Its reported tokens are committed as `tool.usage` and count toward the session's usage, not its context.
+3. Otherwise, if a plugin or the base tools provide a local implementation, the tool is an ordinary local tool subject to permissions.
+4. Otherwise the tool is not offered to the model.
+
+The choice depends only on the card and the adapter, never on per-request options such as the thinking level, so it stays fixed for the epoch. DashScope, for example, runs `web_fetch` separately because its web extractor requires thinking: the separate call always thinks, whatever the chat's level.
 
 Provider-only tools without a Core equivalent (for example DashScope `code_interpreter`) are declared by the adapter as additional native tool ids, namespaced by plugin, and are opt-in per session.
 

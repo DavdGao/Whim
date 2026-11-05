@@ -22,5 +22,6 @@ export type {
 } from './plugin-host.js';
 export { Store } from './store.js';
 export { ToolRuntime, maxResultBytes } from './tools.js';
+export type { ToolModels } from './tools.js';
 export { evaluate, isInside, rulesFor } from './permissions.js';
 export type { PermissionEnv } from './permissions.js';

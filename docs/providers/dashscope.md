@@ -48,9 +48,9 @@ Listed with full Responses support (built-in tools): `qwen3.8-max`, `qwen3.8-fla
 
 `web_search`, `web_extractor` (requires `web_search`), `code_interpreter`, `web_search_image`, `image_search`, `file_search` (one vector store id), `mcp`, plus `function`. `qwen3.8-omni-flash` supports only `web_search`.
 
-Whim mapping: `web_search → web_search`, `web_fetch → web_extractor`. `code_interpreter` is a plugin-namespaced native tool.
+Whim mapping: `web_search → web_search` inside the chat call; `web_fetch` runs as a separate call (`separateTools`) with `web_search` and `web_extractor`, the chat's card and credential, and thinking on. `code_interpreter` is not mapped yet.
 
-- `web_extractor` requires `web_search` and thinking mode (Web extractor page: "必须开启思考模式"). With `reasoning.effort: none`, `qwen3.8-max` returns `400 InternalError.Algo.InvalidParameter: Normal mode does not support web_extractor. Please set enable_thinking to true.` (observed 2026-11-05). The adapter omits `web_extractor` from requests whose thinking level maps to `none`; web search stays available.
+- `web_extractor` requires `web_search` and thinking mode (Web extractor page: "必须开启思考模式"). With `reasoning.effort: none`, `qwen3.8-max` returns `400 InternalError.Algo.InvalidParameter: Normal mode does not support web_extractor. Please set enable_thinking to true.` (observed 2026-11-05). Because of this, the chat call never carries `web_extractor`: `web_fetch` is a separate call that thinks at the chat's level, or at the card's default when the chat's thinking is off, so the chat's tool list does not change with the thinking level.
 - The documentation requires thinking mode for `code_interpreter` on `qwen3.8-max`, `qwen3.8-flash`, and `qwen3.7-max` variants.
 
 ## Streaming and state
