@@ -26,7 +26,7 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [ ] Run on macOS and against live DashScope; verify Keychain-backed `safeStorage`
 - [ ] Live plugin disable/removal sequence (design.md §5.4); today enabling/disabling applies after restart
 - [ ] Credential "Test" action (`verify`)
-- [ ] Load history in bounded pages instead of the whole session; older pages load when the transcript is pulled past its top, without a button
+- [x] Load history in bounded pages (60 entries) instead of the whole session; older pages load when the transcript is pulled past its top, without a button
 - [ ] Validate IPC results in Renderer with schemas, not only envelopes
 - [ ] Warn about unreadable attachments before a model switch (with attachments)
 - [ ] Verify seed card limits and per-model thinking levels

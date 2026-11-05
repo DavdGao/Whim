@@ -40,6 +40,7 @@ import type {
     IpcError,
     Method,
     Results,
+    HistoryPage,
     SessionSnapshot,
     StagedAttachment,
 } from '../shared/ipc.js';
@@ -50,6 +51,8 @@ import type { MessagePortMain } from 'electron';
 
 const parentPort = process.parentPort;
 const maxConcurrentRuns = 4;
+/** History entries sent with a session snapshot and per earlier page. */
+const historyPageSize = 60;
 const defaultProfile: AgentProfile = {
     name: 'Whim',
     systemPrompt: 'You are {name}, a helpful assistant. Answer clearly and concisely.',
@@ -408,6 +411,10 @@ class Backend {
                 const params = methodSchemas[method].parse(raw);
                 return this.readMedia(params.sessionId, params.sha256);
             }
+            case 'session.history': {
+                const params = methodSchemas[method].parse(raw);
+                return this.historyPage(params.sessionId, params.beforeSeq, params.limit);
+            }
             case 'session.stop':
                 await this.stop(methodSchemas[method].parse(raw).sessionId, 'user');
                 return null;
@@ -547,12 +554,29 @@ class Backend {
      * @returns The snapshot.
      */
     async snapshot(sessionId: string): Promise<SessionSnapshot> {
-        const { inbox, ...view } = await this.store.view(sessionId);
+        const { inbox, history, ...view } = await this.store.view(sessionId);
         return {
             ...view,
+            // The latest page only; long chats load earlier pages as the user scrolls up.
+            history: history.slice(-historyPageSize),
+            hasOlder: history.length > historyPageSize,
             pending: [...inbox.values()],
             defaultWorkspace: this.defaultWorkspace(sessionId),
         };
+    }
+
+    /**
+     * A page of history before a sequence number.
+     * @param sessionId The session.
+     * @param beforeSeq Entries strictly before this are returned.
+     * @param limit The page size.
+     * @returns The page, oldest first.
+     */
+    async historyPage(sessionId: string, beforeSeq: number, limit: number): Promise<HistoryPage> {
+        const earlier = (await this.store.view(sessionId)).history.filter(
+            entry => entry.seq < beforeSeq
+        );
+        return { entries: earlier.slice(-limit), hasOlder: earlier.length > limit };
     }
 
     /**
