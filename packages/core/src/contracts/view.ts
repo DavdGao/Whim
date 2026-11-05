@@ -14,6 +14,8 @@ import type {
 export interface HistoryEntry {
     readonly seq: number;
     readonly item: ContextItem;
+    /** When the record that added it was committed. */
+    readonly at: string;
     /** Set for assistant output: whether the attempt completed or was interrupted. */
     readonly status?: 'completed' | 'interrupted';
 }
@@ -268,7 +270,7 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
                 if (!pending)
                     throw new InvalidJournalError('Consumed delivery is not pending.', record.seq);
                 inbox.delete(id);
-                history.push({ seq: record.seq, item: pending.item });
+                history.push({ seq: record.seq, at: record.createdAt, item: pending.item });
             }
             return {
                 ...base,
@@ -323,6 +325,7 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
                           ...view.history,
                           {
                               seq: record.seq,
+                              at: record.createdAt,
                               status: result.status,
                               item: {
                                   type: 'message' as const,
@@ -405,7 +408,7 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
             return {
                 ...base,
                 calls: view.calls.filter(item => item.callId !== call.callId),
-                history: [...view.history, { seq: record.seq, item: result }],
+                history: [...view.history, { seq: record.seq, at: record.createdAt, item: result }],
                 jobs:
                     result.status === 'background' && result.jobId
                         ? [

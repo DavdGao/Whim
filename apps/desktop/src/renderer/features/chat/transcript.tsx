@@ -7,6 +7,7 @@ import { Markdown } from '../../components/markdown';
 import { call } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 
+import { formatDuration } from './duration';
 import { FailureNotice } from './failure-notice';
 import { mathPlugin, normalizeMath } from './math';
 import { MediaView } from './media-view';
@@ -84,12 +85,14 @@ function mediaOf(blocks: readonly Block[]): MediaBlock[] {
 }
 
 /**
- * Copy an answer's text to the clipboard.
- * @param props The text.
- * @param props.text Markdown of the answer.
- * @returns The action row.
+ * The footer under a finished turn: copy its answers and how long it took. Secondary to the
+ * answer, so it is muted and small.
+ * @param props Footer props.
+ * @param props.text Markdown of the turn's answers.
+ * @param props.ms How long the turn took, when known.
+ * @returns The footer.
  */
-function CopyAction({ text }: { text: string }) {
+function TurnFooter({ text, ms }: { text: string; ms?: number }) {
     const { t } = useT();
     const [copied, setCopied] = useState(false);
     useEffect(() => {
@@ -98,18 +101,31 @@ function CopyAction({ text }: { text: string }) {
         return () => clearTimeout(timer);
     }, [copied]);
     return (
-        <MessageActions className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-            <MessageAction
-                tooltip={copied ? t('common.copied') : t('common.copy')}
-                onClick={() =>
-                    void navigator.clipboard.writeText(text).then(
-                        () => setCopied(true),
-                        () => toast.error(t('error.generic'))
-                    )
-                }
-            >
-                {copied ? <CheckIcon /> : <CopyIcon />}
-            </MessageAction>
+        <MessageActions className="text-muted-foreground -ml-1.5 text-xs">
+            {text && (
+                <MessageAction
+                    size="icon-xs"
+                    className="text-muted-foreground"
+                    tooltip={copied ? t('common.copied') : t('common.copy')}
+                    onClick={() =>
+                        void navigator.clipboard.writeText(text).then(
+                            () => setCopied(true),
+                            () => toast.error(t('error.generic'))
+                        )
+                    }
+                >
+                    {copied ? (
+                        <CheckIcon className="size-3.5" />
+                    ) : (
+                        <CopyIcon className="size-3.5" />
+                    )}
+                </MessageAction>
+            )}
+            {ms !== undefined && (
+                <span className="px-1">
+                    {t('chat.turnTime', { duration: formatDuration(ms, t) })}
+                </span>
+            )}
         </MessageActions>
     );
 }
@@ -131,18 +147,10 @@ function hasContent(node: ReactNode): boolean {
  * @param props Line props.
  * @param props.text The reasoning text.
  * @param props.running Whether the model is still thinking.
- * @param props.seconds Recorded duration in seconds.
+ * @param props.ms Recorded duration.
  * @returns The line.
  */
-function ReasoningLine({
-    text,
-    running,
-    seconds,
-}: {
-    text: string;
-    running: boolean;
-    seconds?: number;
-}) {
+function ReasoningLine({ text, running, ms }: { text: string; running: boolean; ms?: number }) {
     const { t } = useT();
     const [open, setOpen] = useState<boolean>();
     return (
@@ -152,9 +160,9 @@ function ReasoningLine({
                     <TraceTitle>
                         {running
                             ? t('chat.thinkingNow')
-                            : seconds === undefined
+                            : ms === undefined
                               ? t('chat.thought')
-                              : t('chat.thoughtFor', { seconds })}
+                              : t('chat.thoughtFor', { duration: formatDuration(ms, t) })}
                     </TraceTitle>
                 </TraceLine>
             </TraceCollapsibleTrigger>
@@ -168,76 +176,36 @@ function ReasoningLine({
 }
 
 /**
- * One assistant or user message.
+ * A user message, sent or queued.
  * @param props Message parts.
- * @param props.role Who wrote it.
  * @param props.text Visible text.
- * @param props.reasoning Reasoning text.
- * @param props.reasoningMs How long the model reasoned, when recorded.
- * @param props.streaming Whether it is still streaming.
+ * @param props.media Files attached to the message, with the session that stores them.
+ * @param props.media.sessionId Session that stores the files.
+ * @param props.media.blocks The attachments.
  * @param props.badge Optional status badge.
  * @param props.onRemove Optional remove action.
- * @param props.children Tool calls shown after the text.
- * @param props.leading Provider-executed calls, which happen before the answer text.
- * @param props.media Files attached to the message, with the session that stores them.
- * @param props.media.sessionId
- * @param props.media.blocks
  * @returns The message.
  */
-function Bubble({
-    role,
+function UserBubble({
     text,
-    reasoning,
-    reasoningMs,
-    streaming,
+    media,
     badge,
     onRemove,
-    children,
-    leading,
-    media,
 }: {
-    role: 'user' | 'assistant';
     text: string;
-    reasoning?: string;
-    reasoningMs?: number;
-    streaming?: boolean;
+    media: { sessionId: string; blocks: readonly MediaBlock[] };
     badge?: string;
     onRemove?: () => Promise<unknown>;
-    children?: ReactNode;
-    leading?: ReactNode;
-    media?: { sessionId: string; blocks: readonly MediaBlock[] };
 }) {
     const { t } = useT();
-    const assistant = role === 'assistant';
     return (
-        // Answers take the full width so short text above a code block does not narrow it.
         <>
-            {media && media.blocks.length > 0 && (
+            {media.blocks.length > 0 && (
                 <MediaView sessionId={media.sessionId} media={media.blocks} />
             )}
-            <Message from={role} className={assistant ? 'max-w-full' : undefined}>
-                <MessageContent className={assistant ? 'w-full' : undefined}>
-                    {reasoning || hasContent(leading) ? (
-                        <Trace>
-                            {reasoning ? (
-                                <ReasoningLine
-                                    text={reasoning}
-                                    running={Boolean(streaming && !text)}
-                                    {...(reasoningMs !== undefined
-                                        ? { seconds: Math.max(1, Math.ceil(reasoningMs / 1000)) }
-                                        : {})}
-                                />
-                            ) : null}
-                            {leading}
-                        </Trace>
-                    ) : null}
-                    {!text ? null : role === 'assistant' ? (
-                        <Markdown plugins={{ math: mathPlugin }}>{normalizeMath(text)}</Markdown>
-                    ) : (
-                        <p className="wrap-anywhere whitespace-pre-wrap">{text}</p>
-                    )}
-                    {hasContent(children) ? <Trace>{children}</Trace> : null}
-                    {assistant && !streaming && text && <CopyAction text={text} />}
+            <Message from="user">
+                <MessageContent>
+                    {text && <p className="wrap-anywhere whitespace-pre-wrap">{text}</p>}
                     {(badge || onRemove) && (
                         <div className="flex items-center gap-2">
                             {badge && <Badge variant="secondary">{badge}</Badge>}
@@ -257,6 +225,126 @@ function Bubble({
             </Message>
         </>
     );
+}
+
+/**
+ * One model output inside a turn: its thinking and provider-run searches, the answer text,
+ * then the tool calls it made.
+ * @param props Output parts.
+ * @param props.text Answer text.
+ * @param props.reasoning Reasoning text.
+ * @param props.reasoningMs How long the model reasoned, when recorded.
+ * @param props.streaming Whether it is still streaming.
+ * @param props.interrupted Whether the user stopped it.
+ * @param props.leading Provider-executed calls, which happen before the answer text.
+ * @param props.children Tool calls shown after the text.
+ * @returns The output.
+ */
+function AssistantOutput({
+    text,
+    reasoning,
+    reasoningMs,
+    streaming,
+    interrupted,
+    leading,
+    children,
+}: {
+    text: string;
+    reasoning: string;
+    reasoningMs?: number;
+    streaming?: boolean;
+    interrupted?: boolean;
+    leading?: ReactNode;
+    children?: ReactNode;
+}) {
+    const { t } = useT();
+    return (
+        <>
+            {reasoning || hasContent(leading) ? (
+                <Trace>
+                    {reasoning ? (
+                        <ReasoningLine
+                            text={reasoning}
+                            running={Boolean(streaming && !text)}
+                            {...(reasoningMs !== undefined ? { ms: reasoningMs } : {})}
+                        />
+                    ) : null}
+                    {leading}
+                </Trace>
+            ) : null}
+            {text && <Markdown plugins={{ math: mathPlugin }}>{normalizeMath(text)}</Markdown>}
+            {hasContent(children) ? <Trace>{children}</Trace> : null}
+            {interrupted && (
+                <div>
+                    <Badge variant="secondary">{t('chat.interrupted')}</Badge>
+                </div>
+            )}
+        </>
+    );
+}
+
+/**
+ * Everything the agent did between two user messages, as one message with one footer.
+ * Answers take the full width so short text above a code block does not narrow it.
+ * @param props Turn props.
+ * @param props.children The turn's outputs, tool calls, and notices.
+ * @param props.footer The footer, once the turn is over.
+ * @returns The turn.
+ */
+function Turn({ children, footer }: { children: ReactNode; footer?: ReactNode }) {
+    return (
+        <Message from="assistant" className="max-w-full">
+            {/* Visible overflow lets inset cards widen past the text column (design §11.3). */}
+            <MessageContent className="w-full overflow-visible">
+                {children}
+                {footer}
+            </MessageContent>
+        </Message>
+    );
+}
+
+/** A user message, or the entries the agent produced before the next one. */
+type Row =
+    | { readonly kind: 'user'; readonly entry: HistoryEntry }
+    | {
+          readonly kind: 'turn';
+          readonly entries: readonly HistoryEntry[];
+          /** When the user message that started it was committed, if it is loaded. */
+          readonly since?: string;
+      };
+
+/**
+ * Split history into user messages and the agent turns between them.
+ * @param history Loaded history, oldest first.
+ * @returns The rows.
+ */
+function rowsOf(history: readonly HistoryEntry[]): Row[] {
+    const rows: Row[] = [];
+    let since: string | undefined;
+    for (const entry of history) {
+        if (entry.item.type === 'message' && entry.item.role === 'user') {
+            rows.push({ kind: 'user', entry });
+            since = entry.at;
+            continue;
+        }
+        const last = rows.at(-1);
+        if (last?.kind === 'turn')
+            rows[rows.length - 1] = { ...last, entries: [...last.entries, entry] };
+        else rows.push({ kind: 'turn', entries: [entry], ...(since ? { since } : {}) });
+    }
+    return rows;
+}
+
+/**
+ * The answer text of a turn, for copying.
+ * @param entries The turn's entries.
+ * @returns Its answers joined as Markdown paragraphs.
+ */
+function turnText(entries: readonly HistoryEntry[]): string {
+    return entries
+        .map(entry => (entry.item.type === 'message' ? textOf(entry.item.blocks, 'text') : ''))
+        .filter(Boolean)
+        .join('\n\n');
 }
 
 /**
@@ -359,9 +447,9 @@ function RetryCountdown({ at, number }: { at: string; number: number }) {
  * The conversation: committed history, queued input, the streaming draft, and run state.
  * @param props Session state.
  * @param props.view The session view.
- * @param props.older
- * @param props.hasOlder
- * @param props.onLoadOlder
+ * @param props.older Earlier history pages the user loaded.
+ * @param props.hasOlder Whether still earlier history exists.
+ * @param props.onLoadOlder Load the next earlier page.
  * @param props.draft The streaming draft.
  * @param props.discarded The failure that discarded a draft before a retry.
  * @returns The transcript.
@@ -395,6 +483,70 @@ export function Transcript({
     const results = new Map<string, ToolResult>();
     for (const entry of history)
         if (entry.item.type === 'tool_result') results.set(entry.item.callId, entry.item);
+    const rows = rowsOf(history);
+    // A running agent works in the last turn, even before its first output is committed.
+    const working = Boolean(view.run || draft);
+    if (working && rows.at(-1)?.kind !== 'turn') {
+        const last = rows.at(-1);
+        rows.push({
+            kind: 'turn',
+            entries: [],
+            ...(last?.kind === 'user' ? { since: last.entry.at } : {}),
+        });
+    }
+
+    /**
+     * What one history entry adds to the transcript, after any compaction that ends there.
+     * @param entry The entry.
+     * @returns Its nodes.
+     */
+    const renderEntry = (entry: HistoryEntry): ReactNode[] => [
+        // A succeeded compaction sits where the history it summarized ends.
+        ...view.compactions
+            .filter(compaction => compaction.from === entry.seq)
+            .map(compaction => (
+                <CompactionLine key={compaction.compactionId} compaction={compaction} />
+            )),
+        entry.item.type === 'message' && entry.item.role === 'user' ? (
+            <UserBubble
+                key={entry.item.id}
+                text={textOf(entry.item.blocks, 'text')}
+                media={{ sessionId: view.sessionId, blocks: mediaOf(entry.item.blocks) }}
+            />
+        ) : entry.item.type === 'message' ? (
+            <AssistantOutput
+                key={entry.item.id}
+                text={textOf(entry.item.blocks, 'text')}
+                reasoning={textOf(entry.item.blocks, 'reasoning')}
+                {...reasoningTime(entry.item.blocks)}
+                interrupted={entry.status === 'interrupted'}
+                leading={entry.item.blocks.map(block =>
+                    block.type === 'native_tool_call' ? (
+                        <NativeToolView
+                            key={`${block.tool}:${block.query ?? ''}:${(block.urls ?? []).join()}`}
+                            block={block}
+                        />
+                    ) : null
+                )}
+            >
+                {entry.item.blocks.map(block =>
+                    block.type === 'tool_call' ? (
+                        <ToolCallView
+                            key={block.callId}
+                            sessionId={view.sessionId}
+                            block={block}
+                            open={view.calls.find(item => item.callId === block.callId)}
+                            result={results.get(block.callId)}
+                            jobRunning={view.jobs.some(job => job.callId === block.callId)}
+                        />
+                    ) : null
+                )}
+            </AssistantOutput>
+        ) : entry.item.type === 'notice' ? (
+            <NoticeLine key={entry.item.id} notice={entry.item} />
+        ) : null,
+    ];
+
     return (
         <Conversation className="min-h-0 flex-1">
             <PullToLoad enabled={hasOlder} onLoad={onLoadOlder} loaded={older.length} />
@@ -406,55 +558,54 @@ export function Transcript({
                         description={t('chat.empty.description')}
                     />
                 ) : null}
-                {history.map(entry => [
-                    // A succeeded compaction sits where the history it summarized ends.
-                    ...view.compactions
-                        .filter(compaction => compaction.from === entry.seq)
-                        .map(compaction => (
-                            <CompactionLine key={compaction.compactionId} compaction={compaction} />
-                        )),
-                    entry.item.type === 'message' ? (
-                        <Bubble
-                            key={entry.item.id}
-                            role={entry.item.role}
-                            text={textOf(entry.item.blocks, 'text')}
-                            reasoning={textOf(entry.item.blocks, 'reasoning')}
-                            {...reasoningTime(entry.item.blocks)}
-                            {...(entry.status === 'interrupted'
-                                ? { badge: t('chat.interrupted') }
-                                : {})}
-                            media={{
-                                sessionId: view.sessionId,
-                                blocks: mediaOf(entry.item.blocks),
-                            }}
-                            leading={entry.item.blocks.map(block =>
-                                block.type === 'native_tool_call' ? (
-                                    <NativeToolView
-                                        key={`${block.tool}:${block.query ?? ''}:${(block.urls ?? []).join()}`}
-                                        block={block}
+                {rows.map((row, index) => {
+                    if (row.kind === 'user') return renderEntry(row.entry);
+                    const current = index === rows.length - 1;
+                    const over = !(current && working);
+                    const first = row.since ?? row.entries[0]?.at;
+                    const last = row.entries.at(-1)?.at;
+                    return (
+                        <Turn
+                            key={row.entries[0]?.seq ?? 'working'}
+                            footer={
+                                over && row.entries.length > 0 ? (
+                                    <TurnFooter
+                                        text={turnText(row.entries)}
+                                        {...(first && last
+                                            ? { ms: Date.parse(last) - Date.parse(first) }
+                                            : {})}
                                     />
-                                ) : null
-                            )}
+                                ) : undefined
+                            }
                         >
-                            {entry.item.blocks.map(block =>
-                                block.type === 'tool_call' ? (
-                                    <ToolCallView
-                                        key={block.callId}
-                                        sessionId={view.sessionId}
-                                        block={block}
-                                        open={view.calls.find(item => item.callId === block.callId)}
-                                        result={results.get(block.callId)}
-                                        jobRunning={view.jobs.some(
-                                            job => job.callId === block.callId
-                                        )}
-                                    />
-                                ) : null
+                            {row.entries.flatMap(renderEntry)}
+                            {current && draft && (
+                                <AssistantOutput
+                                    text={draft.text}
+                                    reasoning={draft.reasoning}
+                                    streaming
+                                />
                             )}
-                        </Bubble>
-                    ) : entry.item.type === 'notice' ? (
-                        <NoticeLine key={entry.item.id} notice={entry.item} />
-                    ) : null,
-                ])}
+                            {current && view.run?.retry && (
+                                <div className="flex flex-col gap-2">
+                                    {discarded && (
+                                        <FailureNotice
+                                            failure={discarded}
+                                            title={t('chat.failed')}
+                                        />
+                                    )}
+                                    <RetryCountdown
+                                        at={view.run.retry.at}
+                                        number={view.run.retry.number}
+                                    />
+                                </div>
+                            )}
+                            {current && failed && (
+                                <FailureNotice failure={failed} title={t('chat.failed')} />
+                            )}
+                        </Turn>
+                    );
+                })}
                 {view.compactions
                     .filter(compaction => compaction.state !== 'succeeded')
                     .map(compaction => (
@@ -464,9 +615,8 @@ export function Transcript({
                     item.item.type === 'notice' ? (
                         <NoticeLine key={item.deliveryId} notice={item.item} />
                     ) : item.item.type === 'message' ? (
-                        <Bubble
+                        <UserBubble
                             key={item.deliveryId}
-                            role="user"
                             text={textOf(item.item.blocks, 'text')}
                             media={{ sessionId: view.sessionId, blocks: mediaOf(item.item.blocks) }}
                             badge={t('chat.pending')}
@@ -479,23 +629,9 @@ export function Transcript({
                         />
                     ) : null
                 )}
-                {draft && (
-                    <Bubble
-                        role="assistant"
-                        text={draft.text}
-                        reasoning={draft.reasoning}
-                        streaming
-                    />
+                {failed && rows.at(-1)?.kind !== 'turn' && (
+                    <FailureNotice failure={failed} title={t('chat.failed')} />
                 )}
-                {view.run?.retry && (
-                    <div className="flex flex-col gap-2">
-                        {discarded && (
-                            <FailureNotice failure={discarded} title={t('chat.failed')} />
-                        )}
-                        <RetryCountdown at={view.run.retry.at} number={view.run.retry.number} />
-                    </div>
-                )}
-                {failed && <FailureNotice failure={failed} title={t('chat.failed')} />}
             </ConversationContent>
             <ConversationScrollButton />
         </Conversation>

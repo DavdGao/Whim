@@ -365,7 +365,13 @@ export function ToolCallView({
                 )}
             </ActivityLine>
             {open?.state === 'asking' && (
-                <Item variant="outline" size="sm" className="rounded-2xl">
+                // Padding matches the corner radius; the negative margin of the same size widens
+                // the card past the text column so its icon and buttons line up with the text edges.
+                <Item
+                    variant="outline"
+                    size="sm"
+                    className="-mx-4 w-[calc(100%+2rem)] gap-3 rounded-2xl px-4 py-3"
+                >
                     <ItemMedia variant="icon">
                         <Icon />
                     </ItemMedia>
