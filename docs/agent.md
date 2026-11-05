@@ -24,7 +24,7 @@ A session's state is the fold of its journal:
 - **Runs** — one active run at most. A run is a sequence of steps; each step makes one or more model attempts.
 - **Jobs** — tool executions owned by Core's Job service, referenced from history.
 
-A session may have a **workspace**: a directory the user picks when creating it, fixed for the session's life. Workspace tools are offered only with a workspace, and the epoch's system prompt is the user's agent profile (name and instructions from Settings) followed by the workspace path, platform, and date as of the epoch's start. Profile edits therefore reach a session only at its next epoch.
+A session has a **workspace**: a directory the user picks when creating it, or `~/Whim` (created on demand) when they pick none, fixed for the session's life. Sessions from before this default may have none; workspace tools are offered only with a workspace, and the epoch's system prompt is the user's agent profile (name and instructions from Settings) followed by the workspace path, platform, and date as of the epoch's start. Profile edits therefore reach a session only at its next epoch.
 
 The journal head (latest seq), the epoch, and the run generation are separate values. New input advances the head without invalidating an in-flight step.
 
@@ -185,7 +185,7 @@ The switch is recorded as `epoch.started { reason: 'model-switch' }`, and the co
 
 ### 9.1 Definitions
 
-Tools are registered by plugins through `context.tools.register(definition)`; Core registers only the job tools (`JobOutput`, `JobStop`). First-party plugins provide `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep` (`@whimkit/plugin-workspace`) and local `WebFetch` (`@whimkit/plugin-web`; a local `WebSearch` needs a keyed search API and is not available yet, so web search is native-only for now). An MCP bridge would be one more plugin registering tools; nothing in Core is MCP-specific.
+The base tools are part of the harness, not plugins: `@whimkit/tools` provides `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, and local `WebFetch`, and Desktop hands them to the tool runtime, which adds the job tools (`JobOutput`, `JobStop`). Every agent has them; they cannot be disabled, and a plugin tool with a base tool's name is ignored. A local `WebSearch` needs a keyed search API and is not available yet, so web search is native-only for now. Plugins add further tools through `context.tools.register(definition)`; an MCP bridge would be one more such plugin, and nothing in Core is MCP-specific. Declarations list base tools, then plugin tools in registration order, then the job tools.
 
 ```ts
 interface ToolDefinition {

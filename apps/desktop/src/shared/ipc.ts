@@ -156,6 +156,10 @@ export interface AppState {
     readonly agent: AgentProfile & { readonly isDefault: boolean };
     readonly chatSlot?: ChatSlot;
     readonly userCardsDir: string;
+    /** The folder a new chat works in when the user picks none. */
+    readonly defaultWorkspace: string;
+    /** Names of the built-in tools every agent has. */
+    readonly baseTools: readonly string[];
     readonly plugins: readonly PluginInfo[];
     readonly credentialTypes: readonly CredentialTypeInfo[];
     readonly adapters: readonly AdapterInfo[];

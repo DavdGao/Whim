@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { stat } from 'node:fs/promises';
+import { mkdir, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 
 import { Agent, rendererVersion } from '@whimkit/agent';
@@ -16,6 +17,7 @@ import {
     StoreError,
     ToolRuntime,
 } from '@whimkit/core';
+import { baseTools } from '@whimkit/tools';
 import { z } from 'zod';
 
 import {
@@ -191,6 +193,7 @@ class Backend {
     #accepting = true;
     readonly agent: Agent;
     readonly tools: ToolRuntime;
+    readonly #baseTools: ReturnType<typeof baseTools>;
 
     /**
      * Wire services together.
@@ -200,6 +203,8 @@ class Backend {
      * @param credentials Credentials.
      * @param models Adapter binding.
      * @param artifactsDir Directory for offloaded tool output.
+     * @param version Application version.
+     * @param defaultWorkspace The folder a chat works in when the user picks none.
      */
     constructor(
         readonly store: Store,
@@ -207,10 +212,13 @@ class Backend {
         readonly catalog: Catalog,
         readonly credentials: CredentialService,
         readonly models: ModelService,
-        artifactsDir: string
+        artifactsDir: string,
+        version: string,
+        readonly defaultWorkspace: string
     ) {
+        this.#baseTools = baseTools(version);
         // A finished background job wakes an idle session so the agent can react to it.
-        this.tools = new ToolRuntime(store, host, artifactsDir, sessionId =>
+        this.tools = new ToolRuntime(store, host, this.#baseTools, artifactsDir, sessionId =>
             this.schedule(sessionId, 'job')
         );
         this.agent = new Agent(store, models, this.tools);
@@ -415,6 +423,8 @@ class Backend {
             resumeAfterRestart: (await this.store.getSetting('agent.resumeAfterRestart')) === true,
             ...(slot.success ? { chatSlot: slot.data } : {}),
             userCardsDir: this.catalog.userDir,
+            defaultWorkspace: this.defaultWorkspace,
+            baseTools: this.#baseTools.map(tool => tool.name),
             plugins: this.host.statuses().map(status => ({
                 id: status.id,
                 version: status.version,
@@ -528,16 +538,17 @@ class Backend {
     /**
      * Create a session from a chat slot.
      * @param slot Credential, card, and thinking level.
-     * @param workspace Absolute directory the session works in.
+     * @param chosen Absolute directory the session works in; the default folder when absent.
      * @returns The session id.
      */
-    async createSession(slot: ChatSlot, workspace?: string): Promise<string> {
+    async createSession(slot: ChatSlot, chosen?: string): Promise<string> {
         const card = await this.#checkBinding(slot.cardId, slot.credentialId);
-        if (workspace !== undefined) {
-            const info = isAbsolute(workspace) ? await stat(workspace).catch(() => null) : null;
+        if (chosen !== undefined) {
+            const info = isAbsolute(chosen) ? await stat(chosen).catch(() => null) : null;
             if (!info?.isDirectory())
                 throw new StoreError('invalid', 'The workspace folder does not exist.');
-        }
+        } else await mkdir(this.defaultWorkspace, { recursive: true });
+        const workspace = chosen ?? this.defaultWorkspace;
         const sessionId = randomUUID();
         await this.store.execute({
             type: 'create',
@@ -546,7 +557,7 @@ class Backend {
             title: '',
             credentialId: slot.credentialId,
             ...(slot.thinking ? { thinking: slot.thinking } : {}),
-            ...(workspace ? { workspace } : {}),
+            workspace,
             epoch: await this.#epoch(card, workspace),
         });
         await this.store.setSetting('slot.chat', slot);
@@ -760,15 +771,17 @@ class Backend {
  */
 function bundledPlugins(): { dir: string; source: 'bundled' }[] {
     const require = createRequire(import.meta.url);
-    return ['@whimkit/plugin-dashscope', '@whimkit/plugin-workspace', '@whimkit/plugin-web'].map(
-        name => ({
-            dir: dirname(require.resolve(`${name}/package.json`)),
-            source: 'bundled' as const,
-        })
-    );
+    return ['@whimkit/plugin-dashscope'].map(name => ({
+        dir: dirname(require.resolve(`${name}/package.json`)),
+        source: 'bundled' as const,
+    }));
 }
 
-const initSchema = z.strictObject({ type: z.literal('init'), userData: z.string().min(1) });
+const initSchema = z.strictObject({
+    type: z.literal('init'),
+    userData: z.string().min(1),
+    version: z.string().min(1),
+});
 const cipherReplySchema = z.object({
     type: z.literal('cipher'),
     id: z.number(),
@@ -800,14 +813,15 @@ parentPort.on('message', event => {
         return;
     }
     const init = initSchema.safeParse(data);
-    if (init.success) void start(init.data.userData);
+    if (init.success) void start(init.data.userData, init.data.version);
 });
 
 /**
  * Open services and report readiness to Main.
  * @param userData The application data directory.
+ * @param version Application version.
  */
-async function start(userData: string): Promise<void> {
+async function start(userData: string, version: string): Promise<void> {
     try {
         const store = await Store.open(join(userData, 'whim.sqlite'));
         const host = new PluginHost(store, bundledPlugins());
@@ -821,7 +835,9 @@ async function start(userData: string): Promise<void> {
             catalog,
             credentials,
             new ModelService(host, credentials),
-            join(userData, 'artifacts')
+            join(userData, 'artifacts'),
+            version,
+            join(homedir(), 'Whim')
         );
         await backend.recover();
         for (const port of pendingPorts.splice(0)) backend.attach(port);

@@ -2,7 +2,7 @@
 
 Whim is a macOS desktop agent workspace built with Electron, TypeScript, React, and pnpm workspaces. This document defines the application architecture: processes, packages, plugins, credentials, model cards, storage, errors, and the frontend shell. [agent.md](agent.md) defines agent execution and context. [roadmap.md](roadmap.md) is the task list. Provider facts and their verification dates live in [providers/](providers/).
 
-Everything outside Core is a plugin. Core owns contracts, persistence, the agent runtime host, and the services plugins call; it does not know any provider protocol.
+Everything outside Core and the base tools (`@whimkit/tools`, part of the harness) is a plugin. Core owns contracts, persistence, the agent runtime host, and the services plugins call; it does not know any provider protocol.
 
 ## 1. Scope
 

@@ -342,7 +342,7 @@ describe('Agent', () => {
                     inputSchema: new CompiledSchema(tool.inputSchema),
                 });
             const ended: string[] = [];
-            const runtime = new ToolRuntime(store, host, join(dir, 'artifacts'), id =>
+            const runtime = new ToolRuntime(store, host, [], join(dir, 'artifacts'), id =>
                 ended.push(id)
             );
             return { runtime, declarations: runtime.declarations(undefined, []), ended };

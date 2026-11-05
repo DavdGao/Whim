@@ -118,6 +118,8 @@ export class ToolRuntime {
     readonly #jobs = new Map<string, Job>();
     readonly #waiters = new Map<string, (decision: Decision) => void>();
     readonly #locks = new Map<string, Promise<void>>();
+    readonly #base: readonly ToolDefinition<unknown>[];
+    /** Base tools followed by the job tools. */
     readonly #builtins: ToolDefinition<unknown>[];
     readonly #builtinSchemas: Map<string, CompiledSchema>;
     #closing = false;
@@ -125,17 +127,20 @@ export class ToolRuntime {
     /**
      * Create the runtime.
      * @param store Persistence.
-     * @param host Registered tools.
+     * @param host Plugin-registered tools.
+     * @param baseTools Built-in tools every agent has; they win over a plugin tool of the same name.
      * @param artifactsDir Directory for offloaded results and job output.
      * @param onJobEnded Called after a background job's end is committed.
      */
     constructor(
         private readonly store: Store,
         private readonly host: PluginHost,
+        baseTools: readonly ToolDefinition<unknown>[],
         readonly artifactsDir: string,
         private readonly onJobEnded: (sessionId: string) => void
     ) {
-        this.#builtins = [this.#jobOutputTool(), this.#jobStopTool()];
+        this.#base = baseTools;
+        this.#builtins = [...baseTools, this.#jobOutputTool(), this.#jobStopTool()];
         this.#builtinSchemas = new Map(
             this.#builtins.map(tool => [tool.name, new CompiledSchema(tool.inputSchema)])
         );
@@ -145,18 +150,18 @@ export class ToolRuntime {
      * The tools to freeze into a new epoch.
      * @param workspace The session's workspace.
      * @param nativeTools Standard ids the provider executes natively.
-     * @returns Declarations in registration order, then the job tools.
+     * @returns Base tools, then plugin tools in registration order, then the job tools.
      */
     declarations(workspace: string | undefined, nativeTools: readonly string[]): ToolDeclaration[] {
-        const tools = [...this.host.tools.values()]
+        const plugins = [...this.host.tools.values()]
             .map(entry => entry.tool)
-            .filter(
-                tool =>
-                    (workspace || !tool.needsWorkspace) &&
-                    !nativeTools.includes(tool.standard ?? '')
-            );
+            .filter(tool => !this.#builtins.some(builtin => builtin.name === tool.name));
+        const tools = [...this.#base, ...plugins].filter(
+            tool =>
+                (workspace || !tool.needsWorkspace) && !nativeTools.includes(tool.standard ?? '')
+        );
         if (tools.length === 0) return [];
-        return [...tools, ...this.#builtins].map(tool => ({
+        return [...tools, ...this.#builtins.slice(this.#base.length)].map(tool => ({
             name: tool.name,
             description: tool.description,
             inputSchema: tool.inputSchema,
@@ -245,7 +250,7 @@ export class ToolRuntime {
      */
     #resolveTool(view: SessionView, name: string): ToolDefinition<unknown> | undefined {
         if (!view.epoch.tools.some(tool => tool.name === name)) return undefined;
-        return this.host.tools.get(name)?.tool ?? this.#builtins.find(tool => tool.name === name);
+        return this.#builtins.find(tool => tool.name === name) ?? this.host.tools.get(name)?.tool;
     }
 
     /**
@@ -257,8 +262,9 @@ export class ToolRuntime {
     #resolve(view: SessionView, call: OpenCall): Resolved | { error: string } {
         if (!view.epoch.tools.some(tool => tool.name === call.name))
             return { error: `There is no tool named ${call.name}.` };
-        const registered = this.host.tools.get(call.name);
-        const tool = registered?.tool ?? this.#builtins.find(item => item.name === call.name);
+        const builtin = this.#builtins.find(item => item.name === call.name);
+        const registered = builtin ? undefined : this.host.tools.get(call.name);
+        const tool = builtin ?? registered?.tool;
         if (!tool) return { error: `The tool ${call.name} is not available right now.` };
         let input: unknown;
         try {

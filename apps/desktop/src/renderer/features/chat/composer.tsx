@@ -102,6 +102,7 @@ export function Composer({
                 <PromptInputTools>
                     <WorkspacePicker
                         workspace={workspace}
+                        fallback={state.defaultWorkspace}
                         {...(onWorkspaceChange ? { onChange: onWorkspaceChange } : {})}
                     />
                     <ModelPicker

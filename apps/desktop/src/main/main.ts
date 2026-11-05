@@ -98,7 +98,11 @@ function startBackend(): void {
         const delay = Math.min(30_000, 500 * 2 ** restarts++);
         setTimeout(startBackend, delay);
     });
-    child.postMessage({ type: 'init', userData: app.getPath('userData') });
+    child.postMessage({
+        type: 'init',
+        userData: app.getPath('userData'),
+        version: app.getVersion(),
+    });
 }
 
 /** Create the main window. */
