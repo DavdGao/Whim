@@ -315,7 +315,18 @@ describe('PluginHost, Catalog, and CredentialService', () => {
                 [
                     'failed',
                     'decide is not declared in whim.contributes.adapters.',
-                    { credentialTypes: ['key'], adapters: ['chat'], tools: [] },
+                    {
+                        credentialTypes: ['key'],
+                        adapters: ['chat'],
+                        tools: [],
+                        services: [],
+                        methods: [],
+                        topics: [],
+                        pages: [],
+                        settingsSections: [],
+                        chatTools: [],
+                        composerActions: [],
+                    },
                 ],
             ]
         );

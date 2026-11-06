@@ -264,6 +264,42 @@ export interface ToolDefinition<Input = Record<string, unknown>> {
     execute(input: Input, context: ToolContext): Promise<ToolOutput>;
 }
 
+/**
+ * Long-running work owned by the plugin, independent of windows (design.md §5.7). Started after
+ * activation succeeds; `signal` aborts when the plugin stops, and the returned promise must
+ * settle soon after. A promise that rejects before then is reported on the plugin.
+ */
+export interface ServiceDefinition {
+    /** Declared in `whim.contributes.services`. */
+    readonly id: string;
+    start(signal: AbortSignal): Promise<void> | void;
+}
+
+/**
+ * A request the plugin's own client entry can make. Core validates the input before `handle`
+ * and the output after it; `signal` aborts when the plugin stops.
+ */
+export interface MethodDefinition<Input = unknown, Output = unknown> {
+    /** Declared in `whim.contributes.methods`. */
+    readonly name: string;
+    readonly inputSchema: JsonSchema;
+    readonly outputSchema: JsonSchema;
+    handle(input: Input, signal: AbortSignal): Promise<Output> | Output;
+}
+
+/** A value the plugin's client entry can follow: the latest value, then every change. */
+export interface TopicDefinition<Value = unknown> {
+    /** Declared in `whim.contributes.topics`. */
+    readonly name: string;
+    readonly schema: JsonSchema;
+    readonly initial: Value;
+}
+
+/** Publishes a topic's new value; Core validates it against the topic's schema. */
+export interface Topic<Value = unknown> {
+    publish(value: Value): void;
+}
+
 /** Services a plugin receives for one activation. Registrations are disposed with it. */
 export interface PluginContext {
     readonly pluginId: string;
@@ -274,6 +310,13 @@ export interface PluginContext {
     readonly tools: {
         // Plugins type their own input; Core validates it against the schema first.
         register<Input>(tool: ToolDefinition<Input>): Disposer;
+    };
+    readonly services: { register(service: ServiceDefinition): Disposer };
+    /** Calls and subscriptions for the plugin's own client entry, nobody else's. */
+    readonly rpc: {
+        // Plugins type their own input and output; Core validates both against the schemas.
+        method<Input, Output>(method: MethodDefinition<Input, Output>): Disposer;
+        topic<Value>(topic: TopicDefinition<Value>): Topic<Value>;
     };
 }
 

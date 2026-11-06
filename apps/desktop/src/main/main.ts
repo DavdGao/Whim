@@ -1,5 +1,5 @@
-import { stat } from 'node:fs/promises';
-import { dirname, isAbsolute, join } from 'node:path';
+import { readFile, realpath, stat } from 'node:fs/promises';
+import { dirname, extname, isAbsolute, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -12,13 +12,14 @@ import {
     Notification,
     powerMonitor,
     powerSaveBlocker,
+    protocol,
     safeStorage,
     shell,
     Tray,
     utilityProcess,
 } from 'electron';
 
-import { activitySchema, attentionSchema } from '../shared/main-protocol.js';
+import { activitySchema, attentionSchema, pluginClientsSchema } from '../shared/main-protocol.js';
 
 import { mainText } from './strings.js';
 
@@ -42,6 +43,58 @@ let quitConfirmed = false;
 let confirmingQuit = false;
 /** Shown notifications, kept so their click handlers are not collected. */
 const notifications = new Set<Notification>();
+/** Client directories of active plugins, by plugin id (design.md §5.7). */
+let pluginRoots = new Map<string, string>();
+
+/** Files a plugin client directory may serve, by extension. */
+const pluginFileTypes: Readonly<Record<string, string>> = {
+    '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
+    '.css': 'text/css',
+    '.json': 'application/json',
+    '.svg': 'image/svg+xml',
+    '.png': 'image/png',
+    '.woff2': 'font/woff2',
+};
+
+// Plugin client files load as ES modules from the file:// page, which needs a standard,
+// secure, CORS-enabled scheme.
+protocol.registerSchemesAsPrivileged([
+    {
+        scheme: 'whim-plugin',
+        privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+    },
+]);
+
+/**
+ * Serve `whim-plugin://plugins/<pluginId>/<path>` from that plugin's client directory only.
+ * @param request The request.
+ * @returns The file, or 404 for anything outside an active plugin's client directory.
+ */
+async function servePluginFile(request: Request): Promise<Response> {
+    const notFound = new Response(null, { status: 404 });
+    const url = new URL(request.url);
+    const [, encodedId, ...segments] = url.pathname.split('/');
+    if (url.host !== 'plugins' || !encodedId || segments.length === 0) return notFound;
+    try {
+        const configured = pluginRoots.get(decodeURIComponent(encodedId));
+        if (!configured) return notFound;
+        const root = await realpath(configured);
+        // Resolving symlinks keeps a link inside the directory from reaching outside it.
+        const file = await realpath(join(root, ...segments.map(decodeURIComponent)));
+        const type = pluginFileTypes[extname(file).toLowerCase()];
+        if (!file.startsWith(root + sep) || !type) return notFound;
+        return new Response(new Uint8Array(await readFile(file)), {
+            headers: {
+                'content-type': type,
+                'access-control-allow-origin': '*',
+                'x-content-type-options': 'nosniff',
+            },
+        });
+    } catch {
+        return notFound;
+    }
+}
 
 /**
  * Answer a Backend cipher request with safeStorage, which only Main can use.
@@ -184,7 +237,13 @@ function startBackend(): void {
                 op: String(message.op),
                 data: 'data' in message ? message.data : undefined,
             });
-        else if (message.type === 'activity') {
+        else if (message.type === 'plugin-clients') {
+            const parsed = pluginClientsSchema.safeParse(message);
+            if (parsed.success)
+                pluginRoots = new Map(
+                    parsed.data.clients.map(client => [client.pluginId, client.root])
+                );
+        } else if (message.type === 'activity') {
             const parsed = activitySchema.safeParse(message);
             if (parsed.success) applyActivity(parsed.data);
         } else if (message.type === 'attention') {
@@ -310,6 +369,7 @@ if (!app.requestSingleInstanceLock()) {
             if (!info?.isDirectory()) return false;
             return (await shell.openPath(path)) === '';
         });
+        protocol.handle('whim-plugin', servePluginFile);
         startBackend();
         tray = new Tray(join(here, 'resources', 'trayTemplate.png'));
         updateTray();

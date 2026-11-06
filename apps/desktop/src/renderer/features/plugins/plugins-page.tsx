@@ -9,6 +9,8 @@ import { call } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 import { pluginText } from '../../lib/messages';
 import { useAction } from '../../lib/use-action';
+import { PluginBoundary } from '../../plugins/plugin-provider';
+import { usePluginRegistrations } from '../../plugins/plugin-ui';
 
 import type { AppState } from '../../../shared/ipc';
 
@@ -63,6 +65,7 @@ function PluginSwitch({
  */
 export function PluginSettings({ state }: { state: AppState }) {
     const { t, locale } = useT();
+    const { settingsSections, failures } = usePluginRegistrations();
     const dates = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
     return (
         <div className="flex flex-col gap-6">
@@ -81,6 +84,14 @@ export function PluginSettings({ state }: { state: AppState }) {
                                     plugin.availability as keyof typeof availabilityKeys
                                 ];
                             const switchId = `plugin-${plugin.id}`;
+                            const name = pluginText(
+                                plugin.locales,
+                                locale,
+                                'plugin.name',
+                                plugin.id
+                            );
+                            const section = settingsSections.get(plugin.id);
+                            const failure = failures.get(plugin.id);
                             return (
                                 <Card key={plugin.id}>
                                     <CardContent className="flex items-start gap-4">
@@ -93,14 +104,7 @@ export function PluginSettings({ state }: { state: AppState }) {
                                         </div>
                                         <div className="min-w-0 flex-1">
                                             <div className="flex flex-wrap items-center gap-2">
-                                                <p className="font-medium">
-                                                    {pluginText(
-                                                        plugin.locales,
-                                                        locale,
-                                                        'plugin.name',
-                                                        plugin.id
-                                                    )}
-                                                </p>
+                                                <p className="font-medium">{name}</p>
                                                 <Badge
                                                     variant={
                                                         plugin.availability === 'active'
@@ -151,6 +155,22 @@ export function PluginSettings({ state }: { state: AppState }) {
                                                 >
                                                     {plugin.error}
                                                 </StatusAlert>
+                                            )}
+                                            {failure && (
+                                                <StatusAlert
+                                                    tone="error"
+                                                    title={t('plugins.clientFailed', { name })}
+                                                    className="mt-2 text-xs break-all"
+                                                >
+                                                    {failure}
+                                                </StatusAlert>
+                                            )}
+                                            {section && (
+                                                <div className="mt-4">
+                                                    <PluginBoundary pluginId={plugin.id}>
+                                                        <section.component />
+                                                    </PluginBoundary>
+                                                </div>
                                             )}
                                         </div>
                                         <div className="flex flex-col items-end gap-1">

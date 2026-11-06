@@ -116,7 +116,7 @@ A plugin is an npm package with a `whim` field in `package.json`:
 
 - The plugin id is the package name; the version is `package.json.version`. Whim-owned packages share one version, and `peerDependencies` pins Core exactly.
 - `api` is the plugin API version the plugin was built against, `MAJOR.MINOR` (§5.7). Whim activates the plugin only when the majors are equal and its own minor is at least the plugin's; otherwise the plugin is `failed` with a message naming both versions.
-- `host` is the Backend entry. `client` is the Renderer entry and `themes` lists declarative themes (§5.7).
+- `host` is the Backend entry. `client` is the Renderer entry, one ES module; `clientStyle` is its precompiled CSS, beside it. `themes` lists declarative themes (§5.7).
 - `contributes` declares, per registration kind (§5.5), the names the plugin registers: the part after `<pluginId>#` for credential types and adapters, the model-facing name for tools. The Plugins page shows the declaration, so the user sees what a plugin adds before enabling it. Registering an undeclared name fails activation; a declared name the plugin does not register (for example, behind a setting) is allowed.
 - `cards` is a directory of seed model cards (§7.3).
 - `category` (`models`, `tools`, or `other`, the default) groups the plugin in Settings.
@@ -149,6 +149,7 @@ Core stores one row per installed plugin: `id`, `version`, `source` (`bundled` o
 - `contentHash` is a SHA-256 over the package's files, computed at installation.
 - On start Core recomputes it. A mismatch sets availability `modified` and the plugin is not activated until the user re-trusts it in the Plugins page, which records the new hash.
 - Bundled plugins live inside the signed application bundle; the check matters mainly for local installs.
+- Local plugins are package directories under `<userData>/plugins/`. One seen for the first time is recorded disabled; the user enables it in the Plugins page after seeing what it declares (§5.1), and it activates at the next start.
 
 ### 5.4 Disabling and removing a plugin
 
@@ -167,16 +168,16 @@ Startup applies the same rules when a plugin is missing or fails to activate.
 
 ### 5.5 Registrations
 
-| Registration    | `contributes` key | Stability | Purpose                                                                                                             |
-| --------------- | ----------------- | --------- | ------------------------------------------------------------------------------------------------------------------- |
-| Credential type | `credentialTypes` | stable    | A JSON Schema for one kind of account credential (§6)                                                               |
-| Model adapter   | `adapters`        | stable    | Implements one model kind (`chat`, `decision`, later `tts`, `asr`, `embedding`) (§7.4)                              |
-| Tool            | `tools`           | stable    | A local tool definition and executor ([agent.md §9](agent.md#9-tools)); names are unique across plugins             |
-| Service         | `services`        | planned   | Long-running work owned by the plugin scope, independent of windows (§5.7)                                          |
-| Method, topic   | `methods`         | planned   | Typed calls and subscriptions the plugin's own client entry uses (§5.7)                                             |
-| Processor       | `processors`      | planned   | Converts an attachment media type into model-deliverable content (§8)                                               |
-| Context source  | `contextSources`  | planned   | A prefix-affecting source such as skills or memory ([agent.md §7](agent.md#7-context-sources-and-the-prompt-cache)) |
-| Settings        | —                 | planned   | A JSON Schema for plugin-level settings, stored by Core                                                             |
+| Registration    | `contributes` key   | Stability    | Purpose                                                                                                             |
+| --------------- | ------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Credential type | `credentialTypes`   | stable       | A JSON Schema for one kind of account credential (§6)                                                               |
+| Model adapter   | `adapters`          | stable       | Implements one model kind (`chat`, `decision`, later `tts`, `asr`, `embedding`) (§7.4)                              |
+| Tool            | `tools`             | stable       | A local tool definition and executor ([agent.md §9](agent.md#9-tools)); names are unique across plugins             |
+| Service         | `services`          | experimental | Long-running work owned by the plugin scope, independent of windows (§5.7)                                          |
+| Method, topic   | `methods`, `topics` | experimental | Typed calls and subscriptions the plugin's own client entry uses (§5.7)                                             |
+| Processor       | `processors`        | planned      | Converts an attachment media type into model-deliverable content (§8)                                               |
+| Context source  | `contextSources`    | planned      | A prefix-affecting source such as skills or memory ([agent.md §7](agent.md#7-context-sources-and-the-prompt-cache)) |
+| Settings        | —                   | planned      | A JSON Schema for plugin-level settings, stored by Core                                                             |
 
 **Stable** registrations keep their contract within a plugin API major version; **experimental** ones may change in a minor version and say so in their types; **planned** ones are designed but not yet registrable.
 
@@ -207,20 +208,22 @@ Whim's plugin system is a fixed set of typed extension points, not a general com
 
 Anything that must continue without a window (a connection, a watcher, a sync loop, a terminal) is a host **service**: registered with `start(signal)`, owned by the plugin scope, and stopped in reverse order on deactivation. Client code only views and commands; unmounting never stops work. A plugin therefore works without a window, and its UI is optional (§4.1).
 
-**Talking to the host half.** A host entry registers **methods** (request → response, JSON Schema for input and output, validated at both ends, cancellable) and **topics** (subscriptions that deliver an initial value, then changes with a sequence for catch-up). The client entry reaches only its own plugin's methods and topics, through `context.rpc`, over the existing Renderer–Backend port and namespaced by plugin id. Business state still changes through Core commands; plugin methods serve the plugin's own services.
+**Talking to the host half.** A host entry registers **methods** (request → response; Core validates the input before the handler and the output after it) and **topics** (a value with an initial state; each `publish` is validated and numbered). The client entry reaches only its own plugin's methods and topics, through `context.rpc.call` and the `context.rpc.useTopic` hook, over the existing Renderer–Backend port (`plugin.call`, `plugin.topics`, and `plugin.topic` events). A call's signal aborts when the plugin stops or the window is replaced; a reconnected window reads every topic's latest value again. Business state still changes through Core commands; plugin methods serve the plugin's own services. Services, methods, and topics are declared in `contributes` like every other registration.
 
 **Slots.** UI extension points are named, typed slots declared by the host component that renders the location. A slot receives typed props and returns React content inside the host's layout; plugins never reach host DOM or global styles. Each slot is either additive (a list ordered by the host) or keyed (one entry per key, such as a tool name), and two plugins claiming the same key is an activation error. Every slot is wrapped in an error boundary that shows a failure naming the plugin. The host's own pages and settings tabs are registered through the same registries, so a slot is never a special path for plugins.
 
-| Slot               | Kind               | Contract                                                                  | Status  |
-| ------------------ | ------------------ | ------------------------------------------------------------------------- | ------- |
-| `page`             | list               | A navigation rail page: id, title key, lucide icon, component             | planned |
-| `settings.section` | keyed by plugin    | A custom section on the plugin's settings, in place of the generated form | planned |
-| `chat.tool`        | keyed by tool name | The trace renderer of one tool's call and result                          | planned |
-| `composer.action`  | list               | An entry in the composer's Add menu that stages input                     | planned |
+| Slot               | Kind               | Contract                                                                       | Status       |
+| ------------------ | ------------------ | ------------------------------------------------------------------------------ | ------------ |
+| `page`             | list               | A navigation rail page: id, title key, icon, component                         | experimental |
+| `settings.section` | keyed by plugin    | A section on the plugin's card in Settings → Plugins                           | experimental |
+| `chat.tool`        | keyed by tool name | The trace renderer of one tool's calls; the permission prompt stays the host's | experimental |
+| `composer.action`  | list               | An entry in the composer's Add menu that inserts text or attaches files        | experimental |
 
 **Themes** are data, not code: a theme lists values for the documented design tokens (§11.3) in light and dark, optionally a background (color, gradient, or an image from the package, at most 2 MiB), validated by token name and applied by the host. Unknown tokens are reported and ignored.
 
-**Shared runtime.** A client entry is an ES module built against host-provided externals: `react`, `react/jsx-runtime`, `@whimkit/ui` (the host's shadcn and AI Elements components and icons, extracted into a shared package for this), and `@whimkit/client` (the client context types, hooks, `t()` for the plugin's own locales). The Renderer publishes them through an import map, so every plugin uses the host's single copy.
+**Client entries.** A client entry is one ES module whose default export is `defineClient({ activate })` from `@whimkit/client`, the client API package (context and slot types; plugins bundle it). `activate(context)` receives the plugin id, `useT` for the plugin's own locale catalogs, `rpc`, and `slots`; every slot registration must be declared in `contributes` (`pages`, `settingsSections`, `chatTools`, `composerActions`) and becomes visible only once `activate` resolves. A client entry that fails to load or activate leaves no registrations and is reported on its Plugins card; a component that throws is contained by its slot's error boundary.
+
+**Shared runtime.** Client entries import `react`, `react/jsx-runtime`, `react-dom`, `sonner`, and `@whimkit/ui/components/*` and `@whimkit/ui/lib/utils` as externals and bundle everything else (icons included). The Renderer publishes its own module objects, and the build (`scripts/shared-modules.mjs`) emits a forwarding module per specifier and a static import map, whose hash is the only inline script the page's CSP allows; every plugin therefore uses the host's single React and component instances.
 
 **Loading.** Main serves plugin client files through a `whim-plugin://<pluginId>/` protocol confined to the package's declared client directory; the Renderer's content security policy allows scripts only from the application and that protocol. Client entries load after Backend reports active plugins, and a plugin's slots are removed when it stops. Client styles are precompiled Tailwind against the host tokens, scoped to the plugin's root, without preflight.
 

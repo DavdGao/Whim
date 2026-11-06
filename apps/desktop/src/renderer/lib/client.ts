@@ -15,7 +15,7 @@ declare global {
     }
 }
 
-const eventTypes = new Set(['state', 'records', 'stream', 'discarded']);
+const eventTypes = new Set(['state', 'records', 'stream', 'discarded', 'plugin.topic']);
 
 /** An IPC failure surfaced to components. */
 export class ClientError extends Error {

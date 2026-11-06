@@ -42,6 +42,8 @@ import {
 import { ActionButton } from '../../components/action-button';
 import { call } from '../../lib/client';
 import { useT } from '../../lib/i18n';
+import { PluginBoundary } from '../../plugins/plugin-provider';
+import { usePluginRegistrations } from '../../plugins/plugin-ui';
 
 import { MediaView } from './media-view';
 
@@ -349,6 +351,7 @@ export function ToolCallView({
     jobRunning: boolean;
 }) {
     const { t } = useT();
+    const renderer = usePluginRegistrations().chatTools.get(block.name);
     const input = parseArguments(block.arguments);
     const target = subject(block.name, input);
     const tool = known[block.name];
@@ -367,29 +370,51 @@ export function ToolCallView({
               : JSON.stringify(input, null, 2);
     return (
         <>
-            <ActivityLine
-                icon={Icon}
-                title={title}
-                detail={detail}
-                note={shown.note && t(shown.note)}
-                status={shown.active ? 'running' : shown.phase === 'failed' ? 'error' : undefined}
-            >
-                {result && (
-                    <div className="flex flex-col gap-2">
-                        <Details label={t('tool.input')} text={inputText} />
-                        {result.content && (
-                            <Details
-                                label={failed ? t('tool.status.error') : t('tool.output')}
-                                text={result.content}
-                                error={failed}
-                            />
-                        )}
-                        {result.media && (
-                            <MediaView sessionId={sessionId} media={result.media} align="start" />
-                        )}
-                    </div>
-                )}
-            </ActivityLine>
+            {renderer ? (
+                // A plugin renders this tool's calls (design.md §5.7); permission stays the host's.
+                <PluginBoundary pluginId={renderer.pluginId}>
+                    <renderer.component
+                        sessionId={sessionId}
+                        callId={block.callId}
+                        name={block.name}
+                        input={input}
+                        state={result ? 'done' : (open?.state ?? 'pending')}
+                        {...(result
+                            ? { result: { status: result.status, content: result.content } }
+                            : {})}
+                    />
+                </PluginBoundary>
+            ) : (
+                <ActivityLine
+                    icon={Icon}
+                    title={title}
+                    detail={detail}
+                    note={shown.note && t(shown.note)}
+                    status={
+                        shown.active ? 'running' : shown.phase === 'failed' ? 'error' : undefined
+                    }
+                >
+                    {result && (
+                        <div className="flex flex-col gap-2">
+                            <Details label={t('tool.input')} text={inputText} />
+                            {result.content && (
+                                <Details
+                                    label={failed ? t('tool.status.error') : t('tool.output')}
+                                    text={result.content}
+                                    error={failed}
+                                />
+                            )}
+                            {result.media && (
+                                <MediaView
+                                    sessionId={sessionId}
+                                    media={result.media}
+                                    align="start"
+                                />
+                            )}
+                        </div>
+                    )}
+                </ActivityLine>
+            )}
             {open?.state === 'asking' && (
                 // Padding matches the corner radius; the negative margin of the same size widens
                 // the card past the text column so its icon and buttons line up with the text edges.

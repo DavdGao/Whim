@@ -21,6 +21,23 @@ export const activitySchema = z.strictObject({
 });
 export type Activity = z.infer<typeof activitySchema>;
 
+/** Directories Main may serve as `whim-plugin://plugins/<pluginId>/` (design.md §5.7). */
+export const pluginClientsSchema = z.strictObject({
+    type: z.literal('plugin-clients'),
+    clients: z.array(z.strictObject({ pluginId: z.string().min(1), root: z.string().min(1) })),
+});
+export type PluginClients = z.infer<typeof pluginClientsSchema>;
+
+/**
+ * The URL a plugin's client file is loaded from.
+ * @param pluginId The plugin.
+ * @param file The file, relative to the plugin's client directory.
+ * @returns The `whim-plugin:` URL.
+ */
+export function pluginClientUrl(pluginId: string, file: string): string {
+    return `whim-plugin://plugins/${encodeURIComponent(pluginId)}/${file}`;
+}
+
 /** A committed fact that needs the user, shown as a notification while no window is focused. */
 export const attentionSchema = z.strictObject({
     type: z.literal('attention'),
