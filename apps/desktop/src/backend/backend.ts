@@ -49,9 +49,10 @@ import type {
     SessionSnapshot,
     StagedAttachment,
 } from '../shared/ipc.js';
+import type { Activity, Attention } from '../shared/main-protocol.js';
 import type { AgentEvent } from '@whimkit/agent';
 import type { ChatCard, FrozenChatCard, Reviewer, SecretCipher } from '@whimkit/core';
-import type { MediaBlock } from '@whimkit/core/contracts';
+import type { AgentRecord, MediaBlock } from '@whimkit/core/contracts';
 import type { MessagePortMain } from 'electron';
 
 const parentPort = process.parentPort;
@@ -229,6 +230,10 @@ class Backend {
     readonly #baseTools: ReturnType<typeof baseTools>;
     /** Attachments wait here between staging and sending; cleared at start. */
     readonly #stagingDir: string;
+    readonly #toMain: (message: Activity | Attention) => void;
+    /** The activity snapshot being computed, and whether another was asked for meanwhile. */
+    #reporting: Promise<void> | undefined;
+    #reportAgain = false;
 
     /**
      * Wire services together.
@@ -239,6 +244,7 @@ class Backend {
      * @param models Adapter binding.
      * @param userData The application data directory; session files live in `sessions/`.
      * @param version Application version.
+     * @param toMain Sends Main activity and attention for background operation (design.md §4.1).
      */
     constructor(
         readonly store: Store,
@@ -247,8 +253,10 @@ class Backend {
         readonly credentials: CredentialService,
         readonly models: ModelService,
         userData: string,
-        version: string
+        version: string,
+        toMain: (message: Activity | Attention) => void
     ) {
+        this.#toMain = toMain;
         this.#baseTools = baseTools(version);
         this.#stagingDir = join(userData, 'staging');
         // A finished background job wakes an idle session so the agent can react to it.
@@ -300,8 +308,11 @@ class Backend {
                         'permission.decided',
                     ].includes(record.body.type)
                 )
-            )
+            ) {
                 this.#emit({ type: 'state' });
+                this.reportActivity();
+            }
+            if (sessionId) this.#attend(sessionId, records);
         });
         catalog.onChange(() => this.#emit({ type: 'state' }));
     }
@@ -315,6 +326,72 @@ class Backend {
         this.#renderer = port;
         port.on('message', event => void this.#handle(port, event.data));
         port.start();
+    }
+
+    /** Send Main a fresh activity snapshot; requests while one is computed coalesce into one more. */
+    reportActivity(): void {
+        if (!this.#accepting) return;
+        if (this.#reporting) {
+            this.#reportAgain = true;
+            return;
+        }
+        this.#reporting = this.#activity()
+            .then(activity => this.#toMain(activity))
+            .catch(error => console.error('Cannot report activity:', describeError(error)))
+            .finally(() => {
+                this.#reporting = undefined;
+                if (this.#reportAgain) {
+                    this.#reportAgain = false;
+                    this.reportActivity();
+                }
+            });
+    }
+
+    /**
+     * Derive the running chats from committed state.
+     * @returns The snapshot.
+     */
+    async #activity(): Promise<Activity> {
+        const locale = localeSchema.safeParse(await this.store.getSetting('locale'));
+        const running: Activity['running'] = [];
+        for (const session of await this.store.sessions()) {
+            if (!session.running) continue;
+            const view = await this.store.view(session.sessionId);
+            running.push({
+                sessionId: session.sessionId,
+                title: view.title,
+                waiting: view.calls.some(
+                    call => call.state === 'asking' && call.review?.state !== 'running'
+                ),
+            });
+        }
+        return { type: 'activity', locale: locale.success ? locale.data : 'en', running };
+    }
+
+    /**
+     * Tell Main about committed facts that need the user: a run that ended on its own, or an ask
+     * left to the user. Interrupted runs were stopped on purpose and do not notify.
+     * @param sessionId The session the records belong to.
+     * @param records Newly committed records.
+     */
+    #attend(sessionId: string, records: readonly AgentRecord[]): void {
+        const kinds: Attention['kind'][] = [];
+        for (const { body } of records) {
+            if (body.type === 'run.ended' && body.result.outcome !== 'interrupted')
+                kinds.push(body.result.outcome);
+            else if (
+                (body.type === 'permission.requested' && !body.reviewer) ||
+                (body.type === 'permission.reviewed' &&
+                    (body.outcome === 'ask' || body.failure !== undefined))
+            )
+                kinds.push('waiting');
+        }
+        const kind = kinds.at(-1);
+        if (!kind) return;
+        this.store
+            .view(sessionId)
+            .then(view => this.#toMain({ type: 'attention', sessionId, title: view.title, kind }))
+            .catch(error => console.error('Cannot report attention:', describeError(error)));
     }
 
     /**
@@ -357,6 +434,7 @@ class Backend {
             case 'settings.locale':
                 await this.store.setSetting('locale', methodSchemas[method].parse(raw).locale);
                 this.#emit({ type: 'state' });
+                this.reportActivity();
                 return null;
             case 'settings.resumeAfterRestart':
                 await this.store.setSetting(
@@ -1120,6 +1198,7 @@ class Backend {
             Promise.all(stopping),
             new Promise(resolve => setTimeout(resolve, 5000)),
         ]);
+        await this.#reporting;
         await this.tools.shutdown();
         this.catalog.stop();
         await this.host.stop();
@@ -1205,11 +1284,13 @@ async function start(userData: string, version: string): Promise<void> {
             credentials,
             new ModelService(host, credentials),
             userData,
-            version
+            version,
+            message => parentPort.postMessage(message)
         );
         await backend.recover();
         for (const port of pendingPorts.splice(0)) backend.attach(port);
         parentPort.postMessage({ type: 'ready' });
+        backend.reportActivity();
     } catch (error) {
         parentPort.postMessage({ type: 'fatal', message: describeError(error) });
     }

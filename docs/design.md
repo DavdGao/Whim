@@ -60,6 +60,30 @@ There is no shared UI package. shadcn components are installed with the official
 - Shutdown order: stop admission → interrupt runs with reason `shutdown` → drain or cancel jobs within a bound → deactivate plugins in reverse dependency order → close the database.
 - Attachments come from the composer's file chooser, drag and drop, or paste. Renderer hands each file's bytes to Backend once (`attachment.stage`, as a binary `Uint8Array`, never Base64); Backend decides the type and keeps the file under a content hash until the message is sent. Renderer never names a path for Backend to read.
 
+### 4.1 Background operation
+
+Whim keeps working when its window is closed. The window is a view; work belongs to Backend.
+
+- **Window closed ≠ quit.** Closing the window leaves Main and Backend running. Runs, tool jobs, and plugin services continue. Reopening the window (Dock, menu bar item, notification, or a second launch) reconnects Renderer, which catches up by sequence number.
+- **Menu bar item.** While Whim runs, Main shows a menu bar item (Electron `Tray`, a template image so it follows the menu bar's appearance). Its title shows how many chats are running, and its menu lists the chats that are running or waiting for the user (clicking one opens the window at that chat), then Open Whim and Quit Whim.
+- **Activity.** Backend sends Main an activity snapshot whenever a run starts or ends or an ask changes: the running chats with their titles and whether each waits for the user, and the UI locale. Main keeps no state of its own beyond the latest snapshot; the snapshot is derived from committed records, so a Backend restart simply sends a new one.
+- **Attention.** Backend sends Main an attention event when a committed record needs the user: a run ended (completed or failed) or a permission ask waits for the user. Main shows it as a macOS notification only when no Whim window is focused; clicking it opens the window at the chat. Interrupted runs (Stop, shutdown) do not notify.
+- **Quit.** Quit Whim in the menu bar item, ⌘Q, or logout stops Backend; closing windows never does. When chats are running, Quit first asks in a native dialog naming how many will be interrupted; confirmed, it follows the shutdown order above. Logout and system shutdown do not ask.
+- **Power.** While any chat is running, Main holds `powerSaveBlocker('prevent-app-suspension')`, so App Nap does not throttle a windowless app; it releases the blocker when the snapshot shows nothing running. Whim does not keep the display awake.
+- **Unattended asks.** A run with no one watching asks normally: the ask waits (with a notification), or goes to the automatic reviewer when auto mode is on (agent.md §10.1). Nothing is approved because the window is closed.
+- **Main strings.** The menu bar item, notifications, and the quit dialog use Main's own small en/zh-CN catalog, keyed by the locale in the activity snapshot.
+- **Beyond Whim's lifetime.** Work that must survive Quit, logout, or a crash runs outside Whim, such as tmux on the execution host for coding agents ([research/coding-agents.md](research/coding-agents.md)). Whim installs no separate always-on daemon: Main stays the long-lived process because it alone owns `safeStorage`, windows, and notifications.
+- **Planned.** Launch at login (`app.setLoginItemSettings`; started at login, Main opens no window), a setting that hides the Dock icon while no window is open, and schedules and triggers (§4.1.1).
+
+#### 4.1.1 Schedules and triggers
+
+Background work that starts without the user is a **trigger** delivering input into a session's inbox, so it follows the same run, permission, and recovery rules as typed input.
+
+- Core owns trigger records in SQLite: kind (`schedule` with a cron expression and time zone, or a plugin event source), target session, the input to deliver, and a missed-fire policy (`skip` or `once`).
+- Backend's scheduler computes the next fire from the records, never from in-memory timers alone. On start it evaluates fires missed while Whim was not running and applies the policy.
+- A fire commits a delivery with a stable id `(triggerId, fireTime)`, so a restart never fires twice, and starts a run with trigger `schedule` or `event`.
+- Plugins contribute trigger sources from their host entries (§5.5); a source emits events, and the trigger decides what to deliver.
+
 ## 5. Plugins
 
 ### 5.1 Manifest

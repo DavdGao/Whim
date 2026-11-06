@@ -7,6 +7,7 @@ import { ChatPage } from './features/chat/chat-page';
 import { SettingsPage } from './features/settings/settings-page';
 import { AppStateProvider } from './lib/app-state';
 import { useAppState } from './lib/app-state-context';
+import { onOpenSession } from './lib/client';
 import { useT } from './lib/i18n';
 import { LocaleProvider } from './lib/locale-provider';
 
@@ -98,6 +99,16 @@ function Shell() {
     const { t } = useT();
     const [page, setPage] = useState<Page>('chat');
     const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
+    // The menu bar item and notifications ask to show a chat (design.md §4.1).
+    const [openRequest, setOpenRequest] = useState<{ sessionId: string }>();
+    useEffect(
+        () =>
+            onOpenSession(sessionId => {
+                setOpenRequest({ sessionId });
+                setPage('chat');
+            }),
+        []
+    );
     const banner =
         status === 'restarting'
             ? t('backend.restarting')
@@ -202,6 +213,7 @@ function Shell() {
                             {page === 'chat' && (
                                 <ChatPage
                                     state={state}
+                                    openRequest={openRequest}
                                     onOpenModels={() => {
                                         setSettingsTab('models');
                                         setPage('settings');

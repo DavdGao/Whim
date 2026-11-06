@@ -84,6 +84,14 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [ ] Live TypeSafe check once an account is available
 - [ ] Persistent permission rules in Settings, with a Bash parser that matches each simple command of a compound one
 
+## PR 7 — Background operation (design.md §4.1)
+
+- [x] Menu bar item with running and waiting chats, Open Whim, and Quit Whim; quit asks while chats run; closing the window keeps Whim running (verified in Electron under Xvfb; the menu bar itself still to be seen on a Mac)
+- [x] Notifications for finished, failed, and waiting chats while no window is focused; clicking opens the chat
+- [x] Hold `prevent-app-suspension` while chats run
+- [ ] Launch at login without opening a window; optional Dock icon hiding
+- [ ] Schedules and triggers (design.md §4.1.1)
+
 ## Later
 
 - [ ] Remote card catalog refresh

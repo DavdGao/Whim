@@ -4,6 +4,7 @@ interface Bridge {
     invoke(method: string, params: unknown): Promise<unknown>;
     onEvent(listener: (event: unknown) => void): () => void;
     onStatus(listener: (status: string) => void): () => void;
+    onOpenSession(listener: (sessionId: string) => void): () => void;
     chooseDirectory(): Promise<string | null>;
     openDirectory(path: string): Promise<boolean>;
 }
@@ -80,6 +81,15 @@ export function subscribe(listener: (event: BackendEvent) => void): () => void {
  */
 export function onStatus(listener: (status: string) => void): () => void {
     return window.whim.onStatus(listener);
+}
+
+/**
+ * Subscribe to requests from the menu bar item or a notification to show a chat.
+ * @param listener Receives the chat's session id.
+ * @returns An unsubscribe function.
+ */
+export function onOpenSession(listener: (sessionId: string) => void): () => void {
+    return window.whim.onOpenSession(listener);
 }
 
 /**

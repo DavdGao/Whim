@@ -1,5 +1,7 @@
 // Bundles the Electron main, preload, and Backend entries. Workspace packages stay external so
 // Core can start its DB worker and plugins load from their own package directories.
+import { cp } from 'node:fs/promises';
+
 import { build } from 'esbuild';
 
 const common = {
@@ -12,6 +14,8 @@ const common = {
 const external = ['electron', '@whimkit/*'];
 
 await Promise.all([
+    // Images Main loads at runtime, such as the menu bar icon.
+    cp('resources', 'dist/resources', { recursive: true }),
     build({
         ...common,
         entryPoints: ['src/main/main.ts'],
