@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
-import { join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { z } from 'zod';
@@ -14,8 +14,10 @@ import type {
     ModelAdapter,
     CredentialType,
     Disposer,
+    MethodDefinition,
     PluginContext,
     PluginDefinition,
+    ServiceDefinition,
     ToolDefinition,
 } from '../plugin/index.js';
 
@@ -27,8 +29,27 @@ const contributesSchema = z
         credentialTypes: contributionNames,
         adapters: contributionNames,
         tools: contributionNames,
+        services: contributionNames,
+        methods: contributionNames,
+        topics: contributionNames,
+        // Client slots (design.md §5.7); the Renderer enforces them.
+        pages: contributionNames,
+        settingsSections: contributionNames,
+        chatTools: contributionNames,
+        composerActions: contributionNames,
     })
-    .default({ credentialTypes: [], adapters: [], tools: [] });
+    .default({
+        credentialTypes: [],
+        adapters: [],
+        tools: [],
+        services: [],
+        methods: [],
+        topics: [],
+        pages: [],
+        settingsSections: [],
+        chatTools: [],
+        composerActions: [],
+    });
 export type PluginContributions = z.infer<typeof contributesSchema>;
 
 const manifestSchema = z.object({
@@ -37,6 +58,16 @@ const manifestSchema = z.object({
     whim: z.strictObject({
         api: z.string().regex(/^\d+\.\d+$/, 'Expected MAJOR.MINOR.'),
         host: z.string().min(1),
+        /** The Renderer entry: one ES module inside the package. */
+        client: z
+            .string()
+            .regex(/\.m?js$/, 'The client entry must be a .js or .mjs module.')
+            .optional(),
+        /** Precompiled CSS for the client, in the client entry's directory. */
+        clientStyle: z
+            .string()
+            .regex(/\.css$/, 'The client style must be a .css file.')
+            .optional(),
         contributes: contributesSchema,
         cards: z.string().min(1).optional(),
         locales: z.string().min(1).optional(),
@@ -76,6 +107,39 @@ export interface PluginStatus {
     readonly category: 'models' | 'tools' | 'other';
     /** What the manifest declares the plugin registers. */
     readonly contributes: PluginContributions;
+    /** The Renderer entry, when the plugin has one: the directory it is served from and its file. */
+    readonly client?: { readonly root: string; readonly entry: string; readonly style?: string };
+}
+
+/**
+ * Locate a client entry: its directory is the only one served to the Renderer (design.md §5.7).
+ * @param dir The package root.
+ * @param client The manifest's `whim.client`.
+ * @param style The manifest's `whim.clientStyle`, which must sit beside the entry.
+ * @returns The served root and file names, or nothing when absent or outside the package.
+ */
+function clientEntry(
+    dir: string,
+    client: string | undefined,
+    style: string | undefined
+): Pick<PluginStatus, 'client'> {
+    if (!client) return {};
+    const file = resolve(dir, client);
+    if (!file.startsWith(dir + sep)) {
+        console.error(`Client entry ${client} of ${dir} leaves the package; ignored.`);
+        return {};
+    }
+    const root = dirname(file);
+    const styleFile = style ? resolve(dir, style) : undefined;
+    if (styleFile && dirname(styleFile) !== root)
+        console.error(`Client style ${style} of ${dir} is not beside the client entry; ignored.`);
+    return {
+        client: {
+            root,
+            entry: basename(file),
+            ...(styleFile && dirname(styleFile) === root ? { style: basename(styleFile) } : {}),
+        },
+    };
 }
 
 /**
@@ -186,6 +250,42 @@ export interface RegisteredTool {
 
 const toolNamePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 
+export interface RegisteredMethod {
+    readonly pluginId: string;
+    readonly method: MethodDefinition;
+    readonly inputSchema: CompiledSchema;
+    readonly outputSchema: CompiledSchema;
+}
+
+/** A topic's latest value; `seq` grows with every publish, starting at 0 for the initial value. */
+export interface TopicValue {
+    readonly pluginId: string;
+    readonly name: string;
+    readonly seq: number;
+    readonly value: unknown;
+}
+
+/** Raised for a plugin call that cannot be made; `code` maps to the IPC error codes. */
+export class PluginCallError extends Error {
+    /**
+     * Describe the refused call.
+     * @param code `not-found` for an unknown method, `invalid` for input or output not matching.
+     * @param message What went wrong.
+     * @param issues Schema issues, when the input was invalid.
+     */
+    constructor(
+        readonly code: 'not-found' | 'invalid',
+        message: string,
+        readonly issues: readonly { path: string; message: string }[] = []
+    ) {
+        super(message);
+        this.name = 'PluginCallError';
+    }
+}
+
+/** How long a stopping plugin's services get to settle before deactivation continues. */
+const serviceStopMs = 5000;
+
 const activationTimeoutMs = 10_000;
 
 /**
@@ -237,10 +337,20 @@ export class PluginHost {
     readonly adapters = new Map<string, RegisteredAdapter>();
     /** Tools in registration order, keyed by model-facing name. */
     readonly tools = new Map<string, RegisteredTool>();
+    /** Client-facing methods, keyed `<pluginId>/<name>`. */
+    readonly #methods = new Map<string, RegisteredMethod>();
+    /** Topic values, keyed `<pluginId>/<name>`. */
+    readonly #topics = new Map<string, TopicValue & { schema: CompiledSchema }>();
+    readonly #topicListeners = new Set<(topic: TopicValue) => void>();
     readonly #statuses = new Map<string, PluginStatus>();
     readonly #scopes = new Map<
         string,
-        { disposers: Disposer[]; definition: PluginDefinition; abort: AbortController }
+        {
+            disposers: Disposer[];
+            definition: PluginDefinition;
+            abort: AbortController;
+            services: Promise<void>[];
+        }
     >();
 
     /**
@@ -259,6 +369,65 @@ export class PluginHost {
      */
     statuses(): PluginStatus[] {
         return [...this.#statuses.values()];
+    }
+
+    /**
+     * Call one of a plugin's methods for its client entry, validating input and output.
+     * @param pluginId The plugin.
+     * @param name The method.
+     * @param input Untrusted input.
+     * @param signal Aborts the call; the plugin stopping aborts it too.
+     * @returns The validated output.
+     * @throws PluginCallError for an unknown method or invalid input or output.
+     */
+    async callMethod(
+        pluginId: string,
+        name: string,
+        input: unknown,
+        signal: AbortSignal
+    ): Promise<unknown> {
+        const entry = this.#methods.get(`${pluginId}/${name}`);
+        const scope = this.#scopes.get(pluginId);
+        if (!entry || !scope)
+            throw new PluginCallError('not-found', `Plugin ${pluginId} has no method ${name}.`);
+        const issues = entry.inputSchema.issues(input);
+        if (issues.length)
+            throw new PluginCallError('invalid', `Invalid input for ${name}.`, issues);
+        const output = await entry.method.handle(
+            input,
+            AbortSignal.any([signal, scope.abort.signal])
+        );
+        const outputIssues = entry.outputSchema.issues(output);
+        if (outputIssues.length)
+            throw new Error(
+                `Plugin ${pluginId} returned invalid output from ${name}: ${outputIssues
+                    .map(issue => `${issue.path} ${issue.message}`)
+                    .join('; ')}`
+            );
+        return output;
+    }
+
+    /**
+     * The latest values of every topic, for a client that connects.
+     * @returns Topic values.
+     */
+    topicValues(): TopicValue[] {
+        return [...this.#topics.values()].map(({ pluginId, name, seq, value }) => ({
+            pluginId,
+            name,
+            seq,
+            value,
+        }));
+    }
+
+    /**
+     * Follow topic changes.
+     * @param listener Receives each published value.
+     * @returns The unsubscriber.
+     */
+    onTopic(listener: (topic: TopicValue) => void): Disposer {
+        this.#topicListeners.add(listener);
+        return () => this.#topicListeners.delete(listener);
     }
 
     /** Record installations, verify integrity, and activate enabled plugins in dependency order. */
@@ -288,7 +457,7 @@ export class PluginHost {
                     locales: {},
                     icons: {},
                     category: 'other',
-                    contributes: { credentialTypes: [], adapters: [], tools: [] },
+                    contributes: contributesSchema.parse(undefined),
                 });
                 continue;
             }
@@ -302,7 +471,9 @@ export class PluginHost {
                 // Bundled plugins are covered by the application signature; their hash follows releases.
                 contentHash:
                     previous && pkg.source === 'local' ? previous.contentHash : contentHash,
-                enabled: previous?.enabled ?? true,
+                // A local plugin seen for the first time waits for the user to enable it, after the
+                // Plugins page has shown what it declares.
+                enabled: previous?.enabled ?? pkg.source === 'bundled',
             };
             await this.store.putPlugin(row);
             const modified =
@@ -324,6 +495,7 @@ export class PluginHost {
                 ...(await readIcons(dir, manifest.whim)),
                 category: manifest.whim.category,
                 contributes: manifest.whim.contributes,
+                ...clientEntry(dir, manifest.whim.client, manifest.whim.clientStyle),
                 ...(incompatible && row.enabled && !modified ? { error: incompatible } : {}),
             };
             this.#statuses.set(row.id, status);
@@ -385,10 +557,16 @@ export class PluginHost {
             credentialTypes: RegisteredCredentialType[];
             adapters: RegisteredAdapter[];
             tools: RegisteredTool[];
+            services: { service: ServiceDefinition; stop: AbortController }[];
+            methods: RegisteredMethod[];
+            topics: (TopicValue & { schema: CompiledSchema })[];
         } = {
             credentialTypes: [],
             adapters: [],
             tools: [],
+            services: [],
+            methods: [],
+            topics: [],
         };
         const abort = new AbortController();
         const prefix = `${id}#`;
@@ -449,6 +627,68 @@ export class PluginHost {
                     return () => this.tools.delete(tool.name);
                 },
             },
+            services: {
+                register: service => {
+                    ensureDeclared('services', service.id);
+                    if (staged.services.some(entry => entry.service.id === service.id))
+                        throw new Error(`Service ${service.id} exists.`);
+                    // Stopped by its disposer or when the plugin stops.
+                    const stop = new AbortController();
+                    abort.signal.addEventListener('abort', () => stop.abort(), { once: true });
+                    staged.services.push({ service, stop });
+                    return () => stop.abort();
+                },
+            },
+            rpc: {
+                method: method => {
+                    ensureDeclared('methods', method.name);
+                    const key = `${id}/${method.name}`;
+                    if (staged.methods.some(entry => entry.method.name === method.name))
+                        throw new Error(`Method ${method.name} exists.`);
+                    staged.methods.push({
+                        pluginId: id,
+                        method: method as MethodDefinition,
+                        inputSchema: new CompiledSchema(method.inputSchema),
+                        outputSchema: new CompiledSchema(method.outputSchema),
+                    });
+                    return () => this.#methods.delete(key);
+                },
+                topic: topic => {
+                    ensureDeclared('topics', topic.name);
+                    if (staged.topics.some(entry => entry.name === topic.name))
+                        throw new Error(`Topic ${topic.name} exists.`);
+                    const schema = new CompiledSchema(topic.schema);
+                    const initialIssues = schema.issues(topic.initial);
+                    if (initialIssues.length)
+                        throw new Error(`Topic ${topic.name} has an invalid initial value.`);
+                    staged.topics.push({
+                        pluginId: id,
+                        name: topic.name,
+                        seq: 0,
+                        value: topic.initial,
+                        schema,
+                    });
+                    const key = `${id}/${topic.name}`;
+                    return {
+                        publish: value => {
+                            const current = this.#topics.get(key);
+                            // Before activation completes, or after the plugin stopped, nobody follows.
+                            if (!current) return;
+                            const issues = schema.issues(value);
+                            if (issues.length)
+                                throw new Error(
+                                    `Invalid value for topic ${topic.name}: ${issues
+                                        .map(issue => `${issue.path} ${issue.message}`)
+                                        .join('; ')}`
+                                );
+                            const next = { ...current, seq: current.seq + 1, value };
+                            this.#topics.set(key, next);
+                            const { schema: _schema, ...published } = next;
+                            for (const listener of this.#topicListeners) listener(published);
+                        },
+                    };
+                },
+            },
         };
         try {
             const module: unknown = await import(pathToFileURL(join(dir, manifest.whim.host)).href);
@@ -478,7 +718,33 @@ export class PluginHost {
                 this.tools.set(entry.tool.name, entry);
                 disposers.push(() => this.tools.delete(entry.tool.name));
             }
-            this.#scopes.set(id, { disposers, definition, abort });
+            for (const entry of staged.methods) {
+                const key = `${id}/${entry.method.name}`;
+                this.#methods.set(key, entry);
+                disposers.push(() => this.#methods.delete(key));
+            }
+            for (const entry of staged.topics) {
+                const key = `${id}/${entry.name}`;
+                this.#topics.set(key, entry);
+                disposers.push(() => this.#topics.delete(key));
+            }
+            const services = staged.services.map(({ service, stop }) =>
+                Promise.resolve()
+                    .then(() => (stop.signal.aborted ? undefined : service.start(stop.signal)))
+                    .catch((error: unknown) => {
+                        if (stop.signal.aborted) return;
+                        console.error(
+                            `Service ${service.id} of ${id} failed:`,
+                            describeError(error)
+                        );
+                        this.#setStatus(
+                            id,
+                            'active',
+                            `Service ${service.id} stopped: ${describeError(error)}`
+                        );
+                    })
+            );
+            this.#scopes.set(id, { disposers, definition, abort, services });
             this.#setStatus(id, 'active');
         } catch (error) {
             abort.abort();
@@ -490,6 +756,13 @@ export class PluginHost {
     async stop(): Promise<void> {
         for (const [id, scope] of [...this.#scopes].reverse()) {
             scope.abort.abort();
+            let timer: NodeJS.Timeout | undefined;
+            await Promise.race([
+                Promise.all(scope.services),
+                new Promise(resolve => {
+                    timer = setTimeout(resolve, serviceStopMs);
+                }),
+            ]).finally(() => clearTimeout(timer));
             try {
                 await scope.definition.deactivate?.();
             } finally {

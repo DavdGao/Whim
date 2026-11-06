@@ -14,6 +14,7 @@ import {
     DecisionReviewer,
     describeError,
     ModelService,
+    PluginCallError,
     PluginHost,
     Store,
     StoreError,
@@ -33,6 +34,7 @@ import {
     requestEnvelopeSchema,
     userNameSchema,
 } from '../shared/ipc.js';
+import { pluginClientUrl } from '../shared/main-protocol.js';
 
 import { gitStatus } from './git.js';
 
@@ -49,7 +51,7 @@ import type {
     SessionSnapshot,
     StagedAttachment,
 } from '../shared/ipc.js';
-import type { Activity, Attention } from '../shared/main-protocol.js';
+import type { Activity, Attention, PluginClients } from '../shared/main-protocol.js';
 import type { AgentEvent } from '@whimkit/agent';
 import type { ChatCard, FrozenChatCard, Reviewer, SecretCipher } from '@whimkit/core';
 import type { AgentRecord, MediaBlock } from '@whimkit/core/contracts';
@@ -202,6 +204,8 @@ function toIpcError(error: unknown): IpcError {
         };
     if (error instanceof CredentialValidationError)
         return { code: 'invalid', message: error.message, issues: error.issues };
+    if (error instanceof PluginCallError)
+        return { code: error.code, message: error.message, issues: [...error.issues] };
     if (error instanceof ApplicationError)
         return { code: 'unavailable', message: error.message, failure: error.failure };
     if (error instanceof StoreError)
@@ -230,10 +234,12 @@ class Backend {
     readonly #baseTools: ReturnType<typeof baseTools>;
     /** Attachments wait here between staging and sending; cleared at start. */
     readonly #stagingDir: string;
-    readonly #toMain: (message: Activity | Attention) => void;
+    readonly #toMain: (message: Activity | Attention | PluginClients) => void;
     /** The activity snapshot being computed, and whether another was asked for meanwhile. */
     #reporting: Promise<void> | undefined;
     #reportAgain = false;
+    /** Aborts plugin calls made by the current window when it is replaced. */
+    #rendererAbort = new AbortController();
 
     /**
      * Wire services together.
@@ -254,7 +260,7 @@ class Backend {
         readonly models: ModelService,
         userData: string,
         version: string,
-        toMain: (message: Activity | Attention) => void
+        toMain: (message: Activity | Attention | PluginClients) => void
     ) {
         this.#toMain = toMain;
         this.#baseTools = baseTools(version);
@@ -315,6 +321,7 @@ class Backend {
             if (sessionId) this.#attend(sessionId, records);
         });
         catalog.onChange(() => this.#emit({ type: 'state' }));
+        host.onTopic(topic => this.#emit({ type: 'plugin.topic', ...topic }));
     }
 
     /**
@@ -322,10 +329,27 @@ class Backend {
      * @param port The new port.
      */
     attach(port: MessagePortMain): void {
+        // Plugin calls of the previous window cannot be answered any more.
+        this.#rendererAbort.abort();
+        this.#rendererAbort = new AbortController();
         this.#renderer?.close();
         this.#renderer = port;
         port.on('message', event => void this.#handle(port, event.data));
         port.start();
+    }
+
+    /** Tell Main which client directories it may serve; plugins change only at restart. */
+    reportPluginClients(): void {
+        this.#toMain({
+            type: 'plugin-clients',
+            clients: this.host
+                .statuses()
+                .flatMap(status =>
+                    status.client && status.availability === 'active'
+                        ? [{ pluginId: status.id, root: status.client.root }]
+                        : []
+                ),
+        });
     }
 
     /** Send Main a fresh activity snapshot; requests while one is computed coalesce into one more. */
@@ -491,6 +515,18 @@ class Backend {
                 methodSchemas[method].parse(raw);
                 await this.catalog.reload();
                 return null;
+            case 'plugin.call': {
+                const params = methodSchemas[method].parse(raw);
+                return this.host.callMethod(
+                    params.pluginId,
+                    params.method,
+                    params.input,
+                    this.#rendererAbort.signal
+                );
+            }
+            case 'plugin.topics':
+                methodSchemas[method].parse(raw);
+                return this.host.topicValues();
             case 'plugins.setEnabled': {
                 const params = methodSchemas[method].parse(raw);
                 await this.host.setEnabled(params.id, params.enabled);
@@ -633,6 +669,16 @@ class Backend {
                 icons: status.icons,
                 category: status.category,
                 contributes: status.contributes,
+                ...(status.client && status.availability === 'active'
+                    ? {
+                          client: {
+                              entry: pluginClientUrl(status.id, status.client.entry),
+                              ...(status.client.style
+                                  ? { style: pluginClientUrl(status.id, status.client.style) }
+                                  : {}),
+                          },
+                      }
+                    : {}),
             })),
             credentialTypes: [...this.host.credentialTypes.values()].map(entry => ({
                 id: entry.type.id,
@@ -1212,6 +1258,27 @@ function bundledPlugins(): { dir: string; source: 'bundled' }[] {
     );
 }
 
+/**
+ * Locate plugins the user installed: each directory under `<userData>/plugins` with a
+ * `package.json` (design.md §5.3).
+ * @param root The local plugins directory.
+ * @returns Package roots; none when the directory does not exist.
+ */
+async function localPlugins(root: string): Promise<{ dir: string; source: 'local' }[]> {
+    const entries = await readdir(root, { withFileTypes: true }).catch((error: unknown) => {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return [];
+        throw error;
+    });
+    const found: { dir: string; source: 'local' }[] = [];
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        if (!entry.isDirectory()) continue;
+        const dir = join(root, entry.name);
+        if (await stat(join(dir, 'package.json')).catch(() => undefined))
+            found.push({ dir, source: 'local' });
+    }
+    return found;
+}
+
 /** Text attachments are inlined into the prompt, so they stay small. */
 const maxTextAttachmentBytes = 512 * 1024;
 
@@ -1264,7 +1331,10 @@ async function start(userData: string, version: string): Promise<void> {
         // Staged attachments that were never sent do not outlive the process.
         await rm(join(userData, 'staging'), { recursive: true, force: true });
         const store = await Store.open(join(userData, 'whim.sqlite'));
-        const host = new PluginHost(store, bundledPlugins());
+        const host = new PluginHost(store, [
+            ...bundledPlugins(),
+            ...(await localPlugins(join(userData, 'plugins'))),
+        ]);
         await host.start();
         const catalog = new Catalog(host, join(userData, 'models'));
         await catalog.start();
@@ -1281,6 +1351,7 @@ async function start(userData: string, version: string): Promise<void> {
         );
         await backend.recover();
         for (const port of pendingPorts.splice(0)) backend.attach(port);
+        backend.reportPluginClients();
         parentPort.postMessage({ type: 'ready' });
         backend.reportActivity();
     } catch (error) {

@@ -16,7 +16,7 @@ import { Skeleton } from '@whimkit/ui/components/skeleton';
 import { Toaster } from '@whimkit/ui/components/sonner';
 import { TooltipProvider } from '@whimkit/ui/components/tooltip';
 import { MessageSquareIcon, SettingsIcon } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { AgentAvatar } from './components/agent-avatar';
@@ -27,6 +27,9 @@ import { useAppState } from './lib/app-state-context';
 import { onOpenSession } from './lib/client';
 import { useT } from './lib/i18n';
 import { LocaleProvider } from './lib/locale-provider';
+import { pluginText } from './lib/messages';
+import { PluginBoundary, PluginUiProvider } from './plugins/plugin-provider';
+import { pluginPageId, usePluginRegistrations } from './plugins/plugin-ui';
 
 import type { Location, PageEntry, PageParams } from './lib/navigation';
 import type { StartupNotice } from '../shared/ipc';
@@ -72,6 +75,49 @@ function StartupNotices({ notices }: { notices: readonly StartupNotice[] }) {
 }
 
 /**
+ * The rail's pages: the host's, then those plugin client entries registered.
+ * @returns Page entries.
+ */
+function usePages(): readonly PageEntry[] {
+    const { pages: pluginPages } = usePluginRegistrations();
+    return useMemo(
+        () => [
+            ...pages.filter(page => page.placement === 'main'),
+            ...pluginPages.map((page): PageEntry => {
+                const own = new Set(
+                    pluginPages.filter(item => item.pluginId === page.pluginId).map(item => item.id)
+                );
+                const Content = page.component;
+                return {
+                    id: pluginPageId(page.pluginId, page.id),
+                    title: { pluginId: page.pluginId, key: page.title },
+                    icon: page.icon,
+                    placement: 'main',
+                    component: ({ params, navigate }) => (
+                        <PluginBoundary pluginId={page.pluginId}>
+                            <Content
+                                params={params}
+                                // A plugin names its own pages by the ids it registered.
+                                navigate={(target, targetParams) =>
+                                    navigate(
+                                        own.has(target)
+                                            ? pluginPageId(page.pluginId, target)
+                                            : target,
+                                        targetParams
+                                    )
+                                }
+                            />
+                        </PluginBoundary>
+                    ),
+                };
+            }),
+            ...pages.filter(page => page.placement === 'footer'),
+        ],
+        [pluginPages]
+    );
+}
+
+/**
  * One navigation entry.
  * @param props The entry.
  * @param props.item The page.
@@ -88,12 +134,23 @@ function NavItem({
     active: boolean;
     onSelect: () => void;
 }) {
-    const { t } = useT();
+    const { t, locale } = useT();
+    const { state } = useAppState();
+    const { title: entryTitle } = item;
+    const title =
+        typeof entryTitle === 'string'
+            ? t(entryTitle)
+            : pluginText(
+                  state?.plugins.find(plugin => plugin.id === entryTitle.pluginId)?.locales,
+                  locale,
+                  entryTitle.key,
+                  entryTitle.key
+              );
     return (
         <SidebarMenuItem>
-            <SidebarMenuButton isActive={active} tooltip={t(item.title)} onClick={onSelect}>
+            <SidebarMenuButton isActive={active} tooltip={title} onClick={onSelect}>
                 <item.icon />
-                <span>{t(item.title)}</span>
+                <span>{title}</span>
             </SidebarMenuButton>
         </SidebarMenuItem>
     );
@@ -112,15 +169,16 @@ function Shell() {
     }, []);
     // The menu bar item and notifications ask to show a chat (design.md §4.1).
     useEffect(() => onOpenSession(sessionId => navigate('chat', { sessionId })), [navigate]);
-    const current = pages.find(item => item.id === location.page) ?? pages[0];
+    const allPages = usePages();
+    const current = allPages.find(item => item.id === location.page) ?? allPages[0];
     const banner =
         status === 'restarting'
             ? t('backend.restarting')
             : status === 'failed'
               ? t('backend.failed')
               : undefined;
-    const main = pages.filter(item => item.placement === 'main');
-    const footer = pages.filter(item => item.placement === 'footer');
+    const main = allPages.filter(item => item.placement === 'main');
+    const footer = allPages.filter(item => item.placement === 'footer');
     return (
         <SidebarProvider
             defaultOpen={false}
@@ -240,10 +298,12 @@ function Localized() {
     const { state } = useAppState();
     return (
         <LocaleProvider locale={state?.locale ?? 'en'}>
-            <TooltipProvider>
-                <Shell />
-                <Toaster />
-            </TooltipProvider>
+            <PluginUiProvider>
+                <TooltipProvider>
+                    <Shell />
+                    <Toaster />
+                </TooltipProvider>
+            </PluginUiProvider>
         </LocaleProvider>
     );
 }

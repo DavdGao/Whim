@@ -16,9 +16,13 @@ import { Spinner } from '@whimkit/ui/components/spinner';
 import { cn } from '@whimkit/ui/lib/utils';
 import { ArrowUpIcon, FolderOpenIcon, PaperclipIcon, PlusIcon, SquareIcon } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 
+import { useAppState } from '../../lib/app-state-context';
 import { chooseDirectory } from '../../lib/client';
 import { useT } from '../../lib/i18n';
+import { pluginText } from '../../lib/messages';
+import { usePluginRegistrations } from '../../plugins/plugin-ui';
 
 import { ContextUsage } from './context-usage';
 import { modelChoices } from './model-choices';
@@ -28,6 +32,7 @@ import { WorkspaceBar } from './workspace-bar';
 
 import type { PendingAttachment } from './use-attachments';
 import type { AppState, ChatSlot } from '../../../shared/ipc';
+import type { ComposerActionContribution, ComposerHandle } from '@whimkit/client';
 import type { Usage } from '@whimkit/core/contracts';
 
 /** One line of text; the collapsed field is one line plus padding. */
@@ -133,6 +138,18 @@ export function Composer({
 
     const attachments = useAttachments();
     const fileInput = useRef<HTMLInputElement>(null);
+    const { composerActions } = usePluginRegistrations();
+    // What a plugin's composer action may do to the draft (design.md §5.7).
+    const handle: ComposerHandle = {
+        insertText: inserted => {
+            const field = textarea.current;
+            const start = field?.selectionStart ?? text.length;
+            const end = field?.selectionEnd ?? text.length;
+            setText(current => current.slice(0, start) + inserted + current.slice(end));
+            field?.focus();
+        },
+        attach: files => attachments.add([...files]),
+    };
     // An image the current model cannot read blocks sending until removed or the model changes.
     const unreadable = (item: PendingAttachment) =>
         item.staged?.mediaType.startsWith('image/') === true &&
@@ -293,6 +310,13 @@ export function Composer({
                                         <FolderOpenIcon />
                                         {t('chat.workspace.choose')}
                                     </DropdownMenuItem>
+                                    {composerActions.map(action => (
+                                        <ComposerActionItem
+                                            key={`${action.pluginId}/${action.id}`}
+                                            action={action}
+                                            handle={handle}
+                                        />
+                                    ))}
                                 </DropdownMenuContent>
                             </DropdownMenu>
                             <Button
@@ -381,5 +405,49 @@ function PendingChip({
             <AttachmentInfo className="max-w-40" />
             <AttachmentRemove label={t('attach.remove')} />
         </Attachment>
+    );
+}
+
+/**
+ * A plugin's entry in the Add menu. Errors from it are reported, not swallowed.
+ * @param props The action.
+ * @param props.action The plugin's registration.
+ * @param props.handle What the action may do to the draft.
+ * @returns The menu item.
+ */
+function ComposerActionItem({
+    action,
+    handle,
+}: {
+    action: ComposerActionContribution & { pluginId: string };
+    handle: ComposerHandle;
+}) {
+    const { t, locale } = useT();
+    const { state } = useAppState();
+    const plugin = state?.plugins.find(item => item.id === action.pluginId);
+    const title = pluginText(plugin?.locales, locale, action.title, action.title);
+    return (
+        <DropdownMenuItem
+            onSelect={() => {
+                Promise.resolve()
+                    .then(() => action.run(handle))
+                    .catch((error: unknown) => {
+                        console.error(`Composer action of ${action.pluginId} failed:`, error);
+                        toast.error(
+                            t('plugins.renderFailed', {
+                                name: pluginText(
+                                    plugin?.locales,
+                                    locale,
+                                    'plugin.name',
+                                    action.pluginId
+                                ),
+                            })
+                        );
+                    });
+            }}
+        >
+            <action.icon />
+            {title}
+        </DropdownMenuItem>
     );
 }

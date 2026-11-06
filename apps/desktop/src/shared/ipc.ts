@@ -87,6 +87,14 @@ export const methodSchemas = {
     'credentials.remove': z.strictObject({ id: idSchema }),
     'catalog.reload': z.strictObject({}),
     'plugins.setEnabled': z.strictObject({ id: idSchema, enabled: z.boolean() }),
+    /** A plugin client entry calls its own plugin's method (design.md §5.7). */
+    'plugin.call': z.strictObject({
+        pluginId: idSchema,
+        method: z.string().min(1).max(200),
+        input: z.unknown(),
+    }),
+    /** The latest value of every plugin topic; changes follow as `plugin.topic` events. */
+    'plugin.topics': z.strictObject({}),
     'session.get': z.strictObject({ sessionId: idSchema }),
     'session.create': z.strictObject({
         slot: chatSlotSchema,
@@ -165,12 +173,22 @@ export interface PluginInfo {
     readonly icons: Readonly<Record<string, string>>;
     readonly category: 'models' | 'tools' | 'other';
     /** What the manifest declares the plugin registers, shown before it is enabled. */
-    readonly contributes: {
-        readonly credentialTypes: readonly string[];
-        readonly adapters: readonly string[];
-        readonly tools: readonly string[];
-    };
+    readonly contributes: Readonly<Record<ContributionKind, readonly string[]>>;
+    /** The client entry's URLs, while the plugin is active and has one. */
+    readonly client?: { readonly entry: string; readonly style?: string };
 }
+
+export type ContributionKind =
+    | 'credentialTypes'
+    | 'adapters'
+    | 'tools'
+    | 'services'
+    | 'methods'
+    | 'topics'
+    | 'pages'
+    | 'settingsSections'
+    | 'chatTools'
+    | 'composerActions';
 
 export interface CredentialTypeInfo {
     readonly id: string;
@@ -267,6 +285,8 @@ export interface Results {
     'credentials.remove': null;
     'catalog.reload': null;
     'plugins.setEnabled': null;
+    'plugin.call': unknown;
+    'plugin.topics': readonly PluginTopicValue[];
     'session.get': SessionSnapshot;
     'session.create': { sessionId: string };
     'session.decide': null;
@@ -294,9 +314,18 @@ export interface IpcError {
     readonly failure?: Failure;
 }
 
+/** A plugin topic's latest value; `seq` grows with every change. */
+export interface PluginTopicValue {
+    readonly pluginId: string;
+    readonly name: string;
+    readonly seq: number;
+    readonly value: unknown;
+}
+
 /** Backend → Renderer events. */
 export type BackendEvent =
     | { readonly type: 'state' }
+    | ({ readonly type: 'plugin.topic' } & PluginTopicValue)
     | {
           readonly type: 'records';
           readonly sessionId: string;

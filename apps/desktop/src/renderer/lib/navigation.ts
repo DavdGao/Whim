@@ -1,6 +1,5 @@
 import type { MessageKey } from './messages';
 import type { AppState } from '../../shared/ipc';
-import type { LucideIcon } from 'lucide-react';
 import type { ComponentType } from 'react';
 
 // The navigation contract shared by the host's pages and, later, plugin pages (design.md §5.7).
@@ -22,11 +21,14 @@ export interface PageProps {
     navigate(page: string, params?: PageParams): void;
 }
 
+/** A host message key, or a key in a plugin's own catalogs. */
+export type PageTitle = MessageKey | { readonly pluginId: string; readonly key: string };
+
 /** A page in the navigation rail. */
 export interface PageEntry {
     readonly id: string;
-    readonly title: MessageKey;
-    readonly icon: LucideIcon;
+    readonly title: PageTitle;
+    readonly icon: ComponentType<{ className?: string }>;
     /** `main` pages are listed at the top of the rail; `footer` pages at its bottom. */
     readonly placement: 'main' | 'footer';
     readonly component: ComponentType<PageProps>;
@@ -36,6 +38,6 @@ export interface PageEntry {
 export interface SettingsSectionEntry {
     readonly id: string;
     readonly title: MessageKey;
-    readonly icon: LucideIcon;
+    readonly icon: ComponentType<{ className?: string }>;
     readonly component: ComponentType<{ readonly state: AppState }>;
 }
