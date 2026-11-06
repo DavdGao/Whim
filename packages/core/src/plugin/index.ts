@@ -9,6 +9,12 @@ import type {
     Usage,
 } from '../contracts/records.js';
 
+/**
+ * The plugin API version this Core implements, `MAJOR.MINOR` (design.md §5.7). A plugin's
+ * `whim.api` must have the same major and a minor no greater than this one.
+ */
+export const pluginApiVersion = '1.0';
+
 /** A JSON Schema 2020-12 object. Core validates it before use. */
 export type JsonSchema = Readonly<Record<string, unknown>>;
 

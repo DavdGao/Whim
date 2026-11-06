@@ -6,7 +6,7 @@ import { after, before, describe, it } from 'node:test';
 
 import { Catalog, mergePatch } from './catalog.js';
 import { CredentialService, CredentialValidationError } from './credentials.js';
-import { PluginHost } from './plugin-host.js';
+import { PluginHost, apiIncompatibility } from './plugin-host.js';
 import { Store } from './store.js';
 
 let dir: string;
@@ -52,7 +52,13 @@ async function writePlugin(
             name: 'fixture-plugin',
             version: '1.0.0',
             type: 'module',
-            whim: { host: './host.js', cards: './cards', ...extra },
+            whim: {
+                api: '1.0',
+                host: './host.js',
+                contributes: { credentialTypes: ['key'], adapters: ['chat', 'decide'] },
+                cards: './cards',
+                ...extra,
+            },
         })
     );
     await writeFile(join(pkg, 'host.js'), hostSource);
@@ -275,6 +281,46 @@ describe('PluginHost, Catalog, and CredentialService', () => {
         assert.equal(status?.icon, `data:image/svg+xml;base64,${btoa('<svg/>')}`);
         assert.deepEqual(status?.icons, { model: 'data:image/png;base64,AQID' });
         await host.stop();
+        await store.close();
+    });
+
+    it('refuses plugins built for another plugin API version', async () => {
+        assert.equal(apiIncompatibility('1.0'), undefined);
+        assert.equal(apiIncompatibility('1.9'), 'Requires plugin API 1.9; this Whim provides 1.0.');
+        assert.equal(apiIncompatibility('2.0'), 'Requires plugin API 2.0; this Whim provides 1.0.');
+        const root = join(dir, 'api');
+        const pkg = await writePlugin(root, hostSource, { api: '2.0' });
+        const store = await Store.open(join(root, 'db.sqlite'));
+        const host = new PluginHost(store, [{ dir: pkg, source: 'bundled' }]);
+        await host.start();
+        assert.deepEqual(
+            host.statuses().map(status => [status.availability, status.error]),
+            [['failed', 'Requires plugin API 2.0; this Whim provides 1.0.']]
+        );
+        assert.equal(host.adapters.size, 0);
+        await store.close();
+    });
+
+    it('fails a plugin that registers something it did not declare', async () => {
+        const root = join(dir, 'undeclared');
+        const pkg = await writePlugin(root, hostSource, {
+            contributes: { credentialTypes: ['key'], adapters: ['chat'] },
+        });
+        const store = await Store.open(join(root, 'db.sqlite'));
+        const host = new PluginHost(store, [{ dir: pkg, source: 'bundled' }]);
+        await host.start();
+        assert.deepEqual(
+            host.statuses().map(status => [status.availability, status.error, status.contributes]),
+            [
+                [
+                    'failed',
+                    'decide is not declared in whim.contributes.adapters.',
+                    { credentialTypes: ['key'], adapters: ['chat'], tools: [] },
+                ],
+            ]
+        );
+        assert.equal(host.credentialTypes.size, 0);
+        assert.equal(host.adapters.size, 0);
         await store.close();
     });
 });
