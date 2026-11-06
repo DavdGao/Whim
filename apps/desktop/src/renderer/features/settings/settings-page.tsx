@@ -20,6 +20,7 @@ import {
     UserRoundIcon,
     PuzzleIcon,
     SaveIcon,
+    PaletteIcon,
     SlidersHorizontalIcon,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -31,6 +32,7 @@ import { EntityIcon } from '../../components/entity-icon';
 import { call } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 import { modelIcon } from '../../lib/icons';
+import { pluginText } from '../../lib/messages';
 import { useAction } from '../../lib/use-action';
 import { reviewerChoices } from '../chat/model-choices';
 import { ModelSettings } from '../models/models-page';
@@ -40,6 +42,9 @@ import { AgentSettings } from './agent-settings';
 
 import type { AppState } from '../../../shared/ipc';
 import type { PageProps, SettingsSectionEntry } from '../../lib/navigation';
+
+/** The default look's choice value; theme ids always contain `#`. */
+const defaultTheme = 'default';
 
 const languages = [
     { value: 'en', label: 'English' },
@@ -122,7 +127,7 @@ export function SettingsPage({ state, params, navigate }: PageProps) {
  * @returns The section.
  */
 function GeneralSettings({ state }: { state: AppState }) {
-    const { t } = useT();
+    const { t, locale } = useT();
     const resume = useAction((enabled: boolean) =>
         call('settings.resumeAfterRestart', { enabled })
     );
@@ -145,6 +150,38 @@ function GeneralSettings({ state }: { state: AppState }) {
                             className="w-44"
                             align="end"
                             onChange={locale => call('settings.locale', { locale })}
+                        />
+                    </Field>
+                    <Field orientation="horizontal">
+                        <FieldContent>
+                            <FieldLabel htmlFor="theme">{t('settings.theme')}</FieldLabel>
+                            <FieldDescription>{t('settings.themeDescription')}</FieldDescription>
+                        </FieldContent>
+                        <ChoiceMenu
+                            id="theme"
+                            value={state.theme ?? defaultTheme}
+                            choices={[
+                                { value: defaultTheme, label: t('settings.theme.default') },
+                                ...state.themes.map(theme => ({
+                                    value: theme.id,
+                                    label: pluginText(
+                                        state.plugins.find(plugin => plugin.id === theme.pluginId)
+                                            ?.locales,
+                                        locale,
+                                        theme.name,
+                                        theme.name
+                                    ),
+                                })),
+                            ]}
+                            icon={<PaletteIcon />}
+                            placeholder={t('settings.theme')}
+                            className="w-44"
+                            align="end"
+                            onChange={theme =>
+                                call('settings.theme', {
+                                    theme: theme === defaultTheme ? null : theme,
+                                })
+                            }
                         />
                     </Field>
                     <Field orientation="horizontal">

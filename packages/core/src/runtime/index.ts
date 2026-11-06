@@ -13,12 +13,19 @@ export type { CredentialRow, PluginRow, SessionSummary } from './db/protocol.js'
 export { CompiledSchema } from './json-schema.js';
 export type { SchemaIssue } from './json-schema.js';
 export { ModelService } from './models.js';
-export { PluginCallError, PluginHost, apiIncompatibility, describeError } from './plugin-host.js';
+export {
+    PluginCallError,
+    PluginHost,
+    apiIncompatibility,
+    describeError,
+    themeTokens,
+} from './plugin-host.js';
 export type {
     PluginAvailability,
     PluginContributions,
     PluginPackage,
     PluginStatus,
+    PluginTheme,
     RegisteredAdapter,
     RegisteredMethod,
     RegisteredTool,

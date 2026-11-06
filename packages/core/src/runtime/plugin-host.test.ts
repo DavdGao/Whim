@@ -170,4 +170,73 @@ describe('PluginHost services, methods, and topics', () => {
         await host.stop();
         await store.close();
     });
+
+    it('loads valid themes and skips invalid ones', async () => {
+        const root = join(dir, 'themes');
+        const pkg = join(root, 'theme-plugin');
+        await mkdir(join(pkg, 'themes'), { recursive: true });
+        await writeFile(
+            join(pkg, 'package.json'),
+            JSON.stringify({
+                name: 'theme-plugin',
+                version: '1.0.0',
+                type: 'module',
+                whim: {
+                    api: '1.0',
+                    host: './host.js',
+                    themes: [
+                        './themes/sunset.json',
+                        './themes/unknown-token.json',
+                        './themes/remote.json',
+                        './themes/outside.json',
+                    ],
+                },
+            })
+        );
+        await writeFile(join(pkg, 'host.js'), 'export default { activate() {} };');
+        await writeFile(join(pkg, 'themes', 'sunset.png'), Buffer.from([1, 2, 3]));
+        await writeFile(
+            join(pkg, 'themes', 'sunset.json'),
+            JSON.stringify({
+                id: 'sunset',
+                name: 'theme.sunset',
+                light: { primary: 'oklch(0.65 0.2 30)', radius: '1.25rem' },
+                backgroundImage: './sunset.png',
+            })
+        );
+        await writeFile(
+            join(pkg, 'themes', 'unknown-token.json'),
+            JSON.stringify({ id: 'odd', name: 'odd', light: { 'font-family': 'serif' } })
+        );
+        await writeFile(
+            join(pkg, 'themes', 'remote.json'),
+            JSON.stringify({
+                id: 'remote',
+                name: 'remote',
+                light: { background: 'url(https://example.com/a.png)' },
+            })
+        );
+        await writeFile(
+            join(pkg, 'themes', 'outside.json'),
+            JSON.stringify({
+                id: 'outside',
+                name: 'outside',
+                light: {},
+                backgroundImage: '../../outside.png',
+            })
+        );
+        const store = await Store.open(join(root, 'db.sqlite'));
+        const host = new PluginHost(store, [{ dir: pkg, source: 'bundled' }]);
+        await host.start();
+        assert.deepEqual(host.statuses()[0]?.themes, [
+            {
+                id: 'sunset',
+                name: 'theme.sunset',
+                light: { primary: 'oklch(0.65 0.2 30)', radius: '1.25rem' },
+                image: { path: join(pkg, 'themes', 'sunset.png'), mediaType: 'image/png' },
+            },
+        ]);
+        await host.stop();
+        await store.close();
+    });
 });
