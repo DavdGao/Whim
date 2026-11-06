@@ -1,3 +1,26 @@
+import {
+    Conversation,
+    ConversationContent,
+    ConversationEmptyState,
+    ConversationScrollButton,
+} from '@whimkit/ui/components/ai-elements/conversation';
+import {
+    Message,
+    MessageAction,
+    MessageActions,
+    MessageContent,
+} from '@whimkit/ui/components/ai-elements/message';
+import { Badge } from '@whimkit/ui/components/badge';
+import {
+    Trace,
+    TraceCollapsible,
+    TraceCollapsibleContent,
+    TraceCollapsibleTrigger,
+    TraceIcon,
+    TraceLine,
+    TraceTitle,
+} from '@whimkit/ui/components/trace';
+import { cn } from '@whimkit/ui/lib/utils';
 import { ArchiveIcon, CheckIcon, CopyIcon, MessageSquareIcon, XIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -26,30 +49,6 @@ import type {
     ToolResult,
 } from '@whimkit/core/contracts';
 import type { ReactNode } from 'react';
-
-import {
-    Conversation,
-    ConversationContent,
-    ConversationEmptyState,
-    ConversationScrollButton,
-} from '@/components/ai-elements/conversation';
-import {
-    Message,
-    MessageAction,
-    MessageActions,
-    MessageContent,
-} from '@/components/ai-elements/message';
-import { Badge } from '@/components/ui/badge';
-import {
-    Trace,
-    TraceCollapsible,
-    TraceCollapsibleContent,
-    TraceCollapsibleTrigger,
-    TraceIcon,
-    TraceLine,
-    TraceTitle,
-} from '@/components/ui/trace';
-import { cn } from '@/lib/utils';
 
 /**
  * Join the text of blocks of one type.

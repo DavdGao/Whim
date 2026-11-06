@@ -1,10 +1,4 @@
-import { ChevronDownIcon } from 'lucide-react';
-
-import { useAction } from '../lib/use-action';
-
-import type { ComponentProps, ReactNode } from 'react';
-
-import { Button } from '@/components/ui/button';
+import { Button } from '@whimkit/ui/components/button';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -14,9 +8,14 @@ import {
     DropdownMenuRadioItem,
     DropdownMenuSeparator,
     DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Spinner } from '@/components/ui/spinner';
-import { cn } from '@/lib/utils';
+} from '@whimkit/ui/components/dropdown-menu';
+import { Spinner } from '@whimkit/ui/components/spinner';
+import { cn } from '@whimkit/ui/lib/utils';
+import { ChevronDownIcon } from 'lucide-react';
+
+import { useAction } from '../lib/use-action';
+
+import type { ComponentProps, ReactNode } from 'react';
 
 export interface Choice<Value extends string> {
     readonly value: Value;

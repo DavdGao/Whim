@@ -1,3 +1,22 @@
+import { Button } from '@whimkit/ui/components/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@whimkit/ui/components/dialog';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@whimkit/ui/components/dropdown-menu';
+import { Input } from '@whimkit/ui/components/input';
+import { Spinner } from '@whimkit/ui/components/spinner';
+import { cn } from '@whimkit/ui/lib/utils';
 import {
     CheckIcon,
     EllipsisIcon,
@@ -16,26 +35,6 @@ import { useAction } from '../../lib/use-action';
 
 import type { SessionInfo } from '../../../shared/ipc';
 import type { MessageKey } from '../../lib/messages';
-
-import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
-import { Spinner } from '@/components/ui/spinner';
-import { cn } from '@/lib/utils';
 
 type Group = { label: MessageKey; sessions: SessionInfo[] };
 

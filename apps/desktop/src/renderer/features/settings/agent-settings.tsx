@@ -1,3 +1,14 @@
+import { Button } from '@whimkit/ui/components/button';
+import { Card, CardContent } from '@whimkit/ui/components/card';
+import {
+    Field,
+    FieldContent,
+    FieldDescription,
+    FieldGroup,
+    FieldLabel,
+} from '@whimkit/ui/components/field';
+import { Input } from '@whimkit/ui/components/input';
+import { Textarea } from '@whimkit/ui/components/textarea';
 import { ImageUpIcon, RotateCcwIcon, SaveIcon, Trash2Icon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -8,18 +19,6 @@ import { call } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 
 import type { AgentProfile, AppState } from '../../../shared/ipc';
-
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import {
-    Field,
-    FieldContent,
-    FieldDescription,
-    FieldGroup,
-    FieldLabel,
-} from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 
 const maxIconBytes = 200 * 1024;
 

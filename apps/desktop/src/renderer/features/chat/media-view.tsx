@@ -1,15 +1,14 @@
-import { useEffect, useState } from 'react';
-
-import { call } from '../../lib/client';
-
-import type { MediaBlock } from '@whimkit/core/contracts';
-
 import {
     Attachment,
     AttachmentInfo,
     AttachmentPreview,
     Attachments,
-} from '@/components/ai-elements/attachments';
+} from '@whimkit/ui/components/ai-elements/attachments';
+import { useEffect, useState } from 'react';
+
+import { call } from '../../lib/client';
+
+import type { MediaBlock } from '@whimkit/core/contracts';
 
 /**
  * A blob URL for a stored media file, loaded from Backend and revoked on unmount.

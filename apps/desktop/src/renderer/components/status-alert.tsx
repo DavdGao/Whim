@@ -1,9 +1,8 @@
+import { Alert, AlertDescription, AlertTitle } from '@whimkit/ui/components/alert';
+import { cn } from '@whimkit/ui/lib/utils';
 import { AlertCircleIcon, InfoIcon, TriangleAlertIcon } from 'lucide-react';
 
 import type { ReactNode } from 'react';
-
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { cn } from '@/lib/utils';
 
 export type StatusTone = 'error' | 'warning' | 'info';
 

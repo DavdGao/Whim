@@ -6,19 +6,19 @@ import { PanelLeftIcon } from 'lucide-react';
 import { Slot } from 'radix-ui';
 import * as React from 'react';
 
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Separator } from '@/components/ui/separator';
+import { Button } from '@whimkit/ui/components/button';
+import { Input } from '@whimkit/ui/components/input';
+import { Separator } from '@whimkit/ui/components/separator';
 import {
     Sheet,
     SheetContent,
     SheetDescription,
     SheetHeader,
     SheetTitle,
-} from '@/components/ui/sheet';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useIsMobile } from '@/hooks/use-mobile';
+} from '@whimkit/ui/components/sheet';
+import { Skeleton } from '@whimkit/ui/components/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@whimkit/ui/components/tooltip';
+import { useIsMobile } from '@whimkit/ui/hooks/use-mobile';
 
 const SIDEBAR_COOKIE_NAME = 'sidebar_state';
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;

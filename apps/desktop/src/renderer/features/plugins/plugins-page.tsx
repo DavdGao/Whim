@@ -1,3 +1,7 @@
+import { Badge } from '@whimkit/ui/components/badge';
+import { Card, CardContent } from '@whimkit/ui/components/card';
+import { Label } from '@whimkit/ui/components/label';
+import { Switch } from '@whimkit/ui/components/switch';
 import { PuzzleIcon } from 'lucide-react';
 
 import { EntityIcon } from '../../components/entity-icon';
@@ -9,10 +13,6 @@ import { useAction } from '../../lib/use-action';
 import type { AppState } from '../../../shared/ipc';
 
 import { StatusAlert } from '@/components/status-alert';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 
 const categories = ['models', 'tools', 'other'] as const;
 

@@ -1,6 +1,6 @@
-import type { LucideIcon } from 'lucide-react';
+import { cn } from '@whimkit/ui/lib/utils';
 
-import { cn } from '@/lib/utils';
+import type { LucideIcon } from 'lucide-react';
 
 /**
  * A plugin-provided image, or a generic glyph when there is none.

@@ -1,3 +1,12 @@
+import { Button } from '@whimkit/ui/components/button';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@whimkit/ui/components/dropdown-menu';
 import {
     ChevronDownIcon,
     ExternalLinkIcon,
@@ -14,16 +23,6 @@ import { call, chooseDirectory, openDirectory } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 
 import type { GitStatus } from '../../../shared/ipc';
-
-import { Button } from '@/components/ui/button';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 
 /**
  * The last segment of a path, for compact display.

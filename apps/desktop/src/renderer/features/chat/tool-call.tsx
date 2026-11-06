@@ -1,4 +1,28 @@
 import {
+    CodeBlock,
+    CodeBlockContent,
+    CodeBlockHeader,
+    CodeBlockTitle,
+} from '@whimkit/ui/components/code-block';
+import {
+    Item,
+    ItemActions,
+    ItemContent,
+    ItemDescription,
+    ItemMedia,
+    ItemTitle,
+} from '@whimkit/ui/components/item';
+import { Spinner } from '@whimkit/ui/components/spinner';
+import {
+    TraceCollapsible,
+    TraceCollapsibleContent,
+    TraceCollapsibleTrigger,
+    TraceDescription,
+    TraceIcon,
+    TraceLine,
+    TraceTitle,
+} from '@whimkit/ui/components/trace';
+import {
     CheckIcon,
     CircleStopIcon,
     FilePenIcon,
@@ -31,31 +55,6 @@ import type {
 } from '@whimkit/core/contracts';
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
-
-import {
-    CodeBlock,
-    CodeBlockContent,
-    CodeBlockHeader,
-    CodeBlockTitle,
-} from '@/components/ui/code-block';
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemMedia,
-    ItemTitle,
-} from '@/components/ui/item';
-import { Spinner } from '@/components/ui/spinner';
-import {
-    TraceCollapsible,
-    TraceCollapsibleContent,
-    TraceCollapsibleTrigger,
-    TraceDescription,
-    TraceIcon,
-    TraceLine,
-    TraceTitle,
-} from '@/components/ui/trace';
 
 type Phase = 'running' | 'done' | 'failed';
 

@@ -1,3 +1,12 @@
+import { Button } from '@whimkit/ui/components/button';
+import {
+    Empty,
+    EmptyContent,
+    EmptyDescription,
+    EmptyHeader,
+    EmptyTitle,
+} from '@whimkit/ui/components/empty';
+import { Skeleton } from '@whimkit/ui/components/skeleton';
 import { BoxesIcon, PlayIcon, PlusIcon } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -14,17 +23,9 @@ import { Transcript } from './transcript';
 import { useSession } from './use-session';
 
 import type { AppState, ChatSlot } from '../../../shared/ipc';
+import type { PageProps } from '../../lib/navigation';
 
 import { StatusAlert } from '@/components/status-alert';
-import { Button } from '@/components/ui/button';
-import {
-    Empty,
-    EmptyContent,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyTitle,
-} from '@/components/ui/empty';
-import { Skeleton } from '@/components/ui/skeleton';
 
 /**
  * Report a failed command as a toast.
@@ -39,29 +40,22 @@ function notify(error: unknown, fallback: string): void {
  * The chat page: session list and the selected conversation.
  * @param props Application state and navigation.
  * @param props.state Application state.
- * @param props.onOpenModels Navigate to the Models page.
- * @param props.openRequest The latest request from outside the page to show a chat.
+ * @param props.params Navigation parameters; `sessionId` selects a chat.
+ * @param props.navigate Navigate, here to the Models settings.
  * @returns The page.
  */
-export function ChatPage({
-    state,
-    onOpenModels,
-    openRequest,
-}: {
-    state: AppState;
-    onOpenModels: () => void;
-    openRequest?: { sessionId: string } | undefined;
-}) {
+export function ChatPage({ state, params, navigate }: PageProps) {
     const { t } = useT();
     const [selected, setSelected] = useState<string | undefined>(
-        openRequest?.sessionId ?? state.sessions[0]?.sessionId
+        params.sessionId ?? state.sessions[0]?.sessionId
     );
-    // Each new request selects its chat once; the user can navigate away afterwards.
-    const [handledRequest, setHandledRequest] = useState(openRequest);
-    if (openRequest !== handledRequest) {
-        setHandledRequest(openRequest);
-        if (openRequest) setSelected(openRequest.sessionId);
+    // Each navigation selects its chat once; the user can switch chats afterwards.
+    const [handledParams, setHandledParams] = useState(params);
+    if (params !== handledParams) {
+        setHandledParams(params);
+        if (params.sessionId) setSelected(params.sessionId);
     }
+    const onOpenModels = () => navigate('settings', { section: 'models' });
     const session = useSession(selected);
     const [workspace, setWorkspace] = useState<string | undefined>();
     const view = session.view;

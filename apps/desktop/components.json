@@ -5,7 +5,7 @@
     "tsx": true,
     "tailwind": {
         "config": "",
-        "css": "src/renderer/index.css",
+        "css": "../../packages/ui/src/styles/globals.css",
         "baseColor": "neutral",
         "cssVariables": true,
         "prefix": ""
@@ -14,10 +14,10 @@
     "rtl": false,
     "aliases": {
         "components": "@/components",
-        "utils": "@/lib/utils",
-        "ui": "@/components/ui",
+        "hooks": "@/hooks",
         "lib": "@/lib",
-        "hooks": "@/hooks"
+        "utils": "@whimkit/ui/lib/utils",
+        "ui": "@whimkit/ui/components"
     },
     "menuColor": "default",
     "menuAccent": "subtle",

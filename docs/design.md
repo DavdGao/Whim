@@ -32,7 +32,8 @@ The external coding-agent feature uses a native terminal with local/SSH executio
 | `@whimkit/agent`            | The agent async generator: reasoning steps, context assembly, compaction, tool scheduling. Accesses Core only through ports.                       |
 | `@whimkit/openai-protocol`  | Library: Responses wire types, SSE decoding, stream-event normalization helpers. No vendor detection, no runtime configuration.                    |
 | `@whimkit/plugin-dashscope` | DashScope credential type, Chat adapter, seed cards                                                                                                |
-| `apps/desktop`              | Electron Main, Backend entry, Renderer, preload, shadcn components (`src/components/ui`), feature pages                                            |
+| `@whimkit/ui`               | shadcn and AI Elements components, the design tokens (`globals.css`); shared by the Renderer and, later, plugin client entries (§5.7)              |
+| `apps/desktop`              | Electron Main, Backend entry, Renderer, preload, feature pages                                                                                     |
 
 Core exposes subpaths:
 
@@ -42,7 +43,7 @@ Core exposes subpaths:
 
 Dependency rules: agent depends on `core/contracts`; Core does not import agent; desktop wires agent to Core's ports. Plugins depend on Core's public subpaths and libraries such as `openai-protocol`, never on another package's internals.
 
-There is no shared UI package. shadcn components are installed with the official CLI into `apps/desktop`. A UI package is introduced only when plugin client entries need to share components with the host (§5.7).
+`@whimkit/ui` is a source package that Vite compiles into the Renderer. shadcn components and AI Elements are installed into it with the official CLI, run in `packages/ui` (shadcn's monorepo layout: its `components.json` aliases are `@whimkit/ui/...`). Importers use `@whimkit/ui/components/<name>`, `@whimkit/ui/lib/utils`, and `@whimkit/ui/hooks/<name>`. Plugin client entries will share the same modules through the import map (§5.7).
 
 ## 4. Processes
 
@@ -507,6 +508,8 @@ The window has no native title bar (`titleBarStyle: 'hiddenInset'`). A draggable
 | Chat     | Session list (Pinned / Today / Earlier, rename, pin, delete), conversation with reasoning and tool calls as Trace lines (the latest 60 history entries first; pulling past the top loads earlier pages with a springy pull, no button), a one-line composer that grows and stacks its add/send buttons below the text when it wraps; the add menu attaches files or chooses the chat's folder. A chosen folder (not the default) appears in a bar above the field with its git branch and uncommitted line counts; under the field sit one model-and-thinking button and a context ring that fills toward compaction |
 | Settings | A section list: General (language, what agents call the user, permissions: ask each time or review automatically with a chosen model, data); Agent (name, icon, system prompt); Models (credentials, default models, available models with a detail page per model, grouped by model kind as kinds are added); Plugins (grouped by manifest category)                                                                                                                                                                                                                                                                |
 
+Pages and Settings sections are entries in registries (`PageEntry`, `SettingsSectionEntry` in `lib/navigation.ts`) that plugin pages will join (§5.7). A page receives the application state, its navigation parameters, and `navigate(page, params)`; the menu bar item opens a chat with `navigate('chat', { sessionId })`, and the Models shortcut opens `navigate('settings', { section: 'models' })`.
+
 Configuration lives in Settings; the rail is for feature pages. Planned feature pages include ACP (connecting external coding agents) and Music; each is added when its feature exists. The language selector is persistent and every string is in typed en/zh-CN catalogs.
 
 ### 11.2 Data flow
@@ -520,7 +523,7 @@ Chat retains the AI Elements Conversation's bottom-following behavior. Its scrol
 
 ### 11.3 Components and style
 
-Use official shadcn/ui components and AI Elements (conversation, message, trace, code block) from the official registry, installed with the CLI into `apps/desktop/src/components/ui`. Compose and theme them through tokens; do not restyle internals with broad selectors. Vendored files change only through the CLI, except for small edits marked with a `Whim:` comment in the file and listed here: the slider thumb is a primary ring inside a background-colored edge, so it stays distinct over the primary range. Keyboard and focus behavior are part of acceptance.
+Use official shadcn/ui components and AI Elements (conversation, message, trace, code block) from the official registry, installed with the CLI into `@whimkit/ui` (`packages/ui/src/components`, §3). Compose and theme them through tokens; do not restyle internals with broad selectors. Vendored files change only through the CLI, except for small edits marked with a `Whim:` comment in the file and listed here: the slider thumb is a primary ring inside a background-colored edge, so it stays distinct over the primary range. Keyboard and focus behavior are part of acceptance.
 
 Whim is a consumer application. The visual direction is friendly and soft rather than dense and formal:
 

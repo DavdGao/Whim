@@ -21,9 +21,8 @@ export default [
             '.husky/_/**',
             '.claude/**',
             // Vendored code installed by the official shadcn CLI; updated through the CLI, not by hand.
-            'apps/desktop/src/renderer/components/ui/**',
-            'apps/desktop/src/renderer/components/ai-elements/**',
-            'apps/desktop/src/renderer/hooks/use-mobile.ts',
+            'packages/ui/src/components/**',
+            'packages/ui/src/hooks/use-mobile.ts',
             'apps/desktop/src/renderer/hooks/use-highlighted-code.ts',
             'apps/desktop/src/renderer/lib/highlighter.tsx',
         ],
@@ -125,7 +124,7 @@ export default [
                 {
                     paths: [
                         {
-                            name: '@/components/ui/select',
+                            name: '@whimkit/ui/components/select',
                             message: 'Use ChoiceMenu (a DropdownMenu radio menu) instead.',
                         },
                     ],
@@ -134,7 +133,7 @@ export default [
         },
     },
     {
-        files: ['**/components/ui/**/*.{ts,tsx}'],
+        files: ['packages/ui/src/components/**/*.{ts,tsx}'],
         rules: {
             'jsdoc/require-description': 'off',
             'jsdoc/require-returns': 'off',

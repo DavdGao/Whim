@@ -1,3 +1,6 @@
+import { Badge } from '@whimkit/ui/components/badge';
+import { Button } from '@whimkit/ui/components/button';
+import { cn } from '@whimkit/ui/lib/utils';
 import {
     ArrowLeftIcon,
     AudioLinesIcon,
@@ -31,9 +34,6 @@ import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { StatusAlert } from '@/components/status-alert';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 
 interface Modality {
     readonly label: MessageKey;
