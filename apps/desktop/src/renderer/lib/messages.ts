@@ -159,6 +159,9 @@ export const en = {
         'What agents call you. Leave it empty to not use a name. Existing chats pick it up after their next model switch or compaction.',
     'settings.userNameSaved': 'Saved. New chats will use it.',
     'settings.language': 'Language',
+    'settings.theme': 'Theme',
+    'settings.themeDescription': 'Colors and background. Plugins can add themes.',
+    'settings.theme.default': 'Default',
     'settings.languageDescription': 'Language of the Whim interface.',
     'settings.permissions': 'Tool permissions',
     'settings.permissionsDescription':
@@ -444,6 +447,9 @@ export const zhCN: Record<MessageKey, string> = {
         '助手会这样称呼你。留空则不使用称呼。已有对话会在下次切换模型或压缩后使用新称呼。',
     'settings.userNameSaved': '已保存，新对话将使用新的称呼。',
     'settings.language': '语言',
+    'settings.theme': '主题',
+    'settings.themeDescription': '配色和背景。插件可以添加主题。',
+    'settings.theme.default': '默认',
     'settings.languageDescription': 'Whim 界面的显示语言。',
     'settings.permissions': '工具权限',
     'settings.permissionsDescription':

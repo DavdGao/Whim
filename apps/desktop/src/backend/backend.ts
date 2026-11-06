@@ -34,7 +34,7 @@ import {
     requestEnvelopeSchema,
     userNameSchema,
 } from '../shared/ipc.js';
-import { pluginClientUrl } from '../shared/main-protocol.js';
+import { pluginClientUrl, themeImageUrl } from '../shared/main-protocol.js';
 
 import { gitStatus } from './git.js';
 
@@ -349,6 +349,17 @@ class Backend {
                         ? [{ pluginId: status.id, root: status.client.root }]
                         : []
                 ),
+            themeImages: this.host
+                .statuses()
+                .flatMap(status =>
+                    status.availability === 'active'
+                        ? status.themes.flatMap(theme =>
+                              theme.image
+                                  ? [{ pluginId: status.id, themeId: theme.id, ...theme.image }]
+                                  : []
+                          )
+                        : []
+                ),
         });
     }
 
@@ -476,6 +487,13 @@ class Backend {
                 this.#emit({ type: 'state' });
                 return null;
             }
+            case 'settings.theme':
+                await this.store.setSetting(
+                    'appearance.theme',
+                    methodSchemas[method].parse(raw).theme
+                );
+                this.#emit({ type: 'state' });
+                return null;
             case 'settings.userName':
                 await this.store.setSetting('user.name', methodSchemas[method].parse(raw).name);
                 this.#emit({ type: 'state' });
@@ -639,6 +657,19 @@ class Backend {
     async state(): Promise<AppState> {
         const locale = localeSchema.safeParse(await this.store.getSetting('locale'));
         const slot = chatSlotSchema.safeParse(await this.store.getSetting('slot.chat'));
+        const theme = z.string().safeParse(await this.store.getSetting('appearance.theme'));
+        const themes = this.host.statuses().flatMap(status =>
+            status.availability === 'active'
+                ? status.themes.map(item => ({
+                      id: `${status.id}#${item.id}`,
+                      pluginId: status.id,
+                      name: item.name,
+                      light: item.light,
+                      ...(item.dark ? { dark: item.dark } : {}),
+                      ...(item.image ? { image: themeImageUrl(status.id, item.id) } : {}),
+                  }))
+                : []
+        );
         const savedProfile = legacyProfileSchema.safeParse(
             await this.store.getSetting('agent.profile')
         ).success;
@@ -656,6 +687,10 @@ class Backend {
             permissions: await this.#permissions(),
             userCardsDir: this.catalog.userDir,
             baseTools: this.#baseTools.map(tool => tool.name),
+            themes,
+            ...(theme.success && themes.some(item => item.id === theme.data)
+                ? { theme: theme.data }
+                : {}),
             plugins: this.host.statuses().map(status => ({
                 id: status.id,
                 version: status.version,

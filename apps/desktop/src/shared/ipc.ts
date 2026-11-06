@@ -78,6 +78,8 @@ export const methodSchemas = {
     'settings.permissions': z.strictObject({ permissions: permissionSettingsSchema }),
     'settings.agent': z.strictObject({ profile: agentProfileSchema.nullable() }),
     'settings.userName': z.strictObject({ name: userNameSchema }),
+    /** A theme id from `AppState.themes`, or null for the default look. */
+    'settings.theme': z.strictObject({ theme: z.string().min(1).max(400).nullable() }),
     'credentials.save': z.strictObject({
         id: idSchema.optional(),
         typeId: idSchema,
@@ -236,6 +238,18 @@ export interface SessionInfo {
 /** One-time startup events the user should know about. */
 export type StartupNotice = { readonly kind: 'database-moved'; readonly path: string };
 
+/** A plugin theme: token values to apply, and an optional background image URL. */
+export interface ThemeInfo {
+    /** `<pluginId>#<themeId>`. */
+    readonly id: string;
+    readonly pluginId: string;
+    /** A key in the plugin's locale catalogs. */
+    readonly name: string;
+    readonly light: Readonly<Record<string, string>>;
+    readonly dark?: Readonly<Record<string, string>>;
+    readonly image?: string;
+}
+
 export interface AppState {
     readonly locale: Locale;
     readonly notices: readonly StartupNotice[];
@@ -251,6 +265,10 @@ export interface AppState {
     /** Names of the built-in tools every agent has. */
     readonly baseTools: readonly string[];
     readonly plugins: readonly PluginInfo[];
+    /** Themes of active plugins (design.md §5.7). */
+    readonly themes: readonly ThemeInfo[];
+    /** The chosen theme's id, while it is available; the default look otherwise. */
+    readonly theme?: string;
     readonly credentialTypes: readonly CredentialTypeInfo[];
     readonly adapters: readonly AdapterInfo[];
     readonly catalog: readonly CatalogEntryInfo[];
@@ -281,6 +299,7 @@ export interface Results {
     'settings.permissions': null;
     'settings.agent': null;
     'settings.userName': null;
+    'settings.theme': null;
     'credentials.save': { id: string };
     'credentials.remove': null;
     'catalog.reload': null;

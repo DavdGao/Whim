@@ -45,6 +45,8 @@ let confirmingQuit = false;
 const notifications = new Set<Notification>();
 /** Client directories of active plugins, by plugin id (design.md §5.7). */
 let pluginRoots = new Map<string, string>();
+/** Theme background images of active plugins, by `<pluginId>/<themeId>`. */
+let themeImages = new Map<string, { path: string; mediaType: string }>();
 
 /** Files a plugin client directory may serve, by extension. */
 const pluginFileTypes: Readonly<Record<string, string>> = {
@@ -75,7 +77,24 @@ async function servePluginFile(request: Request): Promise<Response> {
     const notFound = new Response(null, { status: 404 });
     const url = new URL(request.url);
     const [, encodedId, ...segments] = url.pathname.split('/');
-    if (url.host !== 'plugins' || !encodedId || segments.length === 0) return notFound;
+    if (!encodedId || segments.length === 0) return notFound;
+    if (url.host === 'themes') {
+        const image = themeImages.get(
+            `${decodeURIComponent(encodedId)}/${decodeURIComponent(segments.join('/'))}`
+        );
+        if (!image) return notFound;
+        return readFile(image.path).then(
+            bytes =>
+                new Response(new Uint8Array(bytes), {
+                    headers: {
+                        'content-type': image.mediaType,
+                        'x-content-type-options': 'nosniff',
+                    },
+                }),
+            () => notFound
+        );
+    }
+    if (url.host !== 'plugins') return notFound;
     try {
         const configured = pluginRoots.get(decodeURIComponent(encodedId));
         if (!configured) return notFound;
@@ -239,10 +258,17 @@ function startBackend(): void {
             });
         else if (message.type === 'plugin-clients') {
             const parsed = pluginClientsSchema.safeParse(message);
-            if (parsed.success)
+            if (parsed.success) {
                 pluginRoots = new Map(
                     parsed.data.clients.map(client => [client.pluginId, client.root])
                 );
+                themeImages = new Map(
+                    parsed.data.themeImages.map(image => [
+                        `${image.pluginId}/${image.themeId}`,
+                        { path: image.path, mediaType: image.mediaType },
+                    ])
+                );
+            }
         } else if (message.type === 'activity') {
             const parsed = activitySchema.safeParse(message);
             if (parsed.success) applyActivity(parsed.data);

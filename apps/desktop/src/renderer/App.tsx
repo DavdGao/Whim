@@ -28,6 +28,7 @@ import { onOpenSession } from './lib/client';
 import { useT } from './lib/i18n';
 import { LocaleProvider } from './lib/locale-provider';
 import { pluginText } from './lib/messages';
+import { useTheme } from './lib/use-theme';
 import { PluginBoundary, PluginUiProvider } from './plugins/plugin-provider';
 import { pluginPageId, usePluginRegistrations } from './plugins/plugin-ui';
 
@@ -170,6 +171,7 @@ function Shell() {
     // The menu bar item and notifications ask to show a chat (design.md §4.1).
     useEffect(() => onOpenSession(sessionId => navigate('chat', { sessionId })), [navigate]);
     const allPages = usePages();
+    const background = useTheme(state);
     const current = allPages.find(item => item.id === location.page) ?? allPages[0];
     const banner =
         status === 'restarting'
@@ -182,7 +184,9 @@ function Shell() {
     return (
         <SidebarProvider
             defaultOpen={false}
-            className="bg-sidebar text-sidebar-foreground h-svh min-h-0 flex-col"
+            className="bg-sidebar text-sidebar-foreground h-svh min-h-0 flex-col bg-cover bg-center"
+            // A theme's background image shows behind the chrome (design.md §5.7).
+            style={background ? { backgroundImage: `url("${background}")` } : undefined}
         >
             {/* Draggable title strip; the left inset leaves room for the macOS traffic lights. */}
             <header className="flex h-11 shrink-0 items-center gap-2 pr-4 pl-21 select-none [-webkit-app-region:drag]">

@@ -25,6 +25,15 @@ export type Activity = z.infer<typeof activitySchema>;
 export const pluginClientsSchema = z.strictObject({
     type: z.literal('plugin-clients'),
     clients: z.array(z.strictObject({ pluginId: z.string().min(1), root: z.string().min(1) })),
+    /** Theme background images, served at `whim-plugin://themes/<pluginId>/<themeId>`. */
+    themeImages: z.array(
+        z.strictObject({
+            pluginId: z.string().min(1),
+            themeId: z.string().min(1),
+            path: z.string().min(1),
+            mediaType: z.string().min(1),
+        })
+    ),
 });
 export type PluginClients = z.infer<typeof pluginClientsSchema>;
 
@@ -36,6 +45,16 @@ export type PluginClients = z.infer<typeof pluginClientsSchema>;
  */
 export function pluginClientUrl(pluginId: string, file: string): string {
     return `whim-plugin://plugins/${encodeURIComponent(pluginId)}/${file}`;
+}
+
+/**
+ * The URL of a theme's background image.
+ * @param pluginId The plugin.
+ * @param themeId The theme, within the plugin.
+ * @returns The `whim-plugin:` URL.
+ */
+export function themeImageUrl(pluginId: string, themeId: string): string {
+    return `whim-plugin://themes/${encodeURIComponent(pluginId)}/${encodeURIComponent(themeId)}`;
 }
 
 /** A committed fact that needs the user, shown as a notification while no window is focused. */

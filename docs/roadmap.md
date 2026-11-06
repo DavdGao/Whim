@@ -99,7 +99,7 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [x] Navigation rail and settings tabs from one registry; shadcn and AI Elements moved into `@whimkit/ui`
 - [x] Client entries: `whim-plugin://` protocol, import map for shared modules, slots `page`, `settings.section`, `chat.tool`, `composer.action`, verified with a fixture plugin in Electron
 - [x] Local plugins under `<userData>/plugins/`, disabled until the user enables them
-- [ ] Declarative themes
+- [x] Declarative themes: token sets and a background image, chosen in Settings → General
 
 ## Later
 

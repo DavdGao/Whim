@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { z } from 'zod';
@@ -63,6 +63,8 @@ const manifestSchema = z.object({
             .string()
             .regex(/\.m?js$/, 'The client entry must be a .js or .mjs module.')
             .optional(),
+        /** Declarative themes: JSON files inside the package (design.md §5.7). */
+        themes: z.array(z.string().min(1)).default([]),
         /** Precompiled CSS for the client, in the client entry's directory. */
         clientStyle: z
             .string()
@@ -107,8 +109,122 @@ export interface PluginStatus {
     readonly category: 'models' | 'tools' | 'other';
     /** What the manifest declares the plugin registers. */
     readonly contributes: PluginContributions;
+    /** Valid themes from the manifest's `themes` files. */
+    readonly themes: readonly PluginTheme[];
     /** The Renderer entry, when the plugin has one: the directory it is served from and its file. */
     readonly client?: { readonly root: string; readonly entry: string; readonly style?: string };
+}
+
+/** Design tokens a theme may set (design.md §11.3); values are CSS color or length values. */
+export const themeTokens = [
+    'background',
+    'foreground',
+    'card',
+    'card-foreground',
+    'popover',
+    'popover-foreground',
+    'primary',
+    'primary-foreground',
+    'secondary',
+    'secondary-foreground',
+    'muted',
+    'muted-foreground',
+    'accent',
+    'accent-foreground',
+    'destructive',
+    'border',
+    'input',
+    'ring',
+    'radius',
+    'sidebar',
+    'sidebar-foreground',
+    'sidebar-primary',
+    'sidebar-primary-foreground',
+    'sidebar-accent',
+    'sidebar-accent-foreground',
+    'sidebar-border',
+    'sidebar-ring',
+] as const;
+
+/** One token value: a plain CSS value, never a declaration break or a resource reference. */
+const tokenValueSchema = z
+    .string()
+    .min(1)
+    .max(200)
+    .regex(/^[^;{}<>\\]*$/, 'A token value cannot contain ; { } < > or \\.')
+    .refine(value => !/url\s*\(|@import|expression\s*\(/i.test(value), {
+        message: 'A token value cannot load resources.',
+    });
+
+const tokenSetSchema = z.partialRecord(z.enum(themeTokens), tokenValueSchema);
+
+const themeImageTypes: Readonly<Record<string, string>> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+};
+const maxThemeImageBytes = 2 * 1024 * 1024;
+
+const themeFileSchema = z.strictObject({
+    /** Unique within the plugin: lowercase letters, digits, and `-`. */
+    id: z.string().regex(/^[a-z0-9-]{1,64}$/),
+    /** A key in the plugin's locale catalogs. */
+    name: z.string().min(1).max(200),
+    light: tokenSetSchema,
+    /** Applied once the application has a dark appearance. */
+    dark: tokenSetSchema.optional(),
+    /** An image behind the window's chrome, inside the package. */
+    backgroundImage: z.string().min(1).optional(),
+});
+
+/** A validated theme; `image` is the absolute path of its background image. */
+export interface PluginTheme {
+    readonly id: string;
+    readonly name: string;
+    readonly light: Readonly<Partial<Record<(typeof themeTokens)[number], string>>>;
+    readonly dark?: Readonly<Partial<Record<(typeof themeTokens)[number], string>>>;
+    readonly image?: { readonly path: string; readonly mediaType: string };
+}
+
+/**
+ * Read a plugin's themes; an invalid theme is reported and skipped.
+ * @param dir The package root.
+ * @param files The manifest's theme files.
+ * @returns Valid themes.
+ */
+async function readThemes(dir: string, files: readonly string[]): Promise<PluginTheme[]> {
+    const themes: PluginTheme[] = [];
+    for (const path of files) {
+        try {
+            const file = resolve(dir, path);
+            if (!file.startsWith(dir + sep)) throw new Error('The path leaves the package.');
+            const theme = themeFileSchema.parse(JSON.parse(await readFile(file, 'utf8')));
+            if (themes.some(other => other.id === theme.id))
+                throw new Error(`Theme ${theme.id} exists.`);
+            let image: PluginTheme['image'];
+            if (theme.backgroundImage) {
+                const imagePath = resolve(dirname(file), theme.backgroundImage);
+                const mediaType = themeImageTypes[extname(imagePath).toLowerCase()];
+                if (!imagePath.startsWith(dir + sep))
+                    throw new Error('The image leaves the package.');
+                if (!mediaType) throw new Error('Background images are PNG, JPEG, or WebP.');
+                if ((await stat(imagePath)).size > maxThemeImageBytes)
+                    throw new Error('The background image exceeds 2 MiB.');
+                image = { path: imagePath, mediaType };
+            }
+            themes.push({
+                id: theme.id,
+                name: theme.name,
+                light: theme.light,
+                ...(theme.dark ? { dark: theme.dark } : {}),
+                ...(image ? { image } : {}),
+            });
+        } catch (error) {
+            console.error(`Invalid theme ${path} in ${dir}:`, describeError(error));
+        }
+    }
+    return themes;
 }
 
 /**
@@ -458,6 +574,7 @@ export class PluginHost {
                     icons: {},
                     category: 'other',
                     contributes: contributesSchema.parse(undefined),
+                    themes: [],
                 });
                 continue;
             }
@@ -496,6 +613,7 @@ export class PluginHost {
                 category: manifest.whim.category,
                 contributes: manifest.whim.contributes,
                 ...clientEntry(dir, manifest.whim.client, manifest.whim.clientStyle),
+                themes: await readThemes(dir, manifest.whim.themes),
                 ...(incompatible && row.enabled && !modified ? { error: incompatible } : {}),
             };
             this.#statuses.set(row.id, status);
