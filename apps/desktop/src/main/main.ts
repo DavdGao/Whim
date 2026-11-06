@@ -7,13 +7,23 @@ import {
     BrowserWindow,
     dialog,
     ipcMain,
+    Menu,
     MessageChannelMain,
+    Notification,
+    powerMonitor,
+    powerSaveBlocker,
     safeStorage,
     shell,
+    Tray,
     utilityProcess,
 } from 'electron';
 
-import type { UtilityProcess } from 'electron';
+import { activitySchema, attentionSchema } from '../shared/main-protocol.js';
+
+import { mainText } from './strings.js';
+
+import type { Activity, Attention } from '../shared/main-protocol.js';
+import type { MenuItemConstructorOptions, UtilityProcess } from 'electron';
 
 const here = dirname(fileURLToPath(import.meta.url));
 let backend: UtilityProcess | undefined;
@@ -21,6 +31,17 @@ let backendReady = false;
 let window: BrowserWindow | undefined;
 let quitting = false;
 let restarts = 0;
+/** The latest snapshot from Backend (design.md §4.1); empty while Backend is down. */
+let activity: Activity = { type: 'activity', locale: 'en', running: [] };
+let tray: Tray | undefined;
+let powerBlocker: number | undefined;
+/** A chat to show once a newly created window has loaded. */
+let pendingSession: string | undefined;
+/** Quit was confirmed, or needs no confirmation (system shutdown). */
+let quitConfirmed = false;
+let confirmingQuit = false;
+/** Shown notifications, kept so their click handlers are not collected. */
+const notifications = new Set<Notification>();
 
 /**
  * Answer a Backend cipher request with safeStorage, which only Main can use.
@@ -49,6 +70,89 @@ function handleCipher(message: { id: number; op: string; data: unknown }): void 
             error: error instanceof Error ? error.message : String(error),
         });
     }
+}
+
+/**
+ * Show the window, creating it if needed, optionally at a chat.
+ * @param sessionId The chat to open.
+ */
+function showWindow(sessionId?: string): void {
+    if (!window) {
+        pendingSession = sessionId;
+        createWindow();
+        return;
+    }
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+    if (sessionId) window.webContents.send('whim:open-session', sessionId);
+}
+
+/** Rebuild the menu bar item from the latest activity. */
+function updateTray(): void {
+    if (!tray) return;
+    const { locale, running } = activity;
+    const sessions: MenuItemConstructorOptions[] = running.map(session => {
+        const title = session.title || mainText(locale, 'untitled');
+        return {
+            label: session.waiting ? mainText(locale, 'needsYou', { title }) : title,
+            click: () => showWindow(session.sessionId),
+        };
+    });
+    tray.setTitle(running.length > 0 ? String(running.length) : '');
+    tray.setToolTip(
+        running.length > 0
+            ? mainText(locale, 'running', { count: running.length })
+            : mainText(locale, 'nothingRunning')
+    );
+    tray.setContextMenu(
+        Menu.buildFromTemplate([
+            {
+                label:
+                    running.length > 0
+                        ? mainText(locale, 'running', { count: running.length })
+                        : mainText(locale, 'nothingRunning'),
+                enabled: false,
+            },
+            ...sessions,
+            { type: 'separator' },
+            { label: mainText(locale, 'open'), click: () => showWindow() },
+            { type: 'separator' },
+            { label: mainText(locale, 'quit'), click: () => app.quit() },
+        ])
+    );
+}
+
+/**
+ * Take a new activity snapshot: refresh the menu bar item and hold off App Nap while chats run.
+ * @param next The snapshot.
+ */
+function applyActivity(next: Activity): void {
+    activity = next;
+    if (next.running.length > 0 && powerBlocker === undefined)
+        powerBlocker = powerSaveBlocker.start('prevent-app-suspension');
+    else if (next.running.length === 0 && powerBlocker !== undefined) {
+        powerSaveBlocker.stop(powerBlocker);
+        powerBlocker = undefined;
+    }
+    updateTray();
+}
+
+/**
+ * Notify about a chat that needs the user, unless a Whim window has focus.
+ * @param attention The committed fact.
+ */
+function notifyAttention(attention: Attention): void {
+    if (BrowserWindow.getFocusedWindow() || !Notification.isSupported()) return;
+    const { locale } = activity;
+    const notification = new Notification({
+        title: attention.title || mainText(locale, 'untitled'),
+        body: mainText(locale, attention.kind),
+    });
+    notifications.add(notification);
+    notification.on('click', () => showWindow(attention.sessionId));
+    notification.on('close', () => notifications.delete(notification));
+    notification.show();
 }
 
 /** Give the current window a fresh port to Backend. */
@@ -80,7 +184,13 @@ function startBackend(): void {
                 op: String(message.op),
                 data: 'data' in message ? message.data : undefined,
             });
-        else if (message.type === 'ready') {
+        else if (message.type === 'activity') {
+            const parsed = activitySchema.safeParse(message);
+            if (parsed.success) applyActivity(parsed.data);
+        } else if (message.type === 'attention') {
+            const parsed = attentionSchema.safeParse(message);
+            if (parsed.success) notifyAttention(parsed.data);
+        } else if (message.type === 'ready') {
             backendReady = true;
             restarts = 0;
             connectRenderer();
@@ -95,6 +205,8 @@ function startBackend(): void {
     child.on('exit', code => {
         if (backend === child) backend = undefined;
         if (quitting) return;
+        // Nothing runs while Backend is down; the restarted Backend reports afresh.
+        applyActivity({ ...activity, running: [] });
         console.error(`Backend exited with code ${code}; restarting.`);
         window?.webContents.send('whim:backend', 'restarting');
         const delay = Math.min(30_000, 500 * 2 ** restarts++);
@@ -128,7 +240,11 @@ function createWindow(): void {
         },
     });
     window.once('ready-to-show', () => window?.show());
-    window.webContents.on('did-finish-load', connectRenderer);
+    window.webContents.on('did-finish-load', () => {
+        connectRenderer();
+        if (pendingSession) window?.webContents.send('whim:open-session', pendingSession);
+        pendingSession = undefined;
+    });
     window.on('closed', () => {
         window = undefined;
     });
@@ -142,6 +258,31 @@ function createWindow(): void {
     void window.loadFile(join(here, 'renderer', 'index.html'));
 }
 
+/** Ask before a quit interrupts running chats; quit again once confirmed. */
+async function confirmQuit(): Promise<void> {
+    if (confirmingQuit) return;
+    confirmingQuit = true;
+    const { locale, running } = activity;
+    const options = {
+        type: 'warning' as const,
+        message: mainText(locale, 'quitTitle'),
+        detail: mainText(locale, 'quitDetail', { count: running.length }),
+        buttons: [mainText(locale, 'quitConfirm'), mainText(locale, 'cancel')],
+        defaultId: 0,
+        cancelId: 1,
+    };
+    try {
+        const { response } = window
+            ? await dialog.showMessageBox(window, options)
+            : await dialog.showMessageBox(options);
+        if (response !== 0) return;
+        quitConfirmed = true;
+        app.quit();
+    } finally {
+        confirmingQuit = false;
+    }
+}
+
 // Automated tests on hosts without a keychain opt into Electron's plaintext fallback explicitly.
 if (process.env.WHIM_TEST_PLAINTEXT_SECRETS === '1') {
     void app.whenReady().then(() => safeStorage.setUsePlainTextEncryption(true));
@@ -150,10 +291,7 @@ if (process.env.WHIM_TEST_PLAINTEXT_SECRETS === '1') {
 if (!app.requestSingleInstanceLock()) {
     app.quit();
 } else {
-    app.on('second-instance', () => {
-        if (window?.isMinimized()) window.restore();
-        window?.focus();
-    });
+    app.on('second-instance', () => showWindow());
     app.whenReady().then(() => {
         // Folder picker for a chat's workspace; only the application window may ask.
         ipcMain.handle('whim:choose-directory', async event => {
@@ -173,17 +311,25 @@ if (!app.requestSingleInstanceLock()) {
             return (await shell.openPath(path)) === '';
         });
         startBackend();
+        tray = new Tray(join(here, 'resources', 'trayTemplate.png'));
+        updateTray();
         createWindow();
-        app.on('activate', () => {
-            if (BrowserWindow.getAllWindows().length === 0) createWindow();
+        app.on('activate', () => showWindow());
+        // Logout and system shutdown must not wait on a dialog.
+        powerMonitor.on('shutdown', () => {
+            quitConfirmed = true;
         });
     });
     app.on('window-all-closed', () => {
-        if (process.platform !== 'darwin') app.quit();
+        // Closing windows never quits: Whim keeps running in the menu bar (design.md §4.1).
     });
     app.on('before-quit', event => {
         if (quitting || !backend) return;
         event.preventDefault();
+        if (!quitConfirmed && activity.running.length > 0) {
+            void confirmQuit();
+            return;
+        }
         quitting = true;
         const child = backend;
         const timer = setTimeout(() => child.kill(), 8000);

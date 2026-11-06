@@ -13,6 +13,9 @@ const pending = new Map<
 >();
 const listeners = new Set<Listener>();
 const statusListeners = new Set<(status: string) => void>();
+const openListeners = new Set<(sessionId: string) => void>();
+/** A chat Main asked to open before anything listened (a window just created for it). */
+let pendingOpen: string | undefined;
 const queued: { id: number; method: string; params: unknown }[] = [];
 
 ipcRenderer.on('whim:port', event => {
@@ -54,6 +57,12 @@ ipcRenderer.on('whim:port', event => {
     for (const listener of listeners) listener({ type: 'state' });
 });
 
+ipcRenderer.on('whim:open-session', (_event, sessionId: unknown) => {
+    if (typeof sessionId !== 'string') return;
+    if (openListeners.size === 0) pendingOpen = sessionId;
+    for (const listener of openListeners) listener(sessionId);
+});
+
 ipcRenderer.on('whim:backend', (_event, status: unknown) => {
     for (const listener of statusListeners) listener(String(status));
 });
@@ -81,5 +90,11 @@ contextBridge.exposeInMainWorld('whim', {
     onStatus(listener: (status: string) => void): () => void {
         statusListeners.add(listener);
         return () => statusListeners.delete(listener);
+    },
+    onOpenSession(listener: (sessionId: string) => void): () => void {
+        openListeners.add(listener);
+        if (pendingOpen !== undefined) listener(pendingOpen);
+        pendingOpen = undefined;
+        return () => openListeners.delete(listener);
     },
 });

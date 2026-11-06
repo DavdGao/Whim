@@ -40,11 +40,28 @@ function notify(error: unknown, fallback: string): void {
  * @param props Application state and navigation.
  * @param props.state Application state.
  * @param props.onOpenModels Navigate to the Models page.
+ * @param props.openRequest The latest request from outside the page to show a chat.
  * @returns The page.
  */
-export function ChatPage({ state, onOpenModels }: { state: AppState; onOpenModels: () => void }) {
+export function ChatPage({
+    state,
+    onOpenModels,
+    openRequest,
+}: {
+    state: AppState;
+    onOpenModels: () => void;
+    openRequest?: { sessionId: string } | undefined;
+}) {
     const { t } = useT();
-    const [selected, setSelected] = useState<string | undefined>(state.sessions[0]?.sessionId);
+    const [selected, setSelected] = useState<string | undefined>(
+        openRequest?.sessionId ?? state.sessions[0]?.sessionId
+    );
+    // Each new request selects its chat once; the user can navigate away afterwards.
+    const [handledRequest, setHandledRequest] = useState(openRequest);
+    if (openRequest !== handledRequest) {
+        setHandledRequest(openRequest);
+        if (openRequest) setSelected(openRequest.sessionId);
+    }
     const session = useSession(selected);
     const [workspace, setWorkspace] = useState<string | undefined>();
     const view = session.view;

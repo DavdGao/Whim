@@ -1,6 +1,9 @@
 import { idSchema, thinkingLevelSchema } from '@whimkit/core/contracts';
 import { z } from 'zod';
 
+import { localeSchema } from './main-protocol.js';
+
+import type { Locale } from './main-protocol.js';
 import type {
     AgentRecord,
     Card,
@@ -11,8 +14,8 @@ import type {
     ThinkingLevel,
 } from '@whimkit/core/contracts';
 
-export const localeSchema = z.enum(['en', 'zh-CN']);
-export type Locale = z.infer<typeof localeSchema>;
+export { localeSchema };
+export type { Locale };
 
 export const chatSlotSchema = z.strictObject({
     credentialId: idSchema,
