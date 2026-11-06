@@ -1,7 +1,11 @@
 import * as React from 'react';
-import { cn } from '@/lib/utils';
+import { cn } from '@whimkit/ui/lib/utils';
 
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+} from '@whimkit/ui/components/collapsible';
 import { ChevronRightIcon } from 'lucide-react';
 
 function Trace({ className, ...props }: React.ComponentProps<'div'>) {

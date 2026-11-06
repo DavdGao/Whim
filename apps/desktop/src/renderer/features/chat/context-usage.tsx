@@ -1,10 +1,10 @@
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@whimkit/ui/components/hover-card';
+import { Progress } from '@whimkit/ui/components/progress';
+import { cn } from '@whimkit/ui/lib/utils';
+
 import { useT } from '../../lib/i18n';
 
 import type { Usage } from '@whimkit/core/contracts';
-
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
-import { Progress } from '@/components/ui/progress';
-import { cn } from '@/lib/utils';
 
 /** Compaction starts at this share of the context window (agent.md §5). */
 const compactionShare = 0.8;

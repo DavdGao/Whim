@@ -4,9 +4,9 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from 'cn';
 import * as React from 'react';
 
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@whimkit/ui/components/button';
+import { Input } from '@whimkit/ui/components/input';
+import { Textarea } from '@whimkit/ui/components/textarea';
 
 /**
  *

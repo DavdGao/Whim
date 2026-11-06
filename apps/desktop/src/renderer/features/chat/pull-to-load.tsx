@@ -1,11 +1,10 @@
+import { Spinner } from '@whimkit/ui/components/spinner';
+import { cn } from '@whimkit/ui/lib/utils';
 import { ArrowDownIcon } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStickToBottomContext } from 'use-stick-to-bottom';
 
 import { useT } from '../../lib/i18n';
-
-import { Spinner } from '@/components/ui/spinner';
-import { cn } from '@/lib/utils';
 
 /** How far the content follows the pull before earlier messages load, in pixels. */
 const threshold = 72;

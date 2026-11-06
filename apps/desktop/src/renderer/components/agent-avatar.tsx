@@ -1,6 +1,6 @@
-import logo from '../assets/whim.svg';
+import { cn } from '@whimkit/ui/lib/utils';
 
-import { cn } from '@/lib/utils';
+import logo from '../assets/whim.svg';
 
 /**
  * The agent's icon: the user's image, or the Whim mark by default.

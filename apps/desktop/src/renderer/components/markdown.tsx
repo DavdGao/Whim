@@ -1,13 +1,5 @@
-import { ExternalLinkIcon, XIcon } from 'lucide-react';
-import { useIsCodeFenceIncomplete } from 'streamdown';
-
-import { useT } from '../lib/i18n';
-
-import type { ComponentProps } from 'react';
-import type { ExtraProps, LinkSafetyModalProps } from 'streamdown';
-
-import { MessageResponse } from '@/components/ai-elements/message';
-import { Button } from '@/components/ui/button';
+import { MessageResponse } from '@whimkit/ui/components/ai-elements/message';
+import { Button } from '@whimkit/ui/components/button';
 import {
     CodeBlock,
     CodeBlockActions,
@@ -16,7 +8,7 @@ import {
     CodeBlockHeader,
     CodeBlockLine,
     CodeBlockTitle,
-} from '@/components/ui/code-block';
+} from '@whimkit/ui/components/code-block';
 import {
     Dialog,
     DialogContent,
@@ -24,7 +16,7 @@ import {
     DialogFooter,
     DialogHeader,
     DialogTitle,
-} from '@/components/ui/dialog';
+} from '@whimkit/ui/components/dialog';
 import {
     Table,
     TableBody,
@@ -32,9 +24,17 @@ import {
     TableHead,
     TableHeader,
     TableRow,
-} from '@/components/ui/table';
+} from '@whimkit/ui/components/table';
+import { cn } from '@whimkit/ui/lib/utils';
+import { ExternalLinkIcon, XIcon } from 'lucide-react';
+import { useIsCodeFenceIncomplete } from 'streamdown';
+
+import { useT } from '../lib/i18n';
+
+import type { ComponentProps } from 'react';
+import type { ExtraProps, LinkSafetyModalProps } from 'streamdown';
+
 import { useHighlightedCode } from '@/hooks/use-highlighted-code';
-import { cn } from '@/lib/utils';
 
 /**
  * A fenced code block as a shadcn CodeBlock with syntax highlighting.

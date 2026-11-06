@@ -1,3 +1,16 @@
+import { Button } from '@whimkit/ui/components/button';
+import { Card, CardContent } from '@whimkit/ui/components/card';
+import {
+    Field,
+    FieldContent,
+    FieldDescription,
+    FieldGroup,
+    FieldLabel,
+} from '@whimkit/ui/components/field';
+import { Input } from '@whimkit/ui/components/input';
+import { ScrollArea } from '@whimkit/ui/components/scroll-area';
+import { Switch } from '@whimkit/ui/components/switch';
+import { cn } from '@whimkit/ui/lib/utils';
 import {
     BotIcon,
     BoxesIcon,
@@ -26,54 +39,45 @@ import { PluginSettings } from '../plugins/plugins-page';
 import { AgentSettings } from './agent-settings';
 
 import type { AppState } from '../../../shared/ipc';
-
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import {
-    Field,
-    FieldContent,
-    FieldDescription,
-    FieldGroup,
-    FieldLabel,
-} from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Switch } from '@/components/ui/switch';
-import { cn } from '@/lib/utils';
+import type { PageProps, SettingsSectionEntry } from '../../lib/navigation';
 
 const languages = [
     { value: 'en', label: 'English' },
     { value: 'zh-CN', label: '简体中文' },
 ] as const;
 
-export type SettingsTab = 'general' | 'agent' | 'models' | 'plugins';
-
-const sections = [
-    { id: 'general', label: 'settings.general', icon: SlidersHorizontalIcon },
-    { id: 'agent', label: 'settings.agent', icon: BotIcon },
-    { id: 'models', label: 'nav.models', icon: BoxesIcon },
-    { id: 'plugins', label: 'nav.plugins', icon: PuzzleIcon },
-] as const;
+const sections: readonly SettingsSectionEntry[] = [
+    {
+        id: 'general',
+        title: 'settings.general',
+        icon: SlidersHorizontalIcon,
+        // Remount after a save so the name field shows the stored value.
+        component: ({ state }) => <GeneralSettings key={state.userName ?? ''} state={state} />,
+    },
+    {
+        id: 'agent',
+        title: 'settings.agent',
+        icon: BotIcon,
+        // Remount after a save or reset so the form shows the stored profile.
+        component: ({ state }) => <AgentSettings key={JSON.stringify(state.agent)} state={state} />,
+    },
+    { id: 'models', title: 'nav.models', icon: BoxesIcon, component: ModelSettings },
+    { id: 'plugins', title: 'nav.plugins', icon: PuzzleIcon, component: PluginSettings },
+];
 
 /**
- * The Settings page: a section list on the left and the open section on the right.
+ * The Settings page: a section list on the left and the open section on the right. The
+ * `section` parameter selects the section.
  * @param props Page props.
  * @param props.state Application state.
- * @param props.tab The open section.
- * @param props.onTabChange Switch sections.
+ * @param props.params Navigation parameters.
+ * @param props.navigate Navigate, here to another section.
  * @returns The page.
  */
-export function SettingsPage({
-    state,
-    tab,
-    onTabChange,
-}: {
-    state: AppState;
-    tab: SettingsTab;
-    onTabChange: (tab: SettingsTab) => void;
-}) {
+export function SettingsPage({ state, params, navigate }: PageProps) {
     const { t } = useT();
-    const current = sections.find(item => item.id === tab) ?? sections[0];
+    const current = sections.find(item => item.id === params.section) ?? sections[0];
+    if (!current) return null;
     return (
         <div className="flex h-full min-h-0">
             <nav
@@ -89,29 +93,20 @@ export function SettingsPage({
                         variant="ghost"
                         className={cn(
                             'h-9 justify-start gap-2.5 rounded-xl px-3',
-                            item.id === tab && 'bg-accent text-accent-foreground'
+                            item === current && 'bg-accent text-accent-foreground'
                         )}
-                        aria-current={item.id === tab ? 'page' : undefined}
-                        onClick={() => onTabChange(item.id)}
+                        aria-current={item === current ? 'page' : undefined}
+                        onClick={() => navigate('settings', { section: item.id })}
                     >
                         <item.icon />
-                        {t(item.label)}
+                        {t(item.title)}
                     </Button>
                 ))}
             </nav>
             <ScrollArea className="min-h-0 flex-1">
                 <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-8">
-                    <h2 className="text-2xl font-semibold tracking-tight">{t(current.label)}</h2>
-                    {tab === 'general' && (
-                        // Remount after a save so the name field shows the stored value.
-                        <GeneralSettings key={state.userName ?? ''} state={state} />
-                    )}
-                    {tab === 'agent' && (
-                        // Remount after a save or reset so the form shows the stored profile.
-                        <AgentSettings key={JSON.stringify(state.agent)} state={state} />
-                    )}
-                    {tab === 'models' && <ModelSettings state={state} />}
-                    {tab === 'plugins' && <PluginSettings state={state} />}
+                    <h2 className="text-2xl font-semibold tracking-tight">{t(current.title)}</h2>
+                    <current.component state={state} />
                 </div>
             </ScrollArea>
         </div>

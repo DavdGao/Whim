@@ -1,9 +1,9 @@
+import { Button } from '@whimkit/ui/components/button';
+import { Spinner } from '@whimkit/ui/components/spinner';
+
 import { useAction } from '../lib/use-action';
 
 import type { ComponentProps, ReactNode } from 'react';
-
-import { Button } from '@/components/ui/button';
-import { Spinner } from '@/components/ui/spinner';
 
 export type ActionButtonProps = Omit<ComponentProps<typeof Button>, 'onClick' | 'asChild'> & {
     /** Shown before the label; replaced by a spinner while the action runs. */

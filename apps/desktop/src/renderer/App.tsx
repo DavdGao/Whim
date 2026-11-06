@@ -1,20 +1,3 @@
-import { MessageSquareIcon, SettingsIcon } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
-
-import { AgentAvatar } from './components/agent-avatar';
-import { ChatPage } from './features/chat/chat-page';
-import { SettingsPage } from './features/settings/settings-page';
-import { AppStateProvider } from './lib/app-state';
-import { useAppState } from './lib/app-state-context';
-import { onOpenSession } from './lib/client';
-import { useT } from './lib/i18n';
-import { LocaleProvider } from './lib/locale-provider';
-
-import type { SettingsTab } from './features/settings/settings-page';
-import type { MessageKey } from './lib/messages';
-import type { StartupNotice } from '../shared/ipc';
-
 import {
     Sidebar,
     SidebarContent,
@@ -28,16 +11,42 @@ import {
     SidebarMenuItem,
     SidebarProvider,
     SidebarTrigger,
-} from '@/components/ui/sidebar';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Toaster } from '@/components/ui/sonner';
-import { TooltipProvider } from '@/components/ui/tooltip';
+} from '@whimkit/ui/components/sidebar';
+import { Skeleton } from '@whimkit/ui/components/skeleton';
+import { Toaster } from '@whimkit/ui/components/sonner';
+import { TooltipProvider } from '@whimkit/ui/components/tooltip';
+import { MessageSquareIcon, SettingsIcon } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 
-type Page = 'chat' | 'settings';
+import { AgentAvatar } from './components/agent-avatar';
+import { ChatPage } from './features/chat/chat-page';
+import { SettingsPage } from './features/settings/settings-page';
+import { AppStateProvider } from './lib/app-state';
+import { useAppState } from './lib/app-state-context';
+import { onOpenSession } from './lib/client';
+import { useT } from './lib/i18n';
+import { LocaleProvider } from './lib/locale-provider';
 
-const pages: { id: Page; label: MessageKey; icon: typeof MessageSquareIcon }[] = [
-    { id: 'chat', label: 'nav.chat', icon: MessageSquareIcon },
-    { id: 'settings', label: 'nav.settings', icon: SettingsIcon },
+import type { Location, PageEntry, PageParams } from './lib/navigation';
+import type { StartupNotice } from '../shared/ipc';
+
+/** The host's pages, registered like plugin pages will be (design.md §5.7). */
+const pages: readonly PageEntry[] = [
+    {
+        id: 'chat',
+        title: 'nav.chat',
+        icon: MessageSquareIcon,
+        placement: 'main',
+        component: ChatPage,
+    },
+    {
+        id: 'settings',
+        title: 'nav.settings',
+        icon: SettingsIcon,
+        placement: 'footer',
+        component: SettingsPage,
+    },
 ];
 
 /**
@@ -75,16 +84,16 @@ function NavItem({
     active,
     onSelect,
 }: {
-    item: (typeof pages)[number];
+    item: PageEntry;
     active: boolean;
     onSelect: () => void;
 }) {
     const { t } = useT();
     return (
         <SidebarMenuItem>
-            <SidebarMenuButton isActive={active} tooltip={t(item.label)} onClick={onSelect}>
+            <SidebarMenuButton isActive={active} tooltip={t(item.title)} onClick={onSelect}>
                 <item.icon />
-                <span>{t(item.label)}</span>
+                <span>{t(item.title)}</span>
             </SidebarMenuButton>
         </SidebarMenuItem>
     );
@@ -97,26 +106,21 @@ function NavItem({
 function Shell() {
     const { state, status } = useAppState();
     const { t } = useT();
-    const [page, setPage] = useState<Page>('chat');
-    const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
+    const [location, setLocation] = useState<Location>({ page: 'chat', params: {} });
+    const navigate = useCallback((page: string, params: PageParams = {}) => {
+        setLocation({ page, params: { ...params } });
+    }, []);
     // The menu bar item and notifications ask to show a chat (design.md §4.1).
-    const [openRequest, setOpenRequest] = useState<{ sessionId: string }>();
-    useEffect(
-        () =>
-            onOpenSession(sessionId => {
-                setOpenRequest({ sessionId });
-                setPage('chat');
-            }),
-        []
-    );
+    useEffect(() => onOpenSession(sessionId => navigate('chat', { sessionId })), [navigate]);
+    const current = pages.find(item => item.id === location.page) ?? pages[0];
     const banner =
         status === 'restarting'
             ? t('backend.restarting')
             : status === 'failed'
               ? t('backend.failed')
               : undefined;
-    const main = pages.filter(item => item.id !== 'settings');
-    const settings = pages.find(item => item.id === 'settings');
+    const main = pages.filter(item => item.placement === 'main');
+    const footer = pages.filter(item => item.placement === 'footer');
     return (
         <SidebarProvider
             defaultOpen={false}
@@ -158,7 +162,7 @@ function Shell() {
                                 <SidebarMenuButton
                                     size="lg"
                                     tooltip={state?.agent.name ?? t('app.name')}
-                                    onClick={() => setPage('chat')}
+                                    onClick={() => navigate('chat')}
                                 >
                                     <AgentAvatar icon={state?.agent.icon} />
                                     <span className="truncate text-base font-semibold tracking-tight">
@@ -176,22 +180,25 @@ function Shell() {
                                         <NavItem
                                             key={item.id}
                                             item={item}
-                                            active={page === item.id}
-                                            onSelect={() => setPage(item.id)}
+                                            active={item === current}
+                                            onSelect={() => navigate(item.id)}
                                         />
                                     ))}
                                 </SidebarMenu>
                             </SidebarGroupContent>
                         </SidebarGroup>
                     </SidebarContent>
-                    {settings && (
+                    {footer.length > 0 && (
                         <SidebarFooter>
                             <SidebarMenu>
-                                <NavItem
-                                    item={settings}
-                                    active={page === 'settings'}
-                                    onSelect={() => setPage('settings')}
-                                />
+                                {footer.map(item => (
+                                    <NavItem
+                                        key={item.id}
+                                        item={item}
+                                        active={item === current}
+                                        onSelect={() => navigate(item.id)}
+                                    />
+                                ))}
                             </SidebarMenu>
                         </SidebarFooter>
                     )}
@@ -210,21 +217,11 @@ function Shell() {
                     ) : (
                         <div className="min-h-0 flex-1 overflow-auto">
                             <StartupNotices notices={state.notices} />
-                            {page === 'chat' && (
-                                <ChatPage
+                            {current && (
+                                <current.component
                                     state={state}
-                                    openRequest={openRequest}
-                                    onOpenModels={() => {
-                                        setSettingsTab('models');
-                                        setPage('settings');
-                                    }}
-                                />
-                            )}
-                            {page === 'settings' && (
-                                <SettingsPage
-                                    state={state}
-                                    tab={settingsTab}
-                                    onTabChange={setSettingsTab}
+                                    params={location.params}
+                                    navigate={navigate}
                                 />
                             )}
                         </div>

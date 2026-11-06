@@ -1,4 +1,10 @@
 import { selectableLevels } from '@whimkit/core/contracts';
+import { Button } from '@whimkit/ui/components/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@whimkit/ui/components/popover';
+import { Separator } from '@whimkit/ui/components/separator';
+import { Slider } from '@whimkit/ui/components/slider';
+import { Spinner } from '@whimkit/ui/components/spinner';
+import { cn } from '@whimkit/ui/lib/utils';
 import { BoxIcon, CheckIcon, ChevronDownIcon } from 'lucide-react';
 import { useState } from 'react';
 
@@ -10,13 +16,6 @@ import { useAction } from '../../lib/use-action';
 import type { ModelChoice } from './model-choices';
 import type { AppState, ChatSlot } from '../../../shared/ipc';
 import type { ThinkingLevel } from '@whimkit/core/contracts';
-
-import { Button } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Separator } from '@/components/ui/separator';
-import { Slider } from '@/components/ui/slider';
-import { Spinner } from '@/components/ui/spinner';
-import { cn } from '@/lib/utils';
 
 /**
  * The Thinking heading with the current choice on the same line. The label is muted and the

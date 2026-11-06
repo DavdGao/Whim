@@ -1,3 +1,12 @@
+import {
+    Field,
+    FieldDescription,
+    FieldError,
+    FieldGroup,
+    FieldLabel,
+} from '@whimkit/ui/components/field';
+import { Input } from '@whimkit/ui/components/input';
+import { Switch } from '@whimkit/ui/components/switch';
 import { ListIcon } from 'lucide-react';
 
 import { ChoiceMenu } from '../../components/choice-menu';
@@ -9,9 +18,6 @@ import { readSchema } from './schema';
 import type { FormValue } from './schema';
 
 import { StatusAlert } from '@/components/status-alert';
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
 
 export interface SchemaFormProps {
     readonly schemaId: string;

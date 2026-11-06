@@ -1,3 +1,19 @@
+import {
+    Attachment,
+    AttachmentInfo,
+    AttachmentPreview,
+    AttachmentRemove,
+    Attachments,
+} from '@whimkit/ui/components/ai-elements/attachments';
+import { Button } from '@whimkit/ui/components/button';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@whimkit/ui/components/dropdown-menu';
+import { Spinner } from '@whimkit/ui/components/spinner';
+import { cn } from '@whimkit/ui/lib/utils';
 import { ArrowUpIcon, FolderOpenIcon, PaperclipIcon, PlusIcon, SquareIcon } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
@@ -13,23 +29,6 @@ import { WorkspaceBar } from './workspace-bar';
 import type { PendingAttachment } from './use-attachments';
 import type { AppState, ChatSlot } from '../../../shared/ipc';
 import type { Usage } from '@whimkit/core/contracts';
-
-import {
-    Attachment,
-    AttachmentInfo,
-    AttachmentPreview,
-    AttachmentRemove,
-    Attachments,
-} from '@/components/ai-elements/attachments';
-import { Button } from '@/components/ui/button';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Spinner } from '@/components/ui/spinner';
-import { cn } from '@/lib/utils';
 
 /** One line of text; the collapsed field is one line plus padding. */
 const lineHeight = 22;

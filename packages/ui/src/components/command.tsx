@@ -9,8 +9,8 @@ import {
     DialogDescription,
     DialogHeader,
     DialogTitle,
-} from '@/components/ui/dialog';
-import { InputGroup, InputGroupAddon } from '@/components/ui/input-group';
+} from '@whimkit/ui/components/dialog';
+import { InputGroup, InputGroupAddon } from '@whimkit/ui/components/input-group';
 
 /**
  *

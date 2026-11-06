@@ -1,3 +1,24 @@
+import { Badge } from '@whimkit/ui/components/badge';
+import { Button } from '@whimkit/ui/components/button';
+import {
+    Card,
+    CardAction,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from '@whimkit/ui/components/card';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@whimkit/ui/components/dialog';
+import { Field, FieldGroup, FieldLabel } from '@whimkit/ui/components/field';
+import { Input } from '@whimkit/ui/components/input';
+import { Spinner } from '@whimkit/ui/components/spinner';
 import {
     BoxIcon,
     CheckIcon,
@@ -26,28 +47,6 @@ import { SchemaForm } from './schema-form';
 
 import type { FormValue } from './schema';
 import type { AppState, CredentialInfo } from '../../../shared/ipc';
-
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-    Card,
-    CardAction,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-} from '@/components/ui/card';
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import { Spinner } from '@/components/ui/spinner';
 
 /**
  * Display name of a credential type from its plugin's catalog.

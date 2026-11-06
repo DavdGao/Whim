@@ -1,8 +1,8 @@
 'use client';
 
-import { Button } from '@/components/ui/button';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
-import { cn } from '@/lib/utils';
+import { Button } from '@whimkit/ui/components/button';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@whimkit/ui/components/hover-card';
+import { cn } from '@whimkit/ui/lib/utils';
 import type { FileUIPart, SourceDocumentUIPart } from 'ai';
 import {
     FileTextIcon,

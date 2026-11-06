@@ -6,8 +6,8 @@ import { StickToBottom, useStickToBottomContext } from 'use-stick-to-bottom';
 
 import type { ComponentProps } from 'react';
 
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { Button } from '@whimkit/ui/components/button';
+import { cn } from '@whimkit/ui/lib/utils';
 
 export type ConversationProps = ComponentProps<typeof StickToBottom>;
 
