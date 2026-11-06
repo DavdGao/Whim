@@ -92,6 +92,14 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [ ] Launch at login without opening a window; optional Dock icon hiding
 - [ ] Schedules and triggers (design.md §4.1.1)
 
+## PR 8 — Plugin API (design.md §5.7)
+
+- [x] Plugin API version (`whim.api`) and declared contributions (`whim.contributes`), shown on the Plugins page; undeclared registrations fail activation
+- [ ] Host services and plugin methods/topics over the Renderer port
+- [ ] Navigation rail and settings tabs from one registry; shadcn and AI Elements moved into `@whimkit/ui`
+- [ ] Client entries: `whim-plugin://` protocol, import map for shared modules, slots `page`, `settings.section`, `chat.tool`, `composer.action`, verified with a fixture plugin in Electron
+- [ ] Declarative themes
+
 ## Later
 
 - [ ] Remote card catalog refresh

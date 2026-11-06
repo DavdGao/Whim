@@ -124,9 +124,9 @@ export function PluginSettings({ state }: { state: AppState }) {
                                                     ''
                                                 )}
                                             </p>
-                                            {plugin.tools.length > 0 && (
+                                            {plugin.contributes.tools.length > 0 && (
                                                 <div className="mt-2 flex flex-wrap gap-1.5">
-                                                    {plugin.tools.map(tool => (
+                                                    {plugin.contributes.tools.map(tool => (
                                                         <Badge
                                                             key={tool}
                                                             variant="outline"

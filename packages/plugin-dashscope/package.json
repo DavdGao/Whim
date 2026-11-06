@@ -3,7 +3,16 @@
     "version": "0.1.0",
     "type": "module",
     "whim": {
+        "api": "1.0",
         "host": "./dist/host.js",
+        "contributes": {
+            "credentialTypes": [
+                "api-key"
+            ],
+            "adapters": [
+                "responses"
+            ]
+        },
         "category": "models",
         "cards": "./cards",
         "locales": "./locales",

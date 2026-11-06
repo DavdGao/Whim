@@ -5,6 +5,8 @@ import { pathToFileURL } from 'node:url';
 
 import { z } from 'zod';
 
+import { pluginApiVersion } from '../plugin/index.js';
+
 import { CompiledSchema } from './json-schema.js';
 
 import type { Store } from './store.js';
@@ -17,11 +19,25 @@ import type {
     ToolDefinition,
 } from '../plugin/index.js';
 
+const contributionNames = z.array(z.string().min(1)).default([]);
+
+/** What a plugin declares it registers (design.md §5.1); registering anything else fails. */
+const contributesSchema = z
+    .strictObject({
+        credentialTypes: contributionNames,
+        adapters: contributionNames,
+        tools: contributionNames,
+    })
+    .default({ credentialTypes: [], adapters: [], tools: [] });
+export type PluginContributions = z.infer<typeof contributesSchema>;
+
 const manifestSchema = z.object({
     name: z.string().min(1),
     version: z.string().min(1),
     whim: z.strictObject({
+        api: z.string().regex(/^\d+\.\d+$/, 'Expected MAJOR.MINOR.'),
         host: z.string().min(1),
+        contributes: contributesSchema,
         cards: z.string().min(1).optional(),
         locales: z.string().min(1).optional(),
         icon: z.string().min(1).optional(),
@@ -58,6 +74,21 @@ export interface PluginStatus {
     readonly icons: Readonly<Record<string, string>>;
     /** Manifest category for grouping in the UI. */
     readonly category: 'models' | 'tools' | 'other';
+    /** What the manifest declares the plugin registers. */
+    readonly contributes: PluginContributions;
+}
+
+/**
+ * Explain why a plugin built against `required` cannot run on this Core, if it cannot.
+ * @param required The manifest's `whim.api`, `MAJOR.MINOR`.
+ * @returns The reason, or undefined when compatible.
+ */
+export function apiIncompatibility(required: string): string | undefined {
+    const [major, minor] = required.split('.').map(Number);
+    const [ownMajor, ownMinor] = pluginApiVersion.split('.').map(Number);
+    return major === ownMajor && minor !== undefined && ownMinor !== undefined && minor <= ownMinor
+        ? undefined
+        : `Requires plugin API ${required}; this Whim provides ${pluginApiVersion}.`;
 }
 
 const iconTypes: Readonly<Record<string, string>> = { svg: 'image/svg+xml', png: 'image/png' };
@@ -257,6 +288,7 @@ export class PluginHost {
                     locales: {},
                     icons: {},
                     category: 'other',
+                    contributes: { credentialTypes: [], adapters: [], tools: [] },
                 });
                 continue;
             }
@@ -277,6 +309,7 @@ export class PluginHost {
                 pkg.source === 'local' &&
                 previous !== undefined &&
                 previous.contentHash !== contentHash;
+            const incompatible = apiIncompatibility(manifest.whim.api);
             const status: PluginStatus = {
                 id: row.id,
                 version: row.version,
@@ -290,9 +323,11 @@ export class PluginHost {
                 ),
                 ...(await readIcons(dir, manifest.whim)),
                 category: manifest.whim.category,
+                contributes: manifest.whim.contributes,
+                ...(incompatible && row.enabled && !modified ? { error: incompatible } : {}),
             };
             this.#statuses.set(row.id, status);
-            loaded.push({ manifest, dir, status });
+            if (!incompatible) loaded.push({ manifest, dir, status });
         }
         const pending = loaded.filter(
             entry => entry.status.enabled && entry.status.availability !== 'modified'
@@ -357,6 +392,11 @@ export class PluginHost {
         };
         const abort = new AbortController();
         const prefix = `${id}#`;
+        const declared = manifest.whim.contributes;
+        const ensureDeclared = (kind: keyof PluginContributions, name: string) => {
+            if (!declared[kind].includes(name))
+                throw new Error(`${name} is not declared in whim.contributes.${kind}.`);
+        };
         const context: PluginContext = {
             pluginId: id,
             version: manifest.version,
@@ -365,6 +405,7 @@ export class PluginHost {
                 registerType: type => {
                     if (!type.id.startsWith(prefix))
                         throw new Error(`Credential type ids must start with ${prefix}.`);
+                    ensureDeclared('credentialTypes', type.id.slice(prefix.length));
                     if (this.credentialTypes.has(type.id))
                         throw new Error(`Credential type ${type.id} exists.`);
                     staged.credentialTypes.push({
@@ -379,6 +420,7 @@ export class PluginHost {
                 registerAdapter: adapter => {
                     if (!adapter.id.startsWith(prefix))
                         throw new Error(`Adapter ids must start with ${prefix}.`);
+                    ensureDeclared('adapters', adapter.id.slice(prefix.length));
                     if (this.adapters.has(adapter.id))
                         throw new Error(`Adapter ${adapter.id} exists.`);
                     staged.adapters.push({
@@ -393,6 +435,7 @@ export class PluginHost {
                 register: tool => {
                     if (!toolNamePattern.test(tool.name))
                         throw new Error(`Invalid tool name ${tool.name}.`);
+                    ensureDeclared('tools', tool.name);
                     if (
                         this.tools.has(tool.name) ||
                         staged.tools.some(entry => entry.tool.name === tool.name)

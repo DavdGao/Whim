@@ -164,10 +164,12 @@ export interface PluginInfo {
     /** Named card icons as `data:` URLs. */
     readonly icons: Readonly<Record<string, string>>;
     readonly category: 'models' | 'tools' | 'other';
-    /** What the plugin registered: model adapters, credential types, and tool names. */
-    readonly adapters: number;
-    readonly credentialTypes: number;
-    readonly tools: readonly string[];
+    /** What the manifest declares the plugin registers, shown before it is enabled. */
+    readonly contributes: {
+        readonly credentialTypes: readonly string[];
+        readonly adapters: readonly string[];
+        readonly tools: readonly string[];
+    };
 }
 
 export interface CredentialTypeInfo {

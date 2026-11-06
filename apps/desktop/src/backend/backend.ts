@@ -632,15 +632,7 @@ class Backend {
                 ...(status.icon ? { icon: status.icon } : {}),
                 icons: status.icons,
                 category: status.category,
-                adapters: [...this.host.adapters.values()].filter(
-                    entry => entry.pluginId === status.id
-                ).length,
-                credentialTypes: [...this.host.credentialTypes.values()].filter(
-                    entry => entry.pluginId === status.id
-                ).length,
-                tools: [...this.host.tools.values()]
-                    .filter(entry => entry.pluginId === status.id)
-                    .map(entry => entry.tool.name),
+                contributes: status.contributes,
             })),
             credentialTypes: [...this.host.credentialTypes.values()].map(entry => ({
                 id: entry.type.id,

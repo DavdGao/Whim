@@ -96,7 +96,12 @@ A plugin is an npm package with a `whim` field in `package.json`:
     "version": "0.1.0",
     "type": "module",
     "whim": {
+        "api": "1.0",
         "host": "./dist/host.js",
+        "contributes": {
+            "credentialTypes": ["api-key"],
+            "adapters": ["responses"]
+        },
         "cards": "./cards",
         "locales": "./locales",
         "category": "models",
@@ -109,7 +114,9 @@ A plugin is an npm package with a `whim` field in `package.json`:
 ```
 
 - The plugin id is the package name; the version is `package.json.version`. Whim-owned packages share one version, and `peerDependencies` pins Core exactly.
-- `host` is the Backend entry. `client` (Renderer entry) is reserved for UI slots (§5.7).
+- `api` is the plugin API version the plugin was built against, `MAJOR.MINOR` (§5.7). Whim activates the plugin only when the majors are equal and its own minor is at least the plugin's; otherwise the plugin is `failed` with a message naming both versions.
+- `host` is the Backend entry. `client` is the Renderer entry and `themes` lists declarative themes (§5.7).
+- `contributes` declares, per registration kind (§5.5), the names the plugin registers: the part after `<pluginId>#` for credential types and adapters, the model-facing name for tools. The Plugins page shows the declaration, so the user sees what a plugin adds before enabling it. Registering an undeclared name fails activation; a declared name the plugin does not register (for example, behind a setting) is allowed.
 - `cards` is a directory of seed model cards (§7.3).
 - `category` (`models`, `tools`, or `other`, the default) groups the plugin in Settings.
 - `requires` lists plugin ids whose registrations this plugin uses, e.g. another plugin's credential type.
@@ -159,14 +166,18 @@ Startup applies the same rules when a plugin is missing or fails to activate.
 
 ### 5.5 Registrations
 
-| Registration    | Purpose                                                                                                             |
-| --------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Credential type | A JSON Schema for one kind of account credential (§6)                                                               |
-| Model adapter   | Implements one model kind (`chat`, `decision`, later `tts`, `asr`, `embedding`) (§7.4)                              |
-| Processor       | Converts an attachment media type into model-deliverable content (§8)                                               |
-| Tool            | A local tool definition and executor ([agent.md §9](agent.md#9-tools)); names are unique across plugins             |
-| Context source  | A prefix-affecting source such as skills or memory ([agent.md §7](agent.md#7-context-sources-and-the-prompt-cache)) |
-| Settings        | A JSON Schema for plugin-level settings, stored by Core                                                             |
+| Registration    | `contributes` key | Stability | Purpose                                                                                                             |
+| --------------- | ----------------- | --------- | ------------------------------------------------------------------------------------------------------------------- |
+| Credential type | `credentialTypes` | stable    | A JSON Schema for one kind of account credential (§6)                                                               |
+| Model adapter   | `adapters`        | stable    | Implements one model kind (`chat`, `decision`, later `tts`, `asr`, `embedding`) (§7.4)                              |
+| Tool            | `tools`           | stable    | A local tool definition and executor ([agent.md §9](agent.md#9-tools)); names are unique across plugins             |
+| Service         | `services`        | planned   | Long-running work owned by the plugin scope, independent of windows (§5.7)                                          |
+| Method, topic   | `methods`         | planned   | Typed calls and subscriptions the plugin's own client entry uses (§5.7)                                             |
+| Processor       | `processors`      | planned   | Converts an attachment media type into model-deliverable content (§8)                                               |
+| Context source  | `contextSources`  | planned   | A prefix-affecting source such as skills or memory ([agent.md §7](agent.md#7-context-sources-and-the-prompt-cache)) |
+| Settings        | —                 | planned   | A JSON Schema for plugin-level settings, stored by Core                                                             |
+
+**Stable** registrations keep their contract within a plugin API major version; **experimental** ones may change in a minor version and say so in their types; **planned** ones are designed but not yet registrable.
 
 Plugins call Core services (store commands, model slots, files, jobs). They never open the database or write SQL, and they cannot make model calls that bypass attempt and usage accounting.
 
@@ -180,9 +191,41 @@ Credential types, plugin settings, and card `options` are JSON Schema 2020-12 ob
 - `title` and `description` are the English text. Translations are looked up in the plugin's locale catalog under `schema.<schemaId>.<JSON pointer>.title|description`.
 - Extension keywords use the `x-whim-` prefix and are limited to those listed here. Currently there is one: `x-whim-order`, an integer for form field ordering.
 
-### 5.7 Client entries
+### 5.7 Plugin API and UI extensions
 
-A plugin may later ship a `client` entry that registers React components into named Renderer slots. It runs with the host's React and component modules and communicates only through typed application interfaces. The first release generates all plugin configuration forms from JSON Schema and ships no client entries; the slot registry is built with its first consumer.
+Whim's plugin system is a fixed set of typed extension points, not a general composition framework: plugins add capabilities around Core, and never replace Core's invariants (the journal, the single runner per session, the frozen prompt prefix, permissions and their review, usage accounting). Every extension point is introduced with its first consumer and listed in §5.5 or below with its stability.
+
+**API versions.** The plugin API (the `PluginContext` and client context types, the manifest, the slot contracts) carries one version, `MAJOR.MINOR`, exported by Core as `pluginApiVersion`. Adding an extension point or an optional field raises the minor; changing or removing a stable one raises the major. Experimental extension points may change in a minor version.
+
+**Two halves.** A plugin has up to two entries with separate lifetimes:
+
+| Entry  | Runs in                        | Lives while                | May contribute                                                           |
+| ------ | ------------------------------ | -------------------------- | ------------------------------------------------------------------------ |
+| Host   | Backend (Node, full authority) | Whim runs and it is active | §5.5 registrations, services, methods and topics                         |
+| Client | Renderer (sandboxed page)      | a window is open           | Pages, settings sections, tool renderers, composer actions (slots below) |
+
+Anything that must continue without a window (a connection, a watcher, a sync loop, a terminal) is a host **service**: registered with `start(signal)`, owned by the plugin scope, and stopped in reverse order on deactivation. Client code only views and commands; unmounting never stops work. A plugin therefore works without a window, and its UI is optional (§4.1).
+
+**Talking to the host half.** A host entry registers **methods** (request → response, JSON Schema for input and output, validated at both ends, cancellable) and **topics** (subscriptions that deliver an initial value, then changes with a sequence for catch-up). The client entry reaches only its own plugin's methods and topics, through `context.rpc`, over the existing Renderer–Backend port and namespaced by plugin id. Business state still changes through Core commands; plugin methods serve the plugin's own services.
+
+**Slots.** UI extension points are named, typed slots declared by the host component that renders the location. A slot receives typed props and returns React content inside the host's layout; plugins never reach host DOM or global styles. Each slot is either additive (a list ordered by the host) or keyed (one entry per key, such as a tool name), and two plugins claiming the same key is an activation error. Every slot is wrapped in an error boundary that shows a failure naming the plugin. The host's own pages and settings tabs are registered through the same registries, so a slot is never a special path for plugins.
+
+| Slot               | Kind               | Contract                                                                  | Status  |
+| ------------------ | ------------------ | ------------------------------------------------------------------------- | ------- |
+| `page`             | list               | A navigation rail page: id, title key, lucide icon, component             | planned |
+| `settings.section` | keyed by plugin    | A custom section on the plugin's settings, in place of the generated form | planned |
+| `chat.tool`        | keyed by tool name | The trace renderer of one tool's call and result                          | planned |
+| `composer.action`  | list               | An entry in the composer's Add menu that stages input                     | planned |
+
+**Themes** are data, not code: a theme lists values for the documented design tokens (§11.3) in light and dark, optionally a background (color, gradient, or an image from the package, at most 2 MiB), validated by token name and applied by the host. Unknown tokens are reported and ignored.
+
+**Shared runtime.** A client entry is an ES module built against host-provided externals: `react`, `react/jsx-runtime`, `@whimkit/ui` (the host's shadcn and AI Elements components and icons, extracted into a shared package for this), and `@whimkit/client` (the client context types, hooks, `t()` for the plugin's own locales). The Renderer publishes them through an import map, so every plugin uses the host's single copy.
+
+**Loading.** Main serves plugin client files through a `whim-plugin://<pluginId>/` protocol confined to the package's declared client directory; the Renderer's content security policy allows scripts only from the application and that protocol. Client entries load after Backend reports active plugins, and a plugin's slots are removed when it stops. Client styles are precompiled Tailwind against the host tokens, scoped to the plugin's root, without preflight.
+
+**Out of scope.** Plugins cannot replace or wrap Core services, rewrite records or prompts, decide permissions (they may contribute a reviewer only through Core's reviewer contract), patch host components outside slots, or extend Main (menu bar, windows, application menu). Requests for notifications or native dialogs go through future host APIs.
+
+**Trust.** Host entries are trusted code in Backend's failure domain (§5). Client entries are trusted to render but cannot exceed Renderer's sandbox. Installation is the trust decision; neither half is a permission boundary.
 
 ## 6. Credentials and model slots
 
