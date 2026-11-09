@@ -174,8 +174,8 @@ Hooks do not cover every menu, and installing a hook does not retroactively capt
 Keep packages focused and avoid one package per transport detail.
 
 - Core owns environment and terminal contracts, shared commands, input ownership, event ingestion, persistence, synchronization and managed file transfer.
-- A terminal feature plugin supplies the page and agent-facing terminal tools through those contracts.
-- Claude and Codex integration plugins own native discovery, parsing, hook configuration and provider-specific status correlation. Core contains no native transcript heuristics.
+- The Coding page is built into the desktop app (design.md §11.4); agent-facing terminal tools will use the same Core contracts.
+- Claude and Codex integration plugins register their CLIs as coding agents today, and will own native discovery, parsing, hook configuration and provider-specific status correlation. Core contains no native transcript heuristics.
 - The machine-side helper is a separate executable entry point reusing collection contracts and implementations; packaging is decided with deployment, not by duplicating the logic.
 
 Renderer accesses typed application services, never arbitrary SSH, filesystem or SQL. Backend uses asynchronous process and network I/O. The existing DB worker remains the only owner of synchronous SQLite access. tmux, native CLIs and the helper have independent lifecycles; plugins do not each require a thread.

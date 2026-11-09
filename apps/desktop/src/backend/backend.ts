@@ -19,6 +19,7 @@ import {
     Store,
     StoreError,
     storeMedia,
+    TerminalError,
     ToolRuntime,
 } from '@whimkit/core';
 import { decodeText, sniffImage } from '@whimkit/core/contracts';
@@ -36,6 +37,7 @@ import {
 } from '../shared/ipc.js';
 import { pluginClientUrl, themeImageUrl } from '../shared/main-protocol.js';
 
+import { Coding } from './coding.js';
 import { gitStatus } from './git.js';
 
 import type {
@@ -208,6 +210,16 @@ function toIpcError(error: unknown): IpcError {
         return { code: error.code, message: error.message, issues: [...error.issues] };
     if (error instanceof ApplicationError)
         return { code: 'unavailable', message: error.message, failure: error.failure };
+    if (error instanceof TerminalError)
+        return {
+            code:
+                error.code === 'not-found'
+                    ? 'not-found'
+                    : error.code === 'invalid'
+                      ? 'invalid'
+                      : 'unavailable',
+            message: error.message,
+        };
     if (error instanceof StoreError)
         return {
             code:
@@ -240,6 +252,7 @@ class Backend {
     #reportAgain = false;
     /** Aborts plugin calls made by the current window when it is replaced. */
     #rendererAbort = new AbortController();
+    readonly coding: Coding;
 
     /**
      * Wire services together.
@@ -263,6 +276,13 @@ class Backend {
         toMain: (message: Activity | Attention | PluginClients) => void
     ) {
         this.#toMain = toMain;
+        this.coding = new Coding(store, host, userData, event =>
+            this.#emit(
+                event.type === 'output'
+                    ? { type: 'terminal.output', terminalId: event.terminalId, data: event.data }
+                    : { ...event, type: 'terminal.exit' }
+            )
+        );
         this.#baseTools = baseTools(version);
         this.#stagingDir = join(userData, 'staging');
         // A finished background job wakes an idle session so the agent can react to it.
@@ -637,6 +657,21 @@ class Backend {
                 await this.setWorkspace(params.sessionId, params.workspace);
                 return null;
             }
+            case 'coding.saveHost':
+            case 'coding.removeHost': {
+                const result = await this.coding.dispatch(method, raw, this.#rendererAbort.signal);
+                this.#emit({ type: 'state' });
+                return result;
+            }
+            case 'coding.sessions':
+            case 'coding.create':
+            case 'coding.kill':
+            case 'terminal.open':
+            case 'terminal.input':
+            case 'terminal.resize':
+            case 'terminal.ack':
+            case 'terminal.close':
+                return this.coding.dispatch(method, raw, this.#rendererAbort.signal);
             case 'workspace.git': {
                 const params = methodSchemas[method].parse(raw);
                 if (!isAbsolute(params.path)) return null;
@@ -738,6 +773,12 @@ class Backend {
                 running: session.running,
                 pinned: pinned.includes(session.sessionId),
             })),
+            codingAgents: [...this.host.codingAgents.values()].map(entry => ({
+                id: entry.agent.id,
+                pluginId: entry.pluginId,
+                name: entry.agent.name,
+            })),
+            codingHosts: await this.coding.hosts(),
         };
     }
 
@@ -1262,6 +1303,8 @@ class Backend {
     async shutdown(): Promise<void> {
         this.#accepting = false;
         this.#queue.length = 0;
+        // Detach every view; tmux sessions keep running past Quit (design.md §11.4).
+        this.coding.terminals.closeAll();
         const stopping = [...this.#runs.keys()].map(sessionId =>
             this.stop(sessionId, 'shutdown').catch(error =>
                 console.error('Stop failed:', describeError(error))
@@ -1285,12 +1328,16 @@ class Backend {
  */
 function bundledPlugins(): { dir: string; source: 'bundled' }[] {
     const require = createRequire(import.meta.url);
-    return ['@whimkit/plugin-dashscope', '@whimkit/plugin-tavily', '@whimkit/plugin-typesafe'].map(
-        name => ({
-            dir: dirname(require.resolve(`${name}/package.json`)),
-            source: 'bundled' as const,
-        })
-    );
+    return [
+        '@whimkit/plugin-dashscope',
+        '@whimkit/plugin-tavily',
+        '@whimkit/plugin-typesafe',
+        '@whimkit/plugin-claude-code',
+        '@whimkit/plugin-codex',
+    ].map(name => ({
+        dir: dirname(require.resolve(`${name}/package.json`)),
+        source: 'bundled' as const,
+    }));
 }
 
 /**

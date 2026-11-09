@@ -1,0 +1,5 @@
+{
+    "plugin.name": "Claude Code",
+    "plugin.description": "Anthropic's coding agent CLI, run in a terminal on this Mac or an SSH host.",
+    "agent.name": "Claude Code"
+}

@@ -11,6 +11,7 @@ import { CompiledSchema } from './json-schema.js';
 
 import type { Store } from './store.js';
 import type {
+    CodingAgentDefinition,
     ModelAdapter,
     CredentialType,
     Disposer,
@@ -37,6 +38,7 @@ const contributesSchema = z
         settingsSections: contributionNames,
         chatTools: contributionNames,
         composerActions: contributionNames,
+        codingAgents: contributionNames,
     })
     .default({
         credentialTypes: [],
@@ -49,6 +51,7 @@ const contributesSchema = z
         settingsSections: [],
         chatTools: [],
         composerActions: [],
+        codingAgents: [],
     });
 export type PluginContributions = z.infer<typeof contributesSchema>;
 
@@ -364,6 +367,11 @@ export interface RegisteredTool {
     readonly inputSchema: CompiledSchema;
 }
 
+export interface RegisteredCodingAgent {
+    readonly pluginId: string;
+    readonly agent: CodingAgentDefinition;
+}
+
 const toolNamePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 
 export interface RegisteredMethod {
@@ -453,6 +461,8 @@ export class PluginHost {
     readonly adapters = new Map<string, RegisteredAdapter>();
     /** Tools in registration order, keyed by model-facing name. */
     readonly tools = new Map<string, RegisteredTool>();
+    /** Coding agents by id (design.md §11.4). */
+    readonly codingAgents = new Map<string, RegisteredCodingAgent>();
     /** Client-facing methods, keyed `<pluginId>/<name>`. */
     readonly #methods = new Map<string, RegisteredMethod>();
     /** Topic values, keyed `<pluginId>/<name>`. */
@@ -675,6 +685,7 @@ export class PluginHost {
             credentialTypes: RegisteredCredentialType[];
             adapters: RegisteredAdapter[];
             tools: RegisteredTool[];
+            codingAgents: RegisteredCodingAgent[];
             services: { service: ServiceDefinition; stop: AbortController }[];
             methods: RegisteredMethod[];
             topics: (TopicValue & { schema: CompiledSchema })[];
@@ -682,6 +693,7 @@ export class PluginHost {
             credentialTypes: [],
             adapters: [],
             tools: [],
+            codingAgents: [],
             services: [],
             methods: [],
             topics: [],
@@ -743,6 +755,23 @@ export class PluginHost {
                         inputSchema: new CompiledSchema(tool.inputSchema),
                     });
                     return () => this.tools.delete(tool.name);
+                },
+            },
+            coding: {
+                registerAgent: agent => {
+                    if (!agent.id.startsWith(prefix))
+                        throw new Error(`Coding agent ids must start with ${prefix}.`);
+                    ensureDeclared('codingAgents', agent.id.slice(prefix.length));
+                    if (
+                        !Array.isArray(agent.command) ||
+                        agent.command.length === 0 ||
+                        !agent.command.every(word => typeof word === 'string' && word.length > 0)
+                    )
+                        throw new Error(`Coding agent ${agent.id} needs a command.`);
+                    if (staged.codingAgents.some(entry => entry.agent.id === agent.id))
+                        throw new Error(`Coding agent ${agent.id} exists.`);
+                    staged.codingAgents.push({ pluginId: id, agent });
+                    return () => this.codingAgents.delete(agent.id);
                 },
             },
             services: {
@@ -835,6 +864,10 @@ export class PluginHost {
             for (const entry of staged.tools) {
                 this.tools.set(entry.tool.name, entry);
                 disposers.push(() => this.tools.delete(entry.tool.name));
+            }
+            for (const entry of staged.codingAgents) {
+                this.codingAgents.set(entry.agent.id, entry);
+                disposers.push(() => this.codingAgents.delete(entry.agent.id));
             }
             for (const entry of staged.methods) {
                 const key = `${id}/${entry.method.name}`;

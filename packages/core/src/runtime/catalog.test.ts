@@ -286,8 +286,9 @@ describe('PluginHost, Catalog, and CredentialService', () => {
 
     it('refuses plugins built for another plugin API version', async () => {
         assert.equal(apiIncompatibility('1.0'), undefined);
-        assert.equal(apiIncompatibility('1.9'), 'Requires plugin API 1.9; this Whim provides 1.0.');
-        assert.equal(apiIncompatibility('2.0'), 'Requires plugin API 2.0; this Whim provides 1.0.');
+        assert.equal(apiIncompatibility('1.1'), undefined);
+        assert.equal(apiIncompatibility('1.9'), 'Requires plugin API 1.9; this Whim provides 1.1.');
+        assert.equal(apiIncompatibility('2.0'), 'Requires plugin API 2.0; this Whim provides 1.1.');
         const root = join(dir, 'api');
         const pkg = await writePlugin(root, hostSource, { api: '2.0' });
         const store = await Store.open(join(root, 'db.sqlite'));
@@ -295,7 +296,7 @@ describe('PluginHost, Catalog, and CredentialService', () => {
         await host.start();
         assert.deepEqual(
             host.statuses().map(status => [status.availability, status.error]),
-            [['failed', 'Requires plugin API 2.0; this Whim provides 1.0.']]
+            [['failed', 'Requires plugin API 2.0; this Whim provides 1.1.']]
         );
         assert.equal(host.adapters.size, 0);
         await store.close();
@@ -326,6 +327,7 @@ describe('PluginHost, Catalog, and CredentialService', () => {
                         settingsSections: [],
                         chatTools: [],
                         composerActions: [],
+                        codingAgents: [],
                     },
                 ],
             ]

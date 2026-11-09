@@ -69,6 +69,27 @@ export interface StagedAttachment {
     readonly bytes: number;
 }
 
+/** A coding host: `local` for this Mac, or the id of a saved SSH host. */
+const codingHostIdSchema = z.union([z.literal('local'), idSchema]);
+const terminalIdSchema = z.uuid();
+const terminalSizeSchema = {
+    cols: z.number().int().min(2).max(1000),
+    rows: z.number().int().min(2).max(500),
+};
+
+/** An SSH host the Coding page can run sessions on (design.md §11.4). */
+export const codingHostSchema = z.strictObject({
+    id: idSchema,
+    label: z.string().trim().min(1).max(100),
+    /** An OpenSSH destination; `sshDestinationPattern` in Core. */
+    destination: z
+        .string()
+        .trim()
+        .regex(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9._-]+$/, 'Use user@host or a host alias.')
+        .max(255),
+});
+export type CodingHost = z.infer<typeof codingHostSchema>;
+
 /** Parameters of every Renderer → Backend method; validated in Backend. */
 export const methodSchemas = {
     'app.state': z.strictObject({}),
@@ -156,6 +177,41 @@ export const methodSchemas = {
         sessionId: idSchema,
         title: z.string().trim().min(1).max(200),
     }),
+    'coding.saveHost': z.strictObject({
+        id: idSchema.optional(),
+        label: codingHostSchema.shape.label,
+        destination: codingHostSchema.shape.destination,
+    }),
+    'coding.removeHost': z.strictObject({ id: idSchema }),
+    /** The tmux sessions of a host. */
+    'coding.sessions': z.strictObject({ hostId: codingHostIdSchema }),
+    /** Start a coding agent in a new tmux session. */
+    'coding.create': z.strictObject({
+        hostId: codingHostIdSchema,
+        agentId: z.string().min(1).max(400),
+        /** Absolute, `~`, `~/…`, or empty for the home folder. */
+        folder: z.string().max(4096),
+    }),
+    /** End a tmux session, identified by its `key`. */
+    'coding.kill': z.strictObject({ hostId: codingHostIdSchema, key: z.string().min(1).max(200) }),
+    /** Attach a terminal to a session; output follows as `terminal.output` events. */
+    'terminal.open': z.strictObject({
+        hostId: codingHostIdSchema,
+        key: z.string().min(1).max(200),
+        ...terminalSizeSchema,
+    }),
+    'terminal.input': z.strictObject({
+        terminalId: terminalIdSchema,
+        data: z.string().min(1).max(1_000_000),
+    }),
+    'terminal.resize': z.strictObject({ terminalId: terminalIdSchema, ...terminalSizeSchema }),
+    /** Characters the view has rendered, for flow control. */
+    'terminal.ack': z.strictObject({
+        terminalId: terminalIdSchema,
+        chars: z.number().int().positive(),
+    }),
+    /** Detach: the terminal closes and the session keeps running. */
+    'terminal.close': z.strictObject({ terminalId: terminalIdSchema }),
 } as const;
 export type Method = keyof typeof methodSchemas;
 export type Params<M extends Method> = z.input<(typeof methodSchemas)[M]>;
@@ -190,7 +246,8 @@ export type ContributionKind =
     | 'pages'
     | 'settingsSections'
     | 'chatTools'
-    | 'composerActions';
+    | 'composerActions'
+    | 'codingAgents';
 
 export interface CredentialTypeInfo {
     readonly id: string;
@@ -250,6 +307,33 @@ export interface ThemeInfo {
     readonly image?: string;
 }
 
+/** A coding CLI a plugin provides. */
+export interface CodingAgentInfo {
+    /** `<pluginId>#<name>`. */
+    readonly id: string;
+    readonly pluginId: string;
+    /** A key in the plugin's locale catalogs. */
+    readonly name: string;
+}
+
+/** A tmux session as the Coding page lists it. */
+export interface CodingSession {
+    /** Identifies the session on its server; see `TmuxSession.key` in Core. */
+    readonly key: string;
+    readonly name: string;
+    readonly createdAt: string;
+    readonly attachedClients: number;
+    readonly folder: string;
+    readonly command: string;
+    readonly agentId?: string;
+}
+
+/** A host's sessions, or why they cannot be listed. */
+export type CodingInventory =
+    | { readonly status: 'ok'; readonly sessions: readonly CodingSession[] }
+    | { readonly status: 'tmux-missing' }
+    | { readonly status: 'unreachable'; readonly detail: string };
+
 export interface AppState {
     readonly locale: Locale;
     readonly notices: readonly StartupNotice[];
@@ -274,6 +358,8 @@ export interface AppState {
     readonly catalog: readonly CatalogEntryInfo[];
     readonly credentials: readonly CredentialInfo[];
     readonly sessions: readonly SessionInfo[];
+    readonly codingAgents: readonly CodingAgentInfo[];
+    readonly codingHosts: readonly CodingHost[];
 }
 
 /** A session view with the inbox as an array, safe to copy across context bridges. */
@@ -323,6 +409,16 @@ export interface Results {
     'session.rename': null;
     'session.setWorkspace': null;
     'workspace.git': GitStatus | null;
+    'coding.saveHost': { id: string };
+    'coding.removeHost': null;
+    'coding.sessions': CodingInventory;
+    'coding.create': { key: string };
+    'coding.kill': null;
+    'terminal.open': { terminalId: string };
+    'terminal.input': null;
+    'terminal.resize': null;
+    'terminal.ack': null;
+    'terminal.close': null;
 }
 
 /** Errors crossing IPC: a code for the UI, a message, optional field issues or failure. */
@@ -357,6 +453,13 @@ export type BackendEvent =
           readonly part: 'text' | 'reasoning';
           readonly text: string;
       }
+    | { readonly type: 'terminal.output'; readonly terminalId: string; readonly data: string }
+    | {
+          readonly type: 'terminal.exit';
+          readonly terminalId: string;
+          readonly exitCode: number;
+          readonly signal?: number;
+      }
     | {
           readonly type: 'discarded';
           readonly sessionId: string;
@@ -388,7 +491,17 @@ export const responseEnvelopeSchema = z.discriminatedUnion('ok', [
 
 export const eventEnvelopeSchema = z.strictObject({
     kind: z.literal('event'),
-    event: z.looseObject({ type: z.enum(['state', 'records', 'stream', 'discarded']) }),
+    event: z.looseObject({
+        type: z.enum([
+            'state',
+            'records',
+            'stream',
+            'discarded',
+            'plugin.topic',
+            'terminal.output',
+            'terminal.exit',
+        ]),
+    }),
 });
 
 export type { ThinkingLevel };

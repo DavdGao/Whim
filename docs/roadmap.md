@@ -62,6 +62,15 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 
 - [x] Automatic compaction (no manual trigger): records, epochs, transcript offload with media references, summary with the session's model, UI line with the summary
 - [x] Compact and retry once when the provider reports `context-limit` despite the estimate
+- [ ] Compaction rework (agent.md §8 to be updated first):
+    - Ask for the summary in the step's own request (same prefix, tools, thinking; cut before the kept tail) plus a trailing hint with the current time, so the provider cache is reused; no tool calls allowed
+    - Tagged summary (`goal`, `current-state`, `progress`, `findings`, `next-steps`) with rules: describe the current state instead of copying the previous summary, corrections replace what they correct, identifiers verbatim or marked not recorded, absolute times only, list everything pending
+    - Parse the tags (also HTML-escaped ones); ask once more when a tag is missing or output was cut at its limit, recording each attempt; keep the second reply as written
+    - Keep the last N messages instead of cutting at the latest input, never separating a tool call from its result, so a long autonomous turn can compact; keep the latest user input verbatim
+    - On a provider `context-limit` refusal, summarize the older half first; when the previous summary plus one message is still too long, cut the longest texts in the middle, halving until accepted; never drop the beginning
+    - One append-only conversation file per session with `[seq N · time · role]` headers (thinking, tool calls and results, media references), filled from the journal so a crash gap refills; replaces the chained per-compaction files
+    - Rendered summary followed by sections from local facts, each omitted when empty and naming only tools the session has: conversation file with Read/Grep guidance, running background jobs, recent user messages, recently read or written files; a task list once plans exist
+    - Optional structured `parts` in the epoch context (old string summaries still decode); the compaction line shows the parts
 - [ ] Context-source tracking and notices
 - [ ] Skills
 - [ ] MEMORY.md plugin
@@ -100,6 +109,15 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [x] Client entries: `whim-plugin://` protocol, import map for shared modules, slots `page`, `settings.section`, `chat.tool`, `composer.action`, verified with a fixture plugin in Electron
 - [x] Local plugins under `<userData>/plugins/`, disabled until the user enables them
 - [x] Declarative themes: token sets and a background image, chosen in Settings → General
+
+## PR 9 — Coding page (design.md §11.4)
+
+- [x] Core: tmux commands for this Mac and SSH hosts (shared `ControlMaster` connection), PTY terminals with acknowledgment-based flow control, tested against a real tmux server
+- [x] Plugin API 1.1: `codingAgents` contribution; Claude Code and Codex plugins
+- [x] Coding page: computer picker with SSH hosts, session list, new session with agent and folder, xterm.js terminal with reconnect, end session
+- [ ] Verify an SSH host end to end (listing, start, attach, a broken connection)
+- [ ] Run on a Mac: packaged `node-pty`, IME, paste, Ctrl+C, alternate screen
+- [ ] Session lifecycle, recording, and Whim-agent control (coding-agents.md §11 slices 2–5)
 
 ## Later
 

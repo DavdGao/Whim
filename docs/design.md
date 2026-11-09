@@ -10,11 +10,11 @@ The first release ships:
 
 - One model provider plugin, DashScope (Alibaba Cloud Model Studio), with a Chat adapter over the Responses API. One Decision provider plugin, TypeSafe, with a System One adapter for automatic tool review ([providers/typesafe.md](providers/typesafe.md)).
 - A conversation agent with streaming, Stop-and-continue, error classification and retries, compaction, prompt-cache-preserving context sources, skills, file memory, local tools, background jobs, and permissions. Delivery order is in [roadmap.md](roadmap.md).
-- An application shell with Chat, Models, Plugins, and Settings pages in English and Simplified Chinese.
+- An application shell with Chat, Coding, and Settings pages (models and plugins are Settings sections) in English and Simplified Chinese.
 
 macOS only. Model tokens are tracked; prices and costs are not.
 
-The external coding-agent feature uses a native terminal with local/SSH execution, tmux attachment, and independent event/log collection; it does not depend on ACP. [coding-agents.md](research/coding-agents.md) defines its capabilities, technology choices, persistence and control boundaries, and acceptance criteria. History resume is not a substitute for live attachment. This is a planned feature, not an implementation claim.
+The external coding-agent feature uses a native terminal with local/SSH execution, tmux attachment, and independent event/log collection; it does not depend on ACP. [coding-agents.md](research/coding-agents.md) defines its capabilities, technology choices, persistence and control boundaries, and acceptance criteria. History resume is not a substitute for live attachment. Its first slice is built in: the Coding page runs coding CLIs in tmux on this Mac or SSH hosts and attaches a terminal (§11.4); collection, recording, and Whim-agent control remain planned.
 
 ## 2. Principles
 
@@ -26,14 +26,15 @@ The external coding-agent feature uses a native terminal with local/SSH executio
 
 ## 3. Packages
 
-| Package                     | Responsibility                                                                                                                                     |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@whimkit/core`             | Contracts, SQLite store and DB worker, plugin host, credential and catalog services, attachment and file services, Job service, agent runtime host |
-| `@whimkit/agent`            | The agent async generator: reasoning steps, context assembly, compaction, tool scheduling. Accesses Core only through ports.                       |
-| `@whimkit/openai-protocol`  | Library: Responses wire types, SSE decoding, stream-event normalization helpers. No vendor detection, no runtime configuration.                    |
-| `@whimkit/plugin-dashscope` | DashScope credential type, Chat adapter, seed cards                                                                                                |
-| `@whimkit/ui`               | shadcn and AI Elements components, the design tokens (`globals.css`); shared by the Renderer and, later, plugin client entries (§5.7)              |
-| `apps/desktop`              | Electron Main, Backend entry, Renderer, preload, feature pages                                                                                     |
+| Package                                                | Responsibility                                                                                                                                     |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@whimkit/core`                                        | Contracts, SQLite store and DB worker, plugin host, credential and catalog services, attachment and file services, Job service, agent runtime host |
+| `@whimkit/agent`                                       | The agent async generator: reasoning steps, context assembly, compaction, tool scheduling. Accesses Core only through ports.                       |
+| `@whimkit/openai-protocol`                             | Library: Responses wire types, SSE decoding, stream-event normalization helpers. No vendor detection, no runtime configuration.                    |
+| `@whimkit/plugin-dashscope`                            | DashScope credential type, Chat adapter, seed cards                                                                                                |
+| `@whimkit/plugin-claude-code`, `@whimkit/plugin-codex` | The Claude Code and Codex CLIs as coding agents for the Coding page (§11.4)                                                                        |
+| `@whimkit/ui`                                          | shadcn and AI Elements components, the design tokens (`globals.css`); shared by the Renderer and, later, plugin client entries (§5.7)              |
+| `apps/desktop`                                         | Electron Main, Backend entry, Renderer, preload, feature pages                                                                                     |
 
 Core exposes subpaths:
 
@@ -173,6 +174,7 @@ Startup applies the same rules when a plugin is missing or fails to activate.
 | Credential type | `credentialTypes`   | stable       | A JSON Schema for one kind of account credential (§6)                                                               |
 | Model adapter   | `adapters`          | stable       | Implements one model kind (`chat`, `decision`, later `tts`, `asr`, `embedding`) (§7.4)                              |
 | Tool            | `tools`             | stable       | A local tool definition and executor ([agent.md §9](agent.md#9-tools)); names are unique across plugins             |
+| Coding agent    | `codingAgents`      | experimental | A coding CLI's command, started in a tmux session by the Coding page (§11.4)                                        |
 | Service         | `services`          | experimental | Long-running work owned by the plugin scope, independent of windows (§5.7)                                          |
 | Method, topic   | `methods`, `topics` | experimental | Typed calls and subscriptions the plugin's own client entry uses (§5.7)                                             |
 | Processor       | `processors`        | planned      | Converts an attachment media type into model-deliverable content (§8)                                               |
@@ -509,11 +511,12 @@ The window has no native title bar (`titleBarStyle: 'hiddenInset'`). A draggable
 | Page     | Content                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Chat     | Session list (Pinned / Today / Earlier, rename, pin, delete), conversation with reasoning and tool calls as Trace lines (the latest 60 history entries first; pulling past the top loads earlier pages with a springy pull, no button), a one-line composer that grows and stacks its add/send buttons below the text when it wraps; the add menu attaches files or chooses the chat's folder. A chosen folder (not the default) appears in a bar above the field with its git branch and uncommitted line counts; under the field sit one model-and-thinking button and a context ring that fills toward compaction |
+| Coding   | A computer picker (this Mac and saved SSH hosts), the computer's tmux sessions, and the open session's terminal (§11.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Settings | A section list: General (language, what agents call the user, permissions: ask each time or review automatically with a chosen model, data); Agent (name, icon, system prompt); Models (credentials, default models, available models with a detail page per model, grouped by model kind as kinds are added); Plugins (grouped by manifest category)                                                                                                                                                                                                                                                                |
 
 Pages and Settings sections are entries in registries (`PageEntry`, `SettingsSectionEntry` in `lib/navigation.ts`) that plugin pages will join (§5.7). A page receives the application state, its navigation parameters, and `navigate(page, params)`; the menu bar item opens a chat with `navigate('chat', { sessionId })`, and the Models shortcut opens `navigate('settings', { section: 'models' })`.
 
-Configuration lives in Settings; the rail is for feature pages. Planned feature pages include ACP (connecting external coding agents) and Music; each is added when its feature exists. The language selector is persistent and every string is in typed en/zh-CN catalogs.
+Configuration lives in Settings; the rail is for feature pages. Planned feature pages include Music; each is added when its feature exists. The language selector is persistent and every string is in typed en/zh-CN catalogs.
 
 ### 11.2 Data flow
 
@@ -545,6 +548,16 @@ Whim is a consumer application. The visual direction is friendly and soft rather
 - **Markdown.** Model output renders through `components/markdown.tsx`. Streamdown only parses and lays out text: paragraphs, headings, lists, emphasis, inline links, and math (KaTeX). Anything with chrome is a shadcn component mapped through Streamdown's `components`: fenced code is `CodeBlock` (the filled `radix-rhea` style, highlighted with the CLI's `useHighlightedCode`), tables are `Table`, and the link confirmation is a `Dialog` through `linkSafety.renderModal`. Streamdown's own controls (code, table, image, Mermaid) are turned off. When a new Markdown element needs chrome, map it to a shadcn component the same way; never style or keep Streamdown's widget. Links open in the system browser through Main; the app window never navigates or opens Electron windows.
 - **Status boxes.** Errors, warnings, and notices use `StatusAlert`: border, background, icon, and text share one hue per tone (red, amber, blue), with the border darker than the tinted background. Red text alone is not an error state.
 
+### 11.4 Coding page
+
+The first slice of [coding-agents.md](research/coding-agents.md): coding CLIs run in tmux, and the page attaches a real terminal to them. Nothing about a session is stored by Whim; tmux is the source of truth, so sessions survive Whim quitting or Backend restarting and can be opened from any other terminal.
+
+- **Agents.** Plugins register coding agents (`codingAgents`, §5.5): an id, a name key in the plugin's catalogs, and a command (argv). `@whimkit/plugin-claude-code` runs `claude`, `@whimkit/plugin-codex` runs `codex`. Whim does not install the CLIs; a missing one shows its own error in the terminal.
+- **Computers.** This Mac, or an SSH host saved in the setting `coding.hosts` (a label and an OpenSSH destination, `user@host` or a `Host` alias). A destination that could be read as an option or shell syntax is refused. Sign-in uses the user's SSH config and keys through the system `ssh`; listing runs with `BatchMode=yes`, and every command shares one `ControlMaster` connection per host (sockets in `<userData>/ssh`, mode 0700, kept 60 s). Whim stores no SSH secret.
+- **Sessions.** `coding.sessions` lists a computer's tmux sessions (polled every 5 s while the page is open, one request at a time); it reports tmux missing or the host unreachable as states, not errors. `coding.create` resolves the folder on that computer (absolute, `~`, or `~/…`; a missing folder is an error rather than a silent start in home), then in one tmux command creates a detached session named `<agent>-<6 hex>`, tags it with the user option `@whim-agent`, and types the quoted command into its shell, so the shell survives the agent exiting. Sessions are identified by server pid, session id, and creation time, so a reused name or a restarted server never addresses the wrong one. `coding.kill` ends a session after confirmation.
+- **Terminals.** `terminal.open` starts `tmux attach-session` (over `ssh -t` for a host) in a PTY (`node-pty`) owned by Core's `Terminals`, bound to the window's scope: replacing or closing the window detaches, and the session keeps running. Output goes to the Renderer as `terminal.output` events, input and resizes come back as calls, and the view (xterm.js with the fit addon) acknowledges rendered characters; Backend pauses a PTY with more than 1,000,000 unacknowledged characters and resumes it below 250,000. Closing the view detaches; when the attachment ends or Backend restarts, the view offers Reconnect, and reattaches by itself once Backend is back.
+- **Not yet.** Recording, native log collection, status from the agents, and Whim-agent tools over terminals ([coding-agents.md §5–§8](research/coding-agents.md)).
+
 ## 12. Observability
 
 Instrument agent steps, model attempts, tool calls, compaction, and commits with the OpenTelemetry API; the application owns SDK and exporter setup and runs normally without them. Spans end on every terminal path and propagate across IPC and worker boundaries explicitly. Prompts, outputs, reasoning, file content, credentials, and provider error messages are never put in default spans.
@@ -556,7 +569,7 @@ Application, Core, agent, libraries, and first-party plugins release at one shar
 ### 13.1 Packaging
 
 - The macOS app is built with electron-builder from `apps/desktop` (`pnpm --filter @whimkit/desktop package`), one app per architecture (arm64 and x64), as `dmg` and `zip`. Signing and notarization are added with the release pipeline; until then the builds are unsigned.
-- Main, Backend, the DB worker, the renderer, workspace packages, and bundled plugins run from the `app.asar` archive. A file another process executes cannot run from the archive, so it is listed in `asarUnpack` and placed in `app.asar.unpacked`; the code that spawns it maps the path. Today that is only ripgrep: `@vscode/ripgrep` resolves the binary from its per-platform package, and `@whimkit/tools` rewrites `app.asar/` to `app.asar.unpacked/` before spawning.
+- Main, Backend, the DB worker, the renderer, workspace packages, and bundled plugins run from the `app.asar` archive. A file another process executes cannot run from the archive, so it is listed in `asarUnpack` and placed in `app.asar.unpacked`; the code that spawns it maps the path. Today that is ripgrep (`@vscode/ripgrep` resolves the binary from its per-platform package, and `@whimkit/tools` rewrites `app.asar/` to `app.asar.unpacked/` before spawning) and `node-pty`, whose N-API addon and macOS `spawn-helper` are unpacked as a whole package (it maps the helper's path itself).
 - Only `@whimkit/*` packages are `dependencies` of `apps/desktop`, because they are loaded at runtime from `node_modules`; everything Vite or esbuild bundles is a `devDependency`, so it is not copied into the archive a second time.
 - `electron-builder-squirrel-windows` is a direct `devDependency` although Whim builds no Windows installer: it and `app-builder-lib` are peers of each other, and pnpm hangs while auto-installing that cycle. `electron-winstaller`'s install script is denied in `allowBuilds` for the same reason.
 - Each app carries only its own architecture's ripgrep. The workspace installs both darwin binaries (`supportedArchitectures` in `pnpm-workspace.yaml`), so either architecture can be built on any Mac.
