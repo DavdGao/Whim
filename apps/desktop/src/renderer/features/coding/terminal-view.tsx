@@ -170,18 +170,17 @@ export function TerminalView({
     }, [hostId, sessionKey, attempt]);
 
     return (
-        <div className="relative flex min-h-0 flex-1 flex-col p-3">
-            {/* The fit addon measures the terminal's parent, so the padding sits outside it. */}
-            <div className="flex min-h-0 flex-1 flex-col rounded-2xl bg-[#141416] p-3">
-                <div
-                    ref={container}
-                    role="region"
-                    aria-label={t('coding.terminal')}
-                    className="min-h-0 flex-1 overflow-hidden"
-                />
-            </div>
+        // Edge to edge; the page panel's rounded corners clip it. The background matches the
+        // terminal's so the columns the fit addon leaves over do not show as a border.
+        <div className="relative flex min-h-0 flex-1 flex-col bg-[#141416]">
+            <div
+                ref={container}
+                role="region"
+                aria-label={t('coding.terminal')}
+                className="min-h-0 flex-1 overflow-hidden"
+            />
             {phase.kind !== 'open' && (
-                <div className="absolute inset-3 flex items-center justify-center rounded-2xl bg-black/60">
+                <div className="absolute inset-0 flex items-center justify-center bg-black/60">
                     {phase.kind === 'connecting' ? (
                         <span className="flex items-center gap-2 text-sm text-white/80">
                             <Spinner /> {t('coding.connecting')}
