@@ -116,6 +116,7 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [x] Plugin API 1.1: `codingAgents` contribution; Claude Code and Codex plugins
 - [x] Coding page: computer picker with SSH hosts, session list, new session with agent and folder, xterm.js terminal with reconnect, end session
 - [ ] Verify an SSH host end to end (listing, start, attach, a broken connection)
+- [x] Fix `posix_spawnp failed` on macOS: `node-pty` 1.1.0 ships `spawn-helper` without the execute bit; pinned to 1.2.0-beta.18
 - [ ] Run on a Mac: packaged `node-pty`, IME, paste, Ctrl+C, alternate screen
 - [ ] Session lifecycle, recording, and Whim-agent control (coding-agents.md §11 slices 2–5)
 
