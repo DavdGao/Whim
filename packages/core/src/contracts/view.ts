@@ -241,10 +241,12 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
                     { seq: record.seq, compactionId: body.compactionId, state: 'running' },
                 ],
             };
+        case 'compaction.attempted':
+            return { ...base, usage: addUsage(view.usage, body.usage) };
         case 'compaction.finished':
             return {
                 ...base,
-                usage: addUsage(view.usage, body.usage),
+                ...(body.usage ? { usage: addUsage(view.usage, body.usage) } : {}),
                 compactions: view.compactions.map(item =>
                     item.compactionId === body.compactionId
                         ? {

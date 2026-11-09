@@ -210,21 +210,27 @@ export function estimateTokens(
 
 /**
  * The request messages of the current epoch: after a compaction, a reminder carrying the summary
- * and the transcript's `file:` URI, then the history the summary does not cover.
+ * and the transcript's `file:` URI, the kept user message when it is older than the epoch's start,
+ * then the history the summary does not cover.
  * @param view The session view.
  * @param media Media policy of the session's model.
+ * @param until Leave out history from this sequence number on; a summary request's cut.
  * @returns Messages in order.
  */
 export async function epochMessages(
     view: SessionView,
-    media: MediaPolicy
+    media: MediaPolicy,
+    until = Infinity
 ): Promise<ChatRequestMessage[]> {
     const context = view.epoch.context;
-    if (!context) return toRequestMessages(view.history, media);
+    const from = context?.from ?? 0;
     const messages = await toRequestMessages(
-        view.history.filter(entry => entry.seq >= context.from),
+        view.history.filter(
+            entry => entry.seq < until && (entry.seq >= from || entry.seq === context?.input)
+        ),
         media
     );
+    if (!context) return messages;
     return [
         { role: 'user', blocks: [{ type: 'text', text: summaryReminder(context) }] },
         ...messages,
@@ -237,7 +243,26 @@ export async function epochMessages(
  * @returns The reminder text.
  */
 export function summaryReminder(context: EpochContext): string {
-    return `<system-reminder>The earlier part of this conversation was compacted to save context. Its full transcript is at ${context.transcript}; Read it when you need exact earlier details.\n\nSummary of the earlier conversation:\n${context.summary}</system-reminder>`;
+    return `<system-reminder>The earlier part of this conversation was compacted to save context. Its full transcript is at ${context.transcript}; Read it when you need exact earlier details.${context.input === undefined ? '' : " The user's latest message follows verbatim."}\n\nSummary of the earlier conversation:\n${context.summary}</system-reminder>`;
+}
+
+/**
+ * A rough upper-leaning token size of one history entry, for choosing a compaction cut.
+ * @param entry The entry.
+ * @returns Estimated tokens.
+ */
+export function entryTokens(entry: HistoryEntry): number {
+    const item = entry.item;
+    const media =
+        item.type === 'tool_result'
+            ? (item.media?.length ?? 0)
+            : item.type === 'message'
+              ? item.blocks.filter(block => block.type === 'media' && block.text === undefined)
+                    .length
+              : 0;
+    return Math.ceil(
+        (new TextEncoder().encode(JSON.stringify(item)).length + media * mediaEstimateBytes) / 3
+    );
 }
 
 /**

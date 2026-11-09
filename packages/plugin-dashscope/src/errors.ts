@@ -109,7 +109,7 @@ export function streamFailure(
         return { category: 'transport', retry: { kind: 'backoff' }, outcome, detail };
     if (kind === 'incomplete')
         return {
-            category: code === 'max_output_tokens' ? 'context-limit' : 'protocol',
+            category: code === 'max_output_tokens' ? 'output-limit' : 'protocol',
             retry: { kind: 'never' },
             outcome,
             detail,

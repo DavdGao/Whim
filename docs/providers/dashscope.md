@@ -82,7 +82,7 @@ Whim mapping: `web_search → web_search` inside the chat call; `web_fetch` runs
 | 503    | `ServiceUnavailable`, `ModelUnavailable`           | `overloaded`        | backoff                               |
 | —      | connection error                                   | `transport`         | backoff                               |
 
-Codes are compared case-insensitively; snake_case aliases map identically. `response.failed` and `response.incomplete` in-stream map to `protocol` with `outcome` `partial` when output was published.
+Codes are compared case-insensitively; snake_case aliases map identically. `response.failed` and `response.incomplete` in-stream map to `protocol` with `outcome` `partial` when output was published, except `response.incomplete` with reason `max_output_tokens`, which maps to `output-limit`.
 
 ## Seed cards
 

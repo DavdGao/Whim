@@ -71,12 +71,14 @@ after(async () => {
  * @param text The message.
  * @param tools Declared tools.
  * @param providerTools Standard tool ids the adapter runs as separate calls.
+ * @param frozen The session's card.
  * @returns The session id.
  */
 async function sessionWith(
     text: string,
     tools: { name: string; description: string; inputSchema: Record<string, unknown> }[] = [],
-    providerTools: string[] = []
+    providerTools: string[] = [],
+    frozen: FrozenChatCard = card
 ): Promise<string> {
     const sessionId = randomUUID();
     await store.execute({
@@ -88,7 +90,7 @@ async function sessionWith(
         epoch: {
             epochId: randomUUID(),
             system: 'Be brief.',
-            card,
+            card: frozen,
             renderer: 1,
             tools,
             nativeTools: [],
@@ -174,6 +176,54 @@ const contextLimit = new ApplicationError({
     retry: { kind: 'after-change', change: 'input' },
     outcome: 'rejected',
 });
+
+/**
+ * Whether a request asks for a compaction summary.
+ * @param request The request.
+ * @returns True for summary requests.
+ */
+function isSummary(request: ChatRequest): boolean {
+    return request.messages.some(
+        message =>
+            message.role === 'user' &&
+            message.blocks.some(
+                block =>
+                    block.type === 'text' && block.text.includes('will be replaced by your summary')
+            )
+    );
+}
+
+/**
+ * A summary reply with every section.
+ * @param text Each section's content.
+ * @returns The reply.
+ */
+const tagged = (text: string) =>
+    ['goal', 'current-state', 'progress', 'findings', 'next-steps']
+        .map(name => `<${name}>${text}</${name}>`)
+        .join('\n');
+
+/**
+ * The stored form of a summary whose sections all hold `text`.
+ * @param text Each section's content.
+ * @returns The summary.
+ */
+const stored = (text: string) =>
+    ['goal', 'current-state', 'progress', 'findings', 'next-steps']
+        .map(name => `<${name}>\n${text}\n</${name}>`)
+        .join('\n\n');
+
+/**
+ * The text of a request message.
+ * @param message The message.
+ * @returns Its text blocks or tool content.
+ */
+const textOf = (message: ChatRequest['messages'][number] | undefined) =>
+    !message
+        ? ''
+        : message.role === 'tool'
+          ? message.content
+          : message.blocks.map(block => (block.type === 'text' ? block.text : '')).join('');
 
 describe('Agent', () => {
     it('streams a reply, commits it once, and does not call the model again without input', async () => {
@@ -351,20 +401,22 @@ describe('Agent', () => {
         assert.equal(result?.outcome === 'failed' && result.failure.category, 'context-limit');
     });
 
-    it('compacts the history before the latest input once the threshold is passed', async () => {
-        const long = (letter: string) => letter.repeat(600);
+    it("summarizes in the step's own request and keeps the latest input verbatim", async () => {
+        const long = (letter: string) => letter.repeat(900);
+        // The threshold (80% of the window) is below the budget, as with real cards.
         const { models, requests } = scripted(async function* (request) {
             yield {
                 type: 'text-delta',
-                text: request.system.startsWith('You compact') ? 'SUMMARY' : long('a'),
+                text: isSummary(request) ? tagged('S') : long('a'),
             };
             yield { type: 'completed', usage: { inputTokens: 5, outputTokens: 1 } };
-        }, 400);
+        }, 3000);
         const agent = new Agent(store, models, noTools, {
             sleep: noSleep,
             compaction: compaction(),
+            now: () => new Date('2026-11-09T12:00:00Z'),
         });
-        const sessionId = await sessionWith(long('u'));
+        const sessionId = await sessionWith(long('u'), [], [], { ...card, contextWindow: 1000 });
         await drain(agent.run(sessionId, 'user', new AbortController().signal));
         await say(sessionId, long('v'));
         await drain(agent.run(sessionId, 'user', new AbortController().signal));
@@ -376,38 +428,54 @@ describe('Agent', () => {
         assert.equal(view.epoch.reason, 'compaction');
         assert.deepEqual(
             view.compactions.map(item => [item.state, item.summary]),
-            [['succeeded', 'SUMMARY']]
+            [['succeeded', stored('S')]]
         );
-        assert.equal(view.epoch.context?.from, latest?.seq);
+        // Every entry was too large for the tail, so all are summarized and the input is kept.
+        assert.equal(view.epoch.context?.input, latest?.seq);
+        const from = view.epoch.context?.from ?? 0;
+        assert.deepEqual(
+            view.history.filter(entry => entry.seq >= from).map(entry => entry.item.type),
+            ['message']
+        );
+        assert.ok(from > (latest?.seq ?? Infinity));
         const transcript = await readFile(
             fileURLToPath(view.epoch.context?.transcript ?? 'file:///missing'),
             'utf8'
         );
-        assert.equal(transcript, `### User\n${long('u')}\n\n### Assistant\n${long('a')}\n`);
-        // The summary call sees the transcript; the answer after it sees the summary and the input.
-        assert.deepEqual(
-            requests.map(request => request.messages.length),
-            [1, 1, 2]
+        assert.equal(
+            transcript,
+            `### User\n${long('u')}\n\n### Assistant\n${long('a')}\n\n### User\n${long('v')}\n`
         );
-        const last = requests.at(-1);
+        const [, summary, last] = requests;
+        assert.equal(requests.length, 3);
+        // The summary request is the step's own: same system, tools, thinking, and history.
+        assert.equal(summary?.system, 'Be brief.');
+        assert.equal(summary?.thinking, 'high');
+        assert.deepEqual(summary?.messages.slice(0, 3), [
+            { role: 'user', blocks: [{ type: 'text', text: long('u') }] },
+            { role: 'assistant', blocks: [{ type: 'text', text: long('a') }] },
+            { role: 'user', blocks: [{ type: 'text', text: long('v') }] },
+        ]);
+        assert.match(textOf(summary?.messages[3]), /It is now 2026-11-09T12:00:00\.000Z\./);
+        assert.equal(summary?.messages.length, 4);
         assert.match(
-            last?.messages[0]?.role === 'user' && last.messages[0].blocks[0]?.type === 'text'
-                ? last.messages[0].blocks[0].text
-                : '',
-            /^<system-reminder>The earlier part of this conversation was compacted[\s\S]*SUMMARY<\/system-reminder>$/
+            textOf(last?.messages[0]),
+            /^<system-reminder>The earlier part of this conversation was compacted[\s\S]*The user's latest message follows verbatim\.[\s\S]*<next-steps>\nS\n<\/next-steps><\/system-reminder>$/
         );
-        assert.deepEqual(last?.messages[1], {
-            role: 'user',
-            blocks: [{ type: 'text', text: long('v') }],
-        });
+        assert.deepEqual(last?.messages.slice(1), [
+            { role: 'user', blocks: [{ type: 'text', text: long('v') }] },
+        ]);
         assert.deepEqual(view.usage, { inputTokens: 15, outputTokens: 3 });
     });
 
-    it('compacts and retries once when the provider reports the context limit', async () => {
+    it('compacts and runs the step again when the provider reports the context limit', async () => {
         const { models, requests } = scripted(async function* (request) {
-            if (request.system.startsWith('You compact'))
-                yield { type: 'text-delta', text: 'SUMMARY' };
-            else if (request.messages.length === 3) throw contextLimit;
+            if (isSummary(request)) yield { type: 'text-delta', text: tagged('S') };
+            else if (
+                request.messages.length === 3 &&
+                request.messages.some(message => textOf(message) === 'first')
+            )
+                throw contextLimit;
             else yield { type: 'text-delta', text: 'ok' };
             yield { type: 'completed', usage: {} };
         });
@@ -423,8 +491,21 @@ describe('Agent', () => {
         assert.deepEqual(view.lastRun?.result, { outcome: 'completed' });
         assert.deepEqual(
             requests.map(request => request.messages.length),
-            [1, 3, 1, 2]
+            [1, 3, 2, 3]
         );
+        // The summary request repeats the refused request up to the kept tail.
+        const [, refused, summary] = requests;
+        assert.deepEqual(summary?.messages[0], refused?.messages[0]);
+        assert.deepEqual(summary?.tools, refused?.tools);
+        // The tail is small, so it stays: only the first message is summarized.
+        const kept = view.history.find(
+            entry => entry.item.type === 'message' && entry.item.role === 'assistant'
+        );
+        assert.deepEqual(view.epoch.context && { ...view.epoch.context, transcript: '' }, {
+            summary: stored('S'),
+            from: kept?.seq,
+            transcript: '',
+        });
         assert.deepEqual(
             view.compactions.map(item => item.state),
             ['succeeded']
@@ -439,7 +520,7 @@ describe('Agent', () => {
 
     it('fails with the provider context limit when compaction fails, without resending', async () => {
         const { models, requests } = scripted(async function* (request) {
-            if (request.system.startsWith('You compact')) throw new Error('summary failed');
+            if (isSummary(request)) throw new Error('summary failed');
             if (request.messages.length === 3) throw contextLimit;
             yield { type: 'text-delta', text: 'ok' };
             yield { type: 'completed', usage: {} };
@@ -461,6 +542,154 @@ describe('Agent', () => {
         assert.deepEqual(
             view.compactions.map(item => item.state),
             ['failed']
+        );
+    });
+
+    it('asks once more when a section is missing and records each summary request', async () => {
+        const long = (letter: string) => letter.repeat(900);
+        let summaries = 0;
+        const { models, requests } = scripted(async function* (request) {
+            if (isSummary(request)) {
+                summaries++;
+                yield {
+                    type: 'text-delta',
+                    text: summaries === 1 ? '<goal>G</goal> and some prose' : tagged('T'),
+                };
+            } else yield { type: 'text-delta', text: long('a') };
+            yield { type: 'completed', usage: { inputTokens: 5, outputTokens: 1 } };
+        }, 3000);
+        const agent = new Agent(store, models, noTools, {
+            sleep: noSleep,
+            compaction: compaction(),
+        });
+        const sessionId = await sessionWith(long('u'), [], [], { ...card, contextWindow: 1000 });
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        await say(sessionId, long('v'));
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+
+        const view = await store.view(sessionId);
+        assert.deepEqual(
+            view.compactions.map(item => [item.state, item.summary]),
+            [['succeeded', stored('T')]]
+        );
+        const again = requests[2];
+        assert.deepEqual(
+            again?.messages.slice(-2).map(message => [message.role, textOf(message)]),
+            [
+                ['assistant', '<goal>G</goal> and some prose'],
+                [
+                    'user',
+                    '<system-reminder>Your summary is missing <current-state>, <progress>, <findings>, <next-steps>. Write the complete summary again with all five sections, and nothing else.</system-reminder>',
+                ],
+            ]
+        );
+        // Both summary requests count toward the session's usage.
+        assert.deepEqual(view.usage, { inputTokens: 20, outputTokens: 4 });
+    });
+
+    it('asks once more when the summary is cut off and keeps the second reply as written', async () => {
+        const long = (letter: string) => letter.repeat(900);
+        let summaries = 0;
+        const { models } = scripted(async function* (request) {
+            if (isSummary(request)) {
+                summaries++;
+                yield { type: 'text-delta', text: summaries === 1 ? '<goal>G' : 'plain prose' };
+                if (summaries === 1)
+                    throw new ApplicationError({
+                        category: 'output-limit',
+                        retry: { kind: 'never' },
+                        outcome: 'partial',
+                    });
+            } else yield { type: 'text-delta', text: long('a') };
+            yield { type: 'completed', usage: {} };
+        }, 3000);
+        const agent = new Agent(store, models, noTools, {
+            sleep: noSleep,
+            compaction: compaction(),
+        });
+        const sessionId = await sessionWith(long('u'), [], [], { ...card, contextWindow: 1000 });
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        await say(sessionId, long('v'));
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        const view = await store.view(sessionId);
+        assert.deepEqual(
+            view.compactions.map(item => [item.state, item.summary]),
+            [['succeeded', 'plain prose']]
+        );
+        assert.deepEqual(view.lastRun?.result, { outcome: 'completed' });
+    });
+
+    it('summarizes the older half when the provider refuses the summary request', async () => {
+        const { models, requests } = scripted(async function* (request) {
+            const texts = request.messages.map(textOf);
+            if (
+                isSummary(request)
+                    ? texts.includes('m3')
+                    : texts.includes('m1') && texts.includes('go')
+            )
+                throw contextLimit;
+            yield { type: 'text-delta', text: isSummary(request) ? tagged('S') : 'ok' };
+            yield { type: 'completed', usage: {} };
+        });
+        const agent = new Agent(store, models, noTools, {
+            sleep: noSleep,
+            compaction: compaction(),
+        });
+        const sessionId = await sessionWith('m1');
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        for (const text of ['m2', 'm3', 'm4', 'm5', 'm6', 'go']) {
+            await say(sessionId, text);
+            await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        }
+        const view = await store.view(sessionId);
+        assert.deepEqual(view.lastRun?.result, { outcome: 'completed' });
+        assert.deepEqual(
+            view.compactions.map(item => item.state),
+            ['succeeded']
+        );
+        // The first cut kept the last six entries; the accepted one covers m1, its reply, and m2.
+        const summaries = requests.filter(isSummary);
+        assert.deepEqual(
+            summaries.map(request => request.messages.slice(0, -1).map(textOf)),
+            [
+                ['m1', 'ok', 'm2', 'ok', 'm3', 'ok', 'm4'],
+                ['m1', 'ok', 'm2'],
+            ]
+        );
+        assert.equal(view.epoch.context?.from, view.history[3]?.seq);
+    });
+
+    it('shortens a single long entry in the middle until the summary request is accepted', async () => {
+        const huge = 'h'.repeat(9000);
+        const { models, requests } = scripted(async function* (request) {
+            const texts = request.messages.map(textOf);
+            if (
+                isSummary(request)
+                    ? texts.some(text => text.length > 4000)
+                    : texts.includes(huge) && texts.includes('next')
+            )
+                throw contextLimit;
+            yield { type: 'text-delta', text: isSummary(request) ? tagged('S') : 'ok' };
+            yield { type: 'completed', usage: {} };
+        });
+        const agent = new Agent(store, models, noTools, {
+            sleep: noSleep,
+            compaction: compaction(),
+        });
+        const sessionId = await sessionWith(huge);
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        await say(sessionId, 'next');
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        const view = await store.view(sessionId);
+        assert.deepEqual(view.lastRun?.result, { outcome: 'completed' });
+        const summaries = requests.filter(isSummary);
+        assert.deepEqual(
+            summaries.map(request => textOf(request.messages[0]).length),
+            [9000, 4500 + 31, 2250 + 31]
+        );
+        assert.equal(
+            textOf(summaries.at(-1)?.messages[0]),
+            `${'h'.repeat(1125)}\n[… 6750 characters omitted …]\n${'h'.repeat(1125)}`
         );
     });
 
@@ -650,9 +879,9 @@ describe('Agent', () => {
             let compacted = false;
             const { models } = scripted(async function* (request) {
                 const last = request.messages.at(-1);
-                if (request.system.startsWith('You compact')) {
+                if (isSummary(request)) {
                     compacted = true;
-                    yield { type: 'text-delta', text: 'SUMMARY' };
+                    yield { type: 'text-delta', text: tagged('S') };
                 } else if (last?.role === 'user') yield call(compacted ? 'Check' : 'Touch');
                 else if (last?.role === 'tool' && last.content === 'read a.txt')
                     yield call('Check');
@@ -684,6 +913,66 @@ describe('Agent', () => {
                 entry.item.type === 'tool_result' ? [entry.item.content] : []
             );
             assert.equal(results.at(-1), 'known: null');
+        });
+
+        it('compacts inside a long run of tool calls, keeping each call with its results', async () => {
+            const { runtime, declarations } = runtimeWith([echo]);
+            let calls = 0;
+            const { models, requests } = scripted(async function* (request) {
+                if (isSummary(request)) yield { type: 'text-delta', text: tagged('S') };
+                else if (calls < 12)
+                    yield {
+                        type: 'tool-call',
+                        callId: `call-${++calls}`,
+                        name: 'Echo',
+                        arguments: JSON.stringify({ text: 'x'.repeat(300) }),
+                    };
+                else yield { type: 'text-delta', text: 'done' };
+                yield { type: 'completed', usage: {} };
+            });
+            const agent = new Agent(store, models, runtime, {
+                sleep: noSleep,
+                compaction: compaction(),
+            });
+            const sessionId = await sessionWith('loop', declarations, [], {
+                ...card,
+                contextWindow: 2000,
+            });
+            await drain(agent.run(sessionId, 'user', new AbortController().signal));
+            const view = await store.view(sessionId);
+            assert.deepEqual(view.lastRun?.result, { outcome: 'completed' });
+            assert.ok(view.compactions.length > 0);
+            assert.ok(view.compactions.every(item => item.state === 'succeeded'));
+            const user = view.history.find(
+                entry => entry.item.type === 'message' && entry.item.role === 'user'
+            );
+            assert.equal(view.epoch.context?.input, user?.seq);
+            // Every request keeps tool results right after the message that called them.
+            for (const request of requests)
+                request.messages.forEach((message, index) => {
+                    if (message.role !== 'tool') return;
+                    const caller = request.messages
+                        .slice(0, index)
+                        .findLast(item => item.role !== 'tool');
+                    assert.ok(
+                        caller?.role === 'assistant' &&
+                            caller.blocks.some(
+                                block =>
+                                    block.type === 'tool_call' && block.callId === message.callId
+                            )
+                    );
+                });
+            const last = requests.at(-1);
+            assert.deepEqual(
+                last?.messages
+                    .slice(0, 3)
+                    .map(message => [message.role, textOf(message).slice(0, 18)]),
+                [
+                    ['user', '<system-reminder>T'],
+                    ['user', 'loop'],
+                    ['assistant', ''],
+                ]
+            );
         });
 
         it('reports invalid arguments to the model without running the tool', async () => {

@@ -366,4 +366,24 @@ describe('DashScope Responses adapter', () => {
         assert.equal(result.failure?.outcome, 'partial');
         assert.deepEqual(result.failure?.retry, { kind: 'backoff' });
     });
+
+    it('reports a reply cut at the output limit as output-limit, not context-limit', async () => {
+        const result = await run(
+            fakeFetch(() =>
+                sse([
+                    { type: 'response.output_text.delta', delta: 'Hal' },
+                    {
+                        type: 'response.incomplete',
+                        response: { incomplete_details: { reason: 'max_output_tokens' } },
+                    },
+                ])
+            ).transport
+        );
+        assert.deepEqual(result.failure, {
+            category: 'output-limit',
+            retry: { kind: 'never' },
+            outcome: 'partial',
+            detail: { provider: 'dashscope', code: 'max_output_tokens' },
+        });
+    });
 });

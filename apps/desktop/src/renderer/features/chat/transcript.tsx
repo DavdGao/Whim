@@ -359,6 +359,26 @@ function turnText(entries: readonly HistoryEntry[]): string {
         .join('\n\n');
 }
 
+const summarySections = ['goal', 'current-state', 'progress', 'findings', 'next-steps'] as const;
+
+/**
+ * A compaction summary as Markdown: its tagged sections become headed paragraphs. Summaries
+ * without sections (older ones, or a reply kept as written) are shown as they are.
+ * @param summary The stored summary.
+ * @param label The translated title of a section.
+ * @returns Markdown text.
+ */
+function summaryMarkdown(
+    summary: string,
+    label: (section: (typeof summarySections)[number]) => string
+): string {
+    const parts = summarySections.flatMap(section => {
+        const match = new RegExp(`<${section}>([\\s\\S]*?)</${section}>`).exec(summary);
+        return match ? [`#### ${label(section)}\n\n${(match[1] ?? '').trim()}`] : [];
+    });
+    return parts.length ? parts.join('\n\n') : summary;
+}
+
 /**
  * Where the conversation was compacted: running, the summary to expand, or a failure.
  * @param props Line props.
@@ -394,7 +414,11 @@ function CompactionLine({ compaction }: { compaction: Compaction }) {
                     </TraceLine>
                 </TraceCollapsibleTrigger>
                 <TraceCollapsibleContent>
-                    <Markdown className="text-sm">{compaction.summary ?? ''}</Markdown>
+                    <Markdown className="text-sm">
+                        {summaryMarkdown(compaction.summary ?? '', section =>
+                            t(`chat.summary.${section}`)
+                        )}
+                    </Markdown>
                 </TraceCollapsibleContent>
             </TraceCollapsible>
         </Trace>

@@ -5,18 +5,30 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { ApplicationError, selectableLevels } from '@whimkit/core/contracts';
 
+import {
+    compactionCut,
+    correctionHint,
+    longestText,
+    olderHalf,
+    parseSummary,
+    summaryHint,
+    trimLongTexts,
+} from './compaction.js';
 import { epochMessages, estimateTokens, transcriptText } from './render.js';
 
+import type { CompactionCut, SummaryProblem } from './compaction.js';
+import type { MediaPolicy } from './render.js';
 import type { Command } from '@whimkit/core';
 import type {
     AgentRecord,
     Block,
+    EpochContext,
     Failure,
     FrozenChatCard,
     SessionView,
     Usage,
 } from '@whimkit/core/contracts';
-import type { ChatEvent, ChatRequest, ChatSession } from '@whimkit/core/plugin';
+import type { ChatEvent, ChatRequest, ChatRequestMessage, ChatSession } from '@whimkit/core/plugin';
 
 /** Persistence port; Core's Store implements it. */
 export interface AgentStore {
@@ -54,6 +66,8 @@ export interface AgentOptions {
     readonly readMedia?: (uri: string) => Promise<Uint8Array>;
     /** Enables automatic compaction; without it, an oversized context fails the step. */
     readonly compaction?: AgentCompaction;
+    /** The current time, told to the model when it summarizes. */
+    readonly now?: () => Date;
 }
 
 /** What compaction needs from the host. */
@@ -67,11 +81,17 @@ export interface AgentCompaction {
 /** Compaction starts once a request would exceed this share of the context window. */
 export const compactionShare = 0.8;
 
-const compactionSystem = [
-    'You compact a conversation between a user and an AI agent so that the agent can continue from your summary alone.',
-    "Write in the conversation's language. Cover: the user's goals and requests (quote them when the wording matters), decisions and preferences, work done so far (files created or changed, commands run and their outcomes), important facts and data found, open questions, and what remains to do next.",
-    'Keep identifiers exactly as written: file paths and file: URIs, media identifiers such as img-…, URLs, names, and numbers. Never invent anything. Output only the summary.',
-].join('\n');
+/** The tail a compaction keeps verbatim takes at most this share of the threshold. */
+const tailShare = 0.25;
+
+/** A step compacts at most this many times, each committing a new epoch. */
+const maxCompactionsPerStep = 3;
+
+/** One compaction sends at most this many summary requests. */
+const maxSummaryRequests = 12;
+
+/** Shortening texts of a refused summary request stops below this many characters. */
+const minTrimmedChars = 2000;
 
 /**
  * Transient events for subscribers; never stored. Committed records reach subscribers through
@@ -151,6 +171,7 @@ export class Agent {
     readonly #random: () => number;
     readonly #readMedia: (uri: string) => Promise<Uint8Array>;
     readonly #compaction: AgentCompaction | undefined;
+    readonly #now: () => Date;
 
     /**
      * Create an agent over its ports.
@@ -171,6 +192,7 @@ export class Agent {
         this.#random = options.random ?? Math.random;
         this.#readMedia = options.readMedia ?? (uri => readFile(fileURLToPath(uri)));
         this.#compaction = options.compaction;
+        this.#now = options.now ?? (() => new Date());
     }
 
     /**
@@ -220,16 +242,20 @@ export class Agent {
                 const view = await this.store.view(sessionId);
                 if (first && !needsResponse(view)) break;
                 first = false;
-                let outcome = yield* this.#step(view, runId, stepId, signal, false);
-                if (outcome.kind === 'compact') {
-                    const compacted = await this.#compact(view, runId, signal);
+                let outcome = yield* this.#step(view, runId, stepId, signal, true);
+                for (let compactions = 1; outcome.kind === 'compact'; compactions++) {
+                    const compacted = await this.#compact(
+                        await this.store.view(sessionId),
+                        runId,
+                        signal
+                    );
                     if (signal.aborted) {
-                        result = { outcome: 'interrupted', reason: 'user' };
+                        outcome = { kind: 'interrupted' };
                         break;
                     }
                     // The provider already refused this context; sending it unchanged cannot work.
                     if (!compacted && outcome.failure) {
-                        result = { outcome: 'failed', failure: outcome.failure };
+                        outcome = { kind: 'failed', failure: outcome.failure };
                         break;
                     }
                     outcome = yield* this.#step(
@@ -237,7 +263,7 @@ export class Agent {
                         runId,
                         stepId,
                         signal,
-                        true
+                        compacted && compactions < maxCompactionsPerStep
                     );
                 }
                 if (outcome.kind === 'interrupted') {
@@ -290,9 +316,9 @@ export class Agent {
     }
 
     /**
-     * Compact the history before the latest input: write its transcript into the session's
-     * folder, summarize it with the session's model, and commit a new epoch that starts from the
-     * summary. Failure keeps the current epoch; the step then proceeds or fails on the budget.
+     * Compact the current epoch: ask for a tagged summary in the step's own request cut before
+     * the kept tail, write the covered history into the session's folder, and commit a new epoch
+     * that starts from the summary (agent.md §8). Failure keeps the current epoch.
      * @param view The session view after the step consumed its input.
      * @param runId The active run.
      * @param signal Run interruption.
@@ -300,69 +326,122 @@ export class Agent {
      */
     async #compact(view: SessionView, runId: string, signal: AbortSignal): Promise<boolean> {
         const port = this.#compaction;
-        const cut = compactionCut(view);
-        if (!port || cut === undefined) return false;
+        if (!port) return false;
         const sessionId = view.sessionId;
         const card = view.epoch.card;
-        const previous = view.epoch.context;
-        const covered = view.history.filter(
-            entry => entry.seq >= (previous?.from ?? 0) && entry.seq < cut
-        );
-        const compactionId = randomUUID();
-        const path = port.transcriptPath(sessionId, compactionId);
-        const transcript = transcriptText(covered);
-        // Published before anything refers to it.
-        await mkdir(dirname(path), { recursive: true });
-        await writeFile(
-            path,
-            `${previous ? `Earlier transcript: ${previous.transcript}\n\n` : ''}${transcript}\n`
-        );
-        await this.#exec(sessionId, { type: 'start-compaction', runId, compactionId });
-        let usage: Usage = {};
+        let session: ChatSession;
         try {
-            const session = await this.models.open(card, view.credentialId);
-            // Keep the summary call within budget: the newest part of a very long transcript wins.
-            const room = Math.floor(session.inputBudget() * 0.6) * 3;
-            const clipped =
-                transcript.length > room
-                    ? `[The beginning is omitted here; it is in the transcript file.]\n${transcript.slice(-room)}`
-                    : transcript;
-            const thinking = defaultLevel(card.thinking);
-            const request: ChatRequest = {
-                system: compactionSystem,
-                messages: [
-                    {
+            session = await this.models.open(card, view.credentialId);
+        } catch {
+            return false;
+        }
+        const threshold = Math.min(
+            session.inputBudget(),
+            Math.floor(card.contextWindow * compactionShare)
+        );
+        const first = compactionCut(view, Math.floor(threshold * tailShare));
+        if (!first) return false;
+        let cut: CompactionCut = first;
+        const compactionId = randomUUID();
+        await this.#exec(sessionId, { type: 'start-compaction', runId, compactionId });
+        try {
+            const thinking = stepThinking(view);
+            const hint = summaryHint(this.#now());
+            // Set once the covered part is a single entry and still too long.
+            let trim: number | undefined;
+            let retry: { reply: string; problem: SummaryProblem } | undefined;
+            let summary: string | undefined;
+            for (let requests = 0; summary === undefined; requests++) {
+                if (requests >= maxSummaryRequests)
+                    throw new Error('The summary request was refused too often.');
+                const history = await epochMessages(view, this.#media(session, card), cut.from);
+                const messages: ChatRequestMessage[] = [
+                    ...history,
+                    { role: 'user', blocks: [{ type: 'text', text: hint }] },
+                ];
+                if (retry) {
+                    if (retry.reply)
+                        messages.push({
+                            role: 'assistant',
+                            blocks: [{ type: 'text', text: retry.reply }],
+                        });
+                    messages.push({
                         role: 'user',
-                        blocks: [
-                            {
-                                type: 'text',
-                                text: `${previous ? `Summary of the conversation before this transcript:\n${previous.summary}\n\n` : ''}<transcript>\n${clipped}\n</transcript>\n\nWrite the summary now.`,
-                            },
-                        ],
-                    },
-                ],
-                ...(thinking ? { thinking } : {}),
-                tools: [],
-                nativeTools: [],
-            };
-            let summary = '';
-            for await (const event of session.stream(request, signal)) {
-                if (event.type === 'text-delta') summary += event.text;
-                else if (event.type === 'completed') usage = event.usage;
+                        blocks: [{ type: 'text', text: correctionHint(retry.problem) }],
+                    });
+                }
+                const request: ChatRequest = {
+                    system: view.epoch.system,
+                    messages:
+                        trim === undefined
+                            ? messages
+                            : trimLongTexts(messages, trim, messages.length - history.length),
+                    ...(thinking ? { thinking } : {}),
+                    tools: view.epoch.tools,
+                    nativeTools: view.epoch.nativeTools,
+                };
+                const estimate = session.countTokens
+                    ? await session.countTokens(request, signal)
+                    : estimateTokens(request.system, request.messages, request.tools);
+                const reply =
+                    estimate > session.inputBudget()
+                        ? undefined
+                        : await this.#summaryAttempt(
+                              sessionId,
+                              session,
+                              request,
+                              compactionId,
+                              signal
+                          );
+                if (!reply || reply.failure?.category === 'context-limit') {
+                    // Summarize the older half; a single entry is shortened in the middle instead.
+                    retry = undefined;
+                    const half = trim === undefined ? olderHalf(view, cut) : undefined;
+                    if (half) cut = half;
+                    else {
+                        trim = Math.floor((trim ?? longestText(request.messages)) / 2);
+                        if (trim < minTrimmedChars)
+                            throw reply?.failure
+                                ? new ApplicationError(reply.failure)
+                                : new Error('The summary request does not fit the input budget.');
+                    }
+                    continue;
+                }
+                if (reply.failure && reply.failure.category !== 'output-limit')
+                    throw new ApplicationError(reply.failure);
+                const parsed = parseSummary(reply.text);
+                const problem: SummaryProblem | undefined = reply.failure
+                    ? { kind: 'cut' }
+                    : reply.called
+                      ? { kind: 'tool-call' }
+                      : parsed.missing.length
+                        ? { kind: 'missing', sections: parsed.missing }
+                        : undefined;
+                if (!problem) summary = parsed.summary;
+                else if (!retry) retry = { reply: reply.text, problem };
+                else if (parsed.missing.length === 0) summary = parsed.summary;
+                else if (reply.text) summary = reply.text;
+                else throw new Error('The summary came back empty.');
             }
-            summary = summary.trim();
-            if (!summary) throw new Error('The summary came back empty.');
+
+            const previous = view.epoch.context;
+            const covered = view.history.filter(
+                entry => entry.seq >= (previous?.from ?? 0) && entry.seq < cut.from
+            );
+            const path = port.transcriptPath(sessionId, compactionId);
+            // Published before anything refers to it.
+            await mkdir(dirname(path), { recursive: true });
+            await writeFile(
+                path,
+                `${previous ? `Earlier transcript: ${previous.transcript}\n\n` : ''}${transcriptText(covered)}\n`
+            );
             const epoch = await port.epoch(view);
             await this.#exec(sessionId, {
                 type: 'finish-compaction',
                 compactionId,
-                usage,
                 result: {
                     status: 'succeeded',
-                    epoch: {
-                        ...epoch,
-                        context: { summary, from: cut, transcript: pathToFileURL(path).href },
-                    },
+                    epoch: { ...epoch, context: epochContext(summary, cut, path) },
                 },
             });
             return true;
@@ -370,11 +449,71 @@ export class Agent {
             await this.#exec(sessionId, {
                 type: 'finish-compaction',
                 compactionId,
-                usage,
                 result: { status: 'failed', failure: toFailure(error) },
             });
             return false;
         }
+    }
+
+    /**
+     * Send one summary request and record it with its usage.
+     * @param sessionId The session.
+     * @param session The model session.
+     * @param request The request.
+     * @param compactionId The running compaction.
+     * @param signal Run interruption.
+     * @returns The reply's text, whether it called a tool, and the failure, if any.
+     */
+    async #summaryAttempt(
+        sessionId: string,
+        session: ChatSession,
+        request: ChatRequest,
+        compactionId: string,
+        signal: AbortSignal
+    ): Promise<{ text: string; called: boolean; failure?: Failure }> {
+        let text = '';
+        let called = false;
+        let usage: Usage = {};
+        const attempt = new AbortController();
+        const onAbort = () => attempt.abort(signal.reason);
+        signal.addEventListener('abort', onAbort, { once: true });
+        try {
+            for await (const event of this.#withIdleTimeout(
+                session.stream(request, attempt.signal),
+                attempt
+            ))
+                if (event.type === 'text-delta') text += event.text;
+                else if (event.type === 'tool-call') called = true;
+                else if (event.type === 'completed') usage = event.usage;
+        } catch (error) {
+            const failure = toFailure(error);
+            await this.#exec(sessionId, {
+                type: 'record-compaction-attempt',
+                compactionId,
+                usage,
+                failure,
+            });
+            if (signal.aborted) throw error;
+            return { text: text.trim(), called, failure };
+        } finally {
+            signal.removeEventListener('abort', onAbort);
+        }
+        await this.#exec(sessionId, { type: 'record-compaction-attempt', compactionId, usage });
+        return { text: text.trim(), called };
+    }
+
+    /**
+     * How media in history reach requests of a model session.
+     * @param session The model session.
+     * @param card The session's card.
+     * @returns The media policy.
+     */
+    #media(session: ChatSession, card: FrozenChatCard): MediaPolicy {
+        return {
+            accepts: mediaType => mediaType in card.input,
+            inToolResults: session.toolResultMedia ?? [],
+            read: this.#readMedia,
+        };
     }
 
     /**
@@ -383,7 +522,7 @@ export class Agent {
      * @param runId The run.
      * @param stepId The step.
      * @param signal Run interruption.
-     * @param compacted Whether this step already compacted; it does not compact twice.
+     * @param canCompact Whether the step may still compact.
      * @yields Transient stream events.
      * @returns How the step ended.
      */
@@ -392,26 +531,20 @@ export class Agent {
         runId: string,
         stepId: string,
         signal: AbortSignal,
-        compacted: boolean
+        canCompact: boolean
     ): AsyncGenerator<AgentEvent, StepOutcome> {
         const sessionId = view.sessionId;
         const card = view.epoch.card;
-        const levels = selectableLevels(card.thinking);
-        const thinking =
-            view.thinking && levels.includes(view.thinking)
-                ? view.thinking
-                : defaultLevel(card.thinking);
+        const thinking = stepThinking(view);
+        const compactable =
+            canCompact && this.#compaction !== undefined && compactionCut(view, 0) !== undefined;
         let session: ChatSession;
         let request: ChatRequest;
         try {
             session = await this.models.open(card, view.credentialId);
             request = {
                 system: view.epoch.system,
-                messages: await epochMessages(view, {
-                    accepts: mediaType => mediaType in card.input,
-                    inToolResults: session.toolResultMedia ?? [],
-                    read: this.#readMedia,
-                }),
+                messages: await epochMessages(view, this.#media(session, card)),
                 ...(thinking ? { thinking } : {}),
                 tools: view.epoch.tools,
                 nativeTools: view.epoch.nativeTools,
@@ -426,8 +559,7 @@ export class Agent {
             session.inputBudget(),
             Math.floor(card.contextWindow * compactionShare)
         );
-        if (estimate > threshold && !compacted && compactionCut(view) !== undefined)
-            return { kind: 'compact' };
+        if (estimate > threshold && compactable) return { kind: 'compact' };
         if (estimate > session.inputBudget())
             return {
                 kind: 'failed',
@@ -544,12 +676,7 @@ export class Agent {
                     result: { status: 'failed', failure },
                 });
                 if (published) yield { type: 'discarded', sessionId, attemptId, failure };
-                if (
-                    failure.category === 'context-limit' &&
-                    !compacted &&
-                    this.#compaction &&
-                    compactionCut(view) !== undefined
-                )
+                if (failure.category === 'context-limit' && compactable)
                     return { kind: 'compact', failure };
                 if (failure.retry.kind !== 'backoff' || number >= this.#retry.maxAttempts)
                     return { kind: 'failed', failure };
@@ -697,21 +824,29 @@ function outputBlocks(
 }
 
 /**
- * Where a compaction would cut: the latest input (a user message or notice) after the current
- * epoch's start, so that input stays verbatim while everything before it is summarized.
+ * The thinking level of the session's requests: the chosen one when the card offers it.
  * @param view The session view.
- * @returns The first sequence number to keep, or undefined when nothing could be compacted.
+ * @returns The level, or undefined when the card's thinking is fixed.
  */
-function compactionCut(view: SessionView): number | undefined {
-    const from = view.epoch.context?.from ?? 0;
-    const input = view.history.findLast(
-        entry =>
-            entry.seq > from &&
-            (entry.item.type === 'notice' ||
-                (entry.item.type === 'message' && entry.item.role === 'user'))
-    );
-    if (!input) return undefined;
-    return view.history.some(entry => entry.seq >= from && entry.seq < input.seq)
-        ? input.seq
-        : undefined;
+function stepThinking(view: SessionView) {
+    const thinking = view.epoch.card.thinking;
+    return view.thinking && selectableLevels(thinking).includes(view.thinking)
+        ? view.thinking
+        : defaultLevel(thinking);
+}
+
+/**
+ * The context of the epoch a compaction starts.
+ * @param summary The accepted summary.
+ * @param cut Where the compaction cut.
+ * @param transcript Path of the covered history's transcript.
+ * @returns The epoch context.
+ */
+function epochContext(summary: string, cut: CompactionCut, transcript: string): EpochContext {
+    return {
+        summary,
+        from: cut.from,
+        transcript: pathToFileURL(transcript).href,
+        ...(cut.input === undefined ? {} : { input: cut.input }),
+    };
 }

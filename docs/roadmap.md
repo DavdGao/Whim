@@ -62,15 +62,17 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 
 - [x] Automatic compaction (no manual trigger): records, epochs, transcript offload with media references, summary with the session's model, UI line with the summary
 - [x] Compact and retry once when the provider reports `context-limit` despite the estimate
-- [ ] Compaction rework (agent.md §8 to be updated first):
-    - Ask for the summary in the step's own request (same prefix, tools, thinking; cut before the kept tail) plus a trailing hint with the current time, so the provider cache is reused; no tool calls allowed
-    - Tagged summary (`goal`, `current-state`, `progress`, `findings`, `next-steps`) with rules: describe the current state instead of copying the previous summary, corrections replace what they correct, identifiers verbatim or marked not recorded, absolute times only, list everything pending
-    - Parse the tags (also HTML-escaped ones); ask once more when a tag is missing or output was cut at its limit, recording each attempt; keep the second reply as written
-    - Keep the last N messages instead of cutting at the latest input, never separating a tool call from its result, so a long autonomous turn can compact; keep the latest user input verbatim
-    - On a provider `context-limit` refusal, summarize the older half first; when the previous summary plus one message is still too long, cut the longest texts in the middle, halving until accepted; never drop the beginning
+- [x] Compaction rework, part A (agent.md §8):
+    - Summary asked in the step's own request (same system prompt, tools, thinking, and history, cut before the kept tail) with a trailing reminder carrying the current time; tool calls not allowed
+    - Tagged summary (`goal`, `current-state`, `progress`, `findings`, `next-steps`) with rules against copying the previous summary, for corrections, verbatim identifiers, absolute times, and pending items; escaped tags parsed; asked once more when a section is missing, a tool was called, or the reply hit the output limit; the second reply kept as written; each request recorded as `compaction.attempted` with its usage
+    - The last six entries (fewer when large) stay verbatim instead of everything after the latest input, never separating a call from its results, so a long autonomous run compacts; the latest user message stays verbatim; up to three compactions per step
+    - A refused summary request summarizes the older half; a single covered entry has its longest texts shortened in the middle, halving until accepted
+    - `output-limit` failure category, so a reply cut at the output limit no longer triggers compaction
+- [ ] Compaction rework, part B:
     - One append-only conversation file per session with `[seq N · time · role]` headers (thinking, tool calls and results, media references), filled from the journal so a crash gap refills; replaces the chained per-compaction files
     - Rendered summary followed by sections from local facts, each omitted when empty and naming only tools the session has: conversation file with Read/Grep guidance, running background jobs, recent user messages, recently read or written files; a task list once plans exist
     - Optional structured `parts` in the epoch context (old string summaries still decode); the compaction line shows the parts
+- [ ] Verify the summary request's prefix cache hit against live DashScope
 - [ ] Context-source tracking and notices
 - [ ] Skills
 - [ ] MEMORY.md plugin

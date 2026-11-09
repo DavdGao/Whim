@@ -62,11 +62,12 @@ export function reviewRequest(
     input: unknown,
     access: readonly Access[]
 ): ReviewRequest {
-    const from = view.epoch.context?.from ?? 0;
+    const context = view.epoch.context;
     const requests: string[] = [];
     for (const entry of view.history) {
         const item = entry.item;
-        if (entry.seq < from || item.type !== 'message' || item.role !== 'user') continue;
+        const inContext = entry.seq >= (context?.from ?? 0) || entry.seq === context?.input;
+        if (!inContext || item.type !== 'message' || item.role !== 'user') continue;
         const text = item.blocks
             .flatMap(block => (block.type === 'text' ? [block.text] : []))
             .join('\n')
