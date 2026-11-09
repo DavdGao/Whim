@@ -474,6 +474,7 @@ type Failure = {
         | 'rate-limited'
         | 'overloaded'
         | 'context-limit'
+        | 'output-limit'
         | 'content-filtered'
         | 'invalid-request'
         | 'model-unavailable'

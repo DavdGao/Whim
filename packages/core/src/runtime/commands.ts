@@ -86,9 +86,15 @@ export const commandSchema = z.discriminatedUnion('type', [
     }),
     z.strictObject({
         ...base,
-        type: z.literal('finish-compaction'),
+        type: z.literal('record-compaction-attempt'),
         compactionId: idSchema,
         usage: usageSchema,
+        failure: failureSchema.optional(),
+    }),
+    z.strictObject({
+        ...base,
+        type: z.literal('finish-compaction'),
+        compactionId: idSchema,
         result: z.discriminatedUnion('status', [
             z.strictObject({
                 status: z.literal('succeeded'),
@@ -290,6 +296,21 @@ export function decide(view: SessionView | null, command: Command): Body[] {
                     runId: command.runId,
                 },
             ];
+        case 'record-compaction-attempt':
+            if (
+                !view.compactions.some(
+                    item => item.compactionId === command.compactionId && item.state === 'running'
+                )
+            )
+                throw new StoreError('conflict', 'The compaction is not running.');
+            return [
+                {
+                    type: 'compaction.attempted',
+                    compactionId: command.compactionId,
+                    usage: command.usage,
+                    ...(command.failure ? { failure: command.failure } : {}),
+                },
+            ];
         case 'finish-compaction': {
             const running = view.compactions.find(
                 item => item.compactionId === command.compactionId && item.state === 'running'
@@ -298,7 +319,6 @@ export function decide(view: SessionView | null, command: Command): Body[] {
             const finished = {
                 type: 'compaction.finished' as const,
                 compactionId: command.compactionId,
-                usage: command.usage,
             };
             // The new prefix and the outcome commit together, so a crash leaves either both or neither.
             return command.result.status === 'succeeded'

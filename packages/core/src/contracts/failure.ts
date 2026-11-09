@@ -7,6 +7,8 @@ export const failureCategories = [
     'rate-limited',
     'overloaded',
     'context-limit',
+    /** The reply reached the output token limit and was cut off. */
+    'output-limit',
     'content-filtered',
     'invalid-request',
     'model-unavailable',

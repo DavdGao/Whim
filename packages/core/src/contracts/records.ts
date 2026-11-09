@@ -221,6 +221,8 @@ export const epochContextSchema = z.strictObject({
     /** History entries with a smaller sequence number are covered by the summary. */
     from: z.number().int().positive(),
     transcript: z.string().startsWith('file:'),
+    /** The latest user message, kept verbatim although it is older than `from`. */
+    input: z.number().int().positive().optional(),
 });
 export type EpochContext = z.infer<typeof epochContextSchema>;
 
@@ -274,12 +276,19 @@ export const bodySchema = z.discriminatedUnion('type', [
         compactionId: idSchema,
         runId: idSchema,
     }),
+    /** One summary request; its usage counts in the session's usage, not its context. */
+    z.strictObject({
+        type: z.literal('compaction.attempted'),
+        compactionId: idSchema,
+        usage: usageSchema,
+        failure: failureSchema.optional(),
+    }),
     z.strictObject({
         type: z.literal('compaction.finished'),
         compactionId: idSchema,
         outcome: z.enum(['succeeded', 'failed']),
-        /** Usage of the summary call; counted in the session's usage, not its context. */
-        usage: usageSchema,
+        /** Usage of the summary call in records written before `compaction.attempted` existed. */
+        usage: usageSchema.optional(),
         failure: failureSchema.optional(),
     }),
     z.strictObject({
