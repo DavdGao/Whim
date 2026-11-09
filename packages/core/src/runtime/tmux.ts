@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { stat } from 'node:fs/promises';
+import { lstat, mkdir, stat } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
 import { basename, isAbsolute, join } from 'node:path';
 
@@ -131,8 +131,51 @@ export function childEnv(): NodeJS.ProcessEnv {
     return { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
 }
 
-/** Socket paths longer than this do not fit macOS' `sun_path`. */
-const maxSocketPath = 100;
+/** The longest socket path macOS' `sun_path` holds (104 bytes with the terminator). */
+const maxSocketPath = 103;
+/** `%C` expands to a 40-character hash; a master first binds `<path>.<16 random chars>`. */
+const controlPathGrowth = 40 - 2 + 17;
+
+/**
+ * The OpenSSH options every command to a host uses: keep-alives and, when the socket path fits,
+ * one shared master connection.
+ * @param controlDir Directory for control sockets; see `prepareControlDir`.
+ * @returns The options.
+ */
+export function sshOptions(controlDir: string): string[] {
+    const socket = join(controlDir, '%C');
+    const options = ['-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3'];
+    // OpenSSH splits an option's value on spaces unless it is quoted.
+    if (socket.length + controlPathGrowth > maxSocketPath || socket.includes('"')) return options;
+    return [
+        ...options,
+        '-o',
+        'ControlMaster=auto',
+        '-o',
+        `ControlPath="${socket}"`,
+        '-o',
+        'ControlPersist=60',
+    ];
+}
+
+/**
+ * Create the control socket directory, or check an existing one: OpenSSH needs it private, and a
+ * directory under a shared parent such as `/tmp` could have been created by another user.
+ * @param path The directory.
+ */
+export async function prepareControlDir(path: string): Promise<void> {
+    try {
+        await mkdir(path, { mode: 0o700 });
+    } catch (error) {
+        if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
+    }
+    const info = await lstat(path);
+    if (!info.isDirectory() || info.uid !== userInfo().uid || (info.mode & 0o077) !== 0)
+        throw new TerminalError(
+            'failed',
+            `${path} must be a directory only you can access; remove it and try again.`
+        );
+}
 
 /** Commands for one host's default tmux server. */
 export class Tmux {
@@ -148,24 +191,7 @@ export class Tmux {
         this.host = host;
         if (host.kind === 'ssh' && !sshDestinationPattern.test(host.destination))
             throw new TerminalError('invalid', `Invalid SSH destination ${host.destination}.`);
-        // `%C` is a 40-character hash of the connection; skip sharing when the path is too long.
-        const socket = join(controlDir, '%C');
-        this.#sshOptions = [
-            '-o',
-            'ServerAliveInterval=15',
-            '-o',
-            'ServerAliveCountMax=3',
-            ...(socket.length - 2 + 40 <= maxSocketPath
-                ? [
-                      '-o',
-                      'ControlMaster=auto',
-                      '-o',
-                      `ControlPath=${socket}`,
-                      '-o',
-                      'ControlPersist=60',
-                  ]
-                : []),
-        ];
+        this.#sshOptions = sshOptions(controlDir);
     }
 
     /**

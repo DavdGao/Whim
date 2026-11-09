@@ -276,7 +276,7 @@ class Backend {
         toMain: (message: Activity | Attention | PluginClients) => void
     ) {
         this.#toMain = toMain;
-        this.coding = new Coding(store, host, userData, event =>
+        this.coding = new Coding(store, host, event =>
             this.#emit(
                 event.type === 'output'
                     ? { type: 'terminal.output', terminalId: event.terminalId, data: event.data }

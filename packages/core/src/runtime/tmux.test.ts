@@ -1,11 +1,18 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import { Terminals } from './terminals.js';
-import { TerminalError, Tmux, parseSessions, shellQuote } from './tmux.js';
+import {
+    TerminalError,
+    Tmux,
+    parseSessions,
+    prepareControlDir,
+    shellQuote,
+    sshOptions,
+} from './tmux.js';
 
 import type { TerminalEvent } from './terminals.js';
 
@@ -162,5 +169,39 @@ describe('Tmux on this machine', () => {
         for (const destination of ['-oProxyCommand=x', 'a b', 'host;rm', ''])
             assert.throws(() => new Tmux({ kind: 'ssh', destination }, dir), TerminalError);
         assert.doesNotThrow(() => new Tmux({ kind: 'ssh', destination: 'me@dev-box.lan' }, dir));
+    });
+});
+
+describe('SSH connection sharing', () => {
+    it('quotes the control path and stops sharing when the socket would not fit', () => {
+        assert.deepEqual(sshOptions('/tmp/whim-501'), [
+            '-o',
+            'ServerAliveInterval=15',
+            '-o',
+            'ServerAliveCountMax=3',
+            '-o',
+            'ControlMaster=auto',
+            '-o',
+            'ControlPath="/tmp/whim-501/%C"',
+            '-o',
+            'ControlPersist=60',
+        ]);
+        // 103 bytes at most, counting the 40-character hash and the 17-character bind suffix.
+        assert.equal(sshOptions(`/${'a'.repeat(44)}`).length, 10);
+        assert.equal(sshOptions(`/${'a'.repeat(45)}`).length, 4);
+        assert.equal(sshOptions('/Users/someone/Library/Application Support/Whim/ssh').length, 4);
+    });
+
+    it('creates a private control directory and refuses one others can enter', async () => {
+        const control = join(dir, 'control');
+        await prepareControlDir(control);
+        await prepareControlDir(control);
+        const open = join(dir, 'open');
+        await mkdir(open);
+        await chmod(open, 0o755);
+        await assert.rejects(
+            prepareControlDir(open),
+            (error: unknown) => error instanceof TerminalError && error.code === 'failed'
+        );
     });
 });
