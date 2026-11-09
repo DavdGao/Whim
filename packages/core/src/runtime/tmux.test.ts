@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +11,7 @@ import {
     Tmux,
     parseSessions,
     prepareControlDir,
+    childEnv,
     shellQuote,
     sshOptions,
 } from './tmux.js';
@@ -117,6 +119,7 @@ describe('Tmux on this machine', () => {
                 folder: dir,
                 agentId: 'p#echo',
                 command: ['printf', '%s\\n', 'agent started'],
+                sessionOptions: { 'status-style': 'bg=#232327,fg=#a1a1aa' },
             },
             signal
         );
@@ -124,6 +127,16 @@ describe('Tmux on this machine', () => {
             { name: session.name, agentId: session.agentId, folder: session.folder },
             { name: 'whim-test', agentId: 'p#echo', folder: dir }
         );
+
+        const style = await new Promise<string>((resolve, reject) =>
+            execFile(
+                'tmux',
+                ['show-options', '-v', '-t', session.id, 'status-style'],
+                { env: childEnv() },
+                (error, stdout) => (error ? reject(error) : resolve(stdout.trim()))
+            )
+        );
+        assert.equal(style, 'bg=#232327,fg=#a1a1aa');
 
         const events: TerminalEvent[] = [];
         const terminals = new Terminals(event => events.push(event));

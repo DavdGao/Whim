@@ -10,6 +10,8 @@ import { useEffect, useRef, useState } from 'react';
 import { call, ClientError, onStatus, subscribe } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 
+import { terminalTheme } from './terminal-theme';
+
 // One attached terminal (design.md §11.4). Closing the view detaches; the tmux session keeps running.
 
 /** Rendered characters are acknowledged in batches of at least this size, or after a pause. */
@@ -82,7 +84,7 @@ export function TerminalView({
             fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
             fontSize: 13,
             scrollback: 5000,
-            theme: { background: '#141416', foreground: '#e6e6e6' },
+            theme: terminalTheme,
         });
         const fit = new FitAddon();
         terminal.loadAddon(fit);
@@ -172,7 +174,10 @@ export function TerminalView({
     return (
         // Edge to edge; the page panel's rounded corners clip it. The background matches the
         // terminal's so the columns the fit addon leaves over do not show as a border.
-        <div className="relative flex min-h-0 flex-1 flex-col bg-[#141416]">
+        <div
+            className="relative flex min-h-0 flex-1 flex-col"
+            style={{ backgroundColor: terminalTheme.background }}
+        >
             <div
                 ref={container}
                 role="region"
