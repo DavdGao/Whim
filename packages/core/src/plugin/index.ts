@@ -13,7 +13,7 @@ import type {
  * The plugin API version this Core implements, `MAJOR.MINOR` (design.md §5.7). A plugin's
  * `whim.api` must have the same major and a minor no greater than this one.
  */
-export const pluginApiVersion = '1.0';
+export const pluginApiVersion = '1.1';
 
 /** A JSON Schema 2020-12 object. Core validates it before use. */
 export type JsonSchema = Readonly<Record<string, unknown>>;
@@ -269,6 +269,19 @@ export interface ToolDefinition<Input = Record<string, unknown>> {
  * activation succeeds; `signal` aborts when the plugin stops, and the returned promise must
  * settle soon after. A promise that rejects before then is reported on the plugin.
  */
+/**
+ * An external coding CLI the Coding page can start in a tmux session (design.md §11.4).
+ * Experimental: later versions add log discovery, hooks, and status.
+ */
+export interface CodingAgentDefinition {
+    /** `<pluginId>#<name>`; the name is declared in `whim.contributes.codingAgents`. */
+    readonly id: string;
+    /** A key in the plugin's locale catalogs. */
+    readonly name: string;
+    /** The argv typed into the new session's shell, such as `['claude']`. */
+    readonly command: readonly string[];
+}
+
 export interface ServiceDefinition {
     /** Declared in `whim.contributes.services`. */
     readonly id: string;
@@ -312,6 +325,7 @@ export interface PluginContext {
         register<Input>(tool: ToolDefinition<Input>): Disposer;
     };
     readonly services: { register(service: ServiceDefinition): Disposer };
+    readonly coding: { registerAgent(agent: CodingAgentDefinition): Disposer };
     /** Calls and subscriptions for the plugin's own client entry, nobody else's. */
     readonly rpc: {
         // Plugins type their own input and output; Core validates both against the schemas.

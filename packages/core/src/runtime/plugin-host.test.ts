@@ -171,6 +171,65 @@ describe('PluginHost services, methods, and topics', () => {
         await store.close();
     });
 
+    it('registers declared coding agents and removes them when the plugin stops', async () => {
+        const { host, store } = await start(
+            'coding',
+            `export default {
+                activate(context) {
+                    context.coding.registerAgent({
+                        id: context.pluginId + '#claude',
+                        name: 'agent.name',
+                        command: ['claude', '--verbose'],
+                    });
+                },
+            };`,
+            { codingAgents: ['claude'] }
+        );
+        assert.deepEqual(
+            [...host.codingAgents.values()],
+            [
+                {
+                    pluginId: 'rpc-plugin',
+                    agent: {
+                        id: 'rpc-plugin#claude',
+                        name: 'agent.name',
+                        command: ['claude', '--verbose'],
+                    },
+                },
+            ]
+        );
+        await host.stop();
+        assert.deepEqual([...host.codingAgents.values()], []);
+        await store.close();
+    });
+
+    it('fails a plugin whose coding agent is undeclared or has no command', async () => {
+        for (const [name, agent, error] of [
+            [
+                'coding-undeclared',
+                `{ id: context.pluginId + '#codex', name: 'n', command: ['codex'] }`,
+                'codex is not declared in whim.contributes.codingAgents.',
+            ],
+            [
+                'coding-empty',
+                `{ id: context.pluginId + '#claude', name: 'n', command: [] }`,
+                'Coding agent rpc-plugin#claude needs a command.',
+            ],
+        ] as const) {
+            const { host, store } = await start(
+                name,
+                `export default { activate(context) { context.coding.registerAgent(${agent}); } };`,
+                { codingAgents: ['claude'] }
+            );
+            assert.deepEqual(
+                host.statuses().map(status => [status.availability, status.error]),
+                [['failed', error]]
+            );
+            assert.deepEqual([...host.codingAgents.values()], []);
+            await store.close();
+        }
+    });
+
     it('loads valid themes and skips invalid ones', async () => {
         const root = join(dir, 'themes');
         const pkg = join(root, 'theme-plugin');

@@ -1,0 +1,5 @@
+{
+    "plugin.name": "Codex",
+    "plugin.description": "OpenAI's coding agent CLI, run in a terminal on this Mac or an SSH host.",
+    "agent.name": "Codex"
+}

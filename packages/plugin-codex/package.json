@@ -1,0 +1,38 @@
+{
+    "name": "@whimkit/plugin-codex",
+    "version": "0.1.0",
+    "type": "module",
+    "whim": {
+        "api": "1.1",
+        "host": "./dist/host.js",
+        "contributes": {
+            "codingAgents": [
+                "codex"
+            ]
+        },
+        "category": "tools",
+        "locales": "./locales"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/host.d.ts",
+            "import": "./dist/host.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "dist",
+        "locales"
+    ],
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "peerDependencies": {
+        "@whimkit/core": "0.1.0"
+    },
+    "devDependencies": {
+        "@whimkit/core": "workspace:*",
+        "@types/node": "^24.10.0"
+    }
+}

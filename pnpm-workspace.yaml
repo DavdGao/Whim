@@ -6,6 +6,8 @@ allowBuilds:
     # Windows installer tooling pulled in by electron-builder; never needed on macOS.
     electron-winstaller: false
     esbuild: true
+    # The PTY of the Coding page's terminals; prebuilt on macOS, compiled elsewhere.
+    node-pty: true
 # Install both macOS architectures' native packages (ripgrep), so either app can be built on any Mac.
 supportedArchitectures:
     os: [current, darwin]

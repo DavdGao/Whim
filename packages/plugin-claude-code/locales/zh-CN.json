@@ -1,0 +1,5 @@
+{
+    "plugin.name": "Claude Code",
+    "plugin.description": "Anthropic 的编程 agent 命令行工具，在本机或 SSH 主机的终端里运行。",
+    "agent.name": "Claude Code"
+}
