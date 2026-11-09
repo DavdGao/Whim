@@ -40,7 +40,15 @@ export type { PermissionEnv } from './permissions.js';
 export { storeMedia } from './media.js';
 export { ChatReviewer, DecisionReviewer, decisionConfidence, reviewRequest } from './review.js';
 export type { Review, ReviewRequest, Reviewer } from './review.js';
-export { TerminalError, Tmux, parseSessions, shellQuote, sshDestinationPattern } from './tmux.js';
+export {
+    TerminalError,
+    Tmux,
+    parseSessions,
+    prepareControlDir,
+    shellQuote,
+    sshDestinationPattern,
+    sshOptions,
+} from './tmux.js';
 export type { Invocation, TerminalHost, TmuxInventory, TmuxSession } from './tmux.js';
 export { Terminals, pauseAboveChars, resumeBelowChars } from './terminals.js';
 export type { TerminalEvent } from './terminals.js';

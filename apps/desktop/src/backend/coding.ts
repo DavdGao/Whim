@@ -1,8 +1,8 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { userInfo } from 'node:os';
 import { join } from 'node:path';
 
-import { TerminalError, Terminals, Tmux } from '@whimkit/core';
+import { prepareControlDir, TerminalError, Terminals, Tmux } from '@whimkit/core';
 import { z } from 'zod';
 
 import { codingHostSchema, methodSchemas } from '../shared/ipc.js';
@@ -39,18 +39,14 @@ export class Coding {
      * Create the service; nothing runs until a method is called.
      * @param store Settings storage.
      * @param plugins Provides the coding agents.
-     * @param userData The application data folder; SSH control sockets live under it.
      * @param emit Forwards terminal events to the window.
      */
-    constructor(
-        store: Store,
-        plugins: PluginHost,
-        userData: string,
-        emit: (event: TerminalEvent) => void
-    ) {
+    constructor(store: Store, plugins: PluginHost, emit: (event: TerminalEvent) => void) {
         this.#store = store;
         this.#plugins = plugins;
-        this.#controlDir = join(userData, 'ssh');
+        // A short path: socket paths are limited to 103 bytes, and the data folder under
+        // `~/Library/Application Support` is too long and contains a space.
+        this.#controlDir = join('/tmp', `whim-${userInfo().uid}`);
         this.terminals = new Terminals(emit);
     }
 
@@ -74,8 +70,7 @@ export class Coding {
         if (hostId === 'local') return new Tmux({ kind: 'local' }, this.#controlDir);
         const host = (await this.hosts()).find(item => item.id === hostId);
         if (!host) throw new TerminalError('not-found', 'The host was removed.');
-        // OpenSSH requires its control socket directory to be private.
-        await mkdir(this.#controlDir, { recursive: true, mode: 0o700 });
+        await prepareControlDir(this.#controlDir);
         return new Tmux({ kind: 'ssh', destination: host.destination }, this.#controlDir);
     }
 
