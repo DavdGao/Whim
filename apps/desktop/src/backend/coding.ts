@@ -13,6 +13,8 @@ import type { PluginHost, Store, TerminalEvent } from '@whimkit/core';
 // The Coding page's hosts, tmux sessions, and terminals (design.md §11.4).
 
 const hostsSetting = 'coding.hosts';
+/** tmux's status line in the dark palette of the Coding terminal, instead of tmux's green. */
+const sessionOptions = { 'status-style': 'bg=#232327,fg=#a1a1aa' };
 /** Bounds how long a listing or start may take, SSH connection included. */
 const commandTimeoutMs = 20_000;
 
@@ -123,7 +125,13 @@ export class Coding {
                 // The plugin's name part, so `tmux ls` elsewhere shows what runs in it.
                 const name = `${agent.agent.id.split('#').pop() ?? 'agent'}-${randomBytes(3).toString('hex')}`;
                 const session = await tmux.create(
-                    { name, folder, agentId: agent.agent.id, command: agent.agent.command },
+                    {
+                        name,
+                        folder,
+                        agentId: agent.agent.id,
+                        command: agent.agent.command,
+                        sessionOptions,
+                    },
                     signal
                 );
                 return { key: session.key };

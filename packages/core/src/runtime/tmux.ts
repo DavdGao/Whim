@@ -340,11 +340,19 @@ export class Tmux {
      * @param options.folder Absolute folder on the host.
      * @param options.agentId Recorded as the `@whim-agent` session option.
      * @param options.command The argv to type.
+     * @param options.sessionOptions Session options set before the command starts.
      * @param signal Cancels the start.
      * @returns The new session.
      */
     async create(
-        options: { name: string; folder: string; agentId: string; command: readonly string[] },
+        options: {
+            name: string;
+            folder: string;
+            agentId: string;
+            command: readonly string[];
+            /** Session options set before the command starts, such as `status-style`. */
+            sessionOptions?: Readonly<Record<string, string>>;
+        },
         signal: AbortSignal
     ): Promise<TmuxSession> {
         // Later commands of one sequence act on the session it created; tmux resolves `-t`
@@ -366,6 +374,12 @@ export class Tmux {
                 '@whim-agent',
                 options.agentId,
                 ';',
+                ...Object.entries(options.sessionOptions ?? {}).flatMap(([name, value]) => [
+                    'set-option',
+                    name,
+                    value,
+                    ';',
+                ]),
                 'send-keys',
                 '-l',
                 options.command.map(shellQuote).join(' '),
