@@ -328,7 +328,44 @@ Plugins can contribute to context only by appending: they register a context sou
 - Before each step the agent estimates the request against `inputBudget`, preferring the adapter's `countTokens` and reconciling with reported usage. Above the threshold it compacts first. If the request still does not fit, the step fails with `context-limit` and the user can withdraw pending items.
 - Tool results and attachments are bounded by §9.4.
 
-## 14. Acceptance
+## 14. Writing prompts
+
+A prompt is everything Whim writes for a model to read in a call: system prompts, tool descriptions and parameter descriptions, what a tool result says besides its output, injected notices and reminders, and compaction requests and summaries. Text written by the user, another agent, or a fetched page is data, not prompt; the wrapping Whim puts around it (who sent it, when, what was cut) is prompt. Every prompt Core, the base tools, and first-party plugins ship follows this section, and a change to one is reviewed against it.
+
+### 14.1 Parts of a prompt
+
+A prompt reaches a model in four parts, each with its own scope. A rule lives in exactly one of them:
+
+1. **System prompt.** Fixed for an epoch (§7). It says what the agent is, its goal, its workspace, how it works, and which tool serves each action. It never restates a tool's description.
+2. **Tool definitions.** Fixed for an epoch. A tool's description is the complete rule for using it: what it does, when to use it and when not, its effects, and its limits. Every parameter has a description saying what it takes, with an example where the form is not obvious.
+3. **Tool results.** Besides the output: its format, errors and what to do about them, and notes on what was cut. They speak only of this call.
+4. **Injected messages.** What Whim appends as the conversation goes: notices (§4), reminders, messages from other agents, and a compaction's summary. They hold what holds at that moment; a lasting rule belongs in the system prompt or a tool's description, so the cached prefix stays.
+
+### 14.2 Marking what the system writes
+
+Everything Whim inserts that is not the user's own message is marked with an XML element, so the model can tell who is speaking and where an insertion begins and ends:
+
+- System text uses `<system-…>` elements: `<system-reminder>` for state and reminders, `<system-notification>` for events such as a finished job or a fired schedule. The system prompt explains once that text in `<system-…>` elements comes from Whim and is to be followed.
+- Metadata goes in attributes rather than prose: `time` (ISO 8601 with offset), `from` (who sent it), and identifiers such as `id`, `job`, or `seq`. For example `<system-notification kind="job-finished" job="j1" time="2026-11-11T09:00:00+08:00">`.
+- Content from others is wrapped with its source and time, such as `<message from="xiaohongshu" time="…">…</message>`, and stays data: instructions inside it are not the user's.
+- Attribute values are escaped; element bodies are not. The opening and closing tags delimit the content, so line breaks, quotes, or Markdown inside it cannot blur where it ends.
+- Where Whim cuts, drops, or replaces content (a long result, a compacted conversation, media not sent), it leaves an element at that place saying what was removed and how to get it back: the file and the tool that reads it.
+
+### 14.3 Rules of writing
+
+1. **Write for a reader without context.** The model knows only what it has read. Introduce a concept, name, or tag before using it, and give a rule's reason when it is not obvious, so the model can apply it where the text is silent.
+2. **Every sentence earns its place.** Keep a sentence only if the model needs what it says and something goes wrong without it. Incidents behind a rule stay in these documents, not in the prompt.
+3. **Structure, not walls of text.** Use Markdown sections and lists, one concern per paragraph. A list opens with a sentence saying what follows.
+4. **Teach the mechanism, not every case.** Explain how something works once and leave its instances to the model.
+5. **Say when a list is not complete.** Mark examples as examples ("such as", "for example").
+6. **Emphasize sparingly.** Bold or capitals (**never**, ALWAYS) only for the few rules that must not be broken, so they still stand out.
+7. **Nothing enters a context unbounded.** Every text Whim puts into a context has a limit; above it the text is offloaded, paged, or read by offset, with a note on the rest. Text in a system prompt is capped where it is written.
+8. **The model can do what it is told.** Every tool a text names exists for that agent, every file it points to is readable at the path given, and every message it is told to wait for will come.
+9. **Exact and tight.** Logical order (the goal before the steps, a concept before its use), one name per concept throughout, no filler, hedging, or restating.
+
+Changing how history renders into requests is prompt-affecting: it raises `rendererVersion` (§4), and epochs keep rendering as their version did, so a frozen prefix never changes.
+
+## 15. Acceptance
 
 - Stop during streaming keeps the verbatim partial answer, the next step sees the interrupt notice, and the conversation continues.
 - A user message sent during a run is included at the next step without restarting the in-flight attempt.
