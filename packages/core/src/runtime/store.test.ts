@@ -279,12 +279,18 @@ describe('Store', () => {
         const sessionId = await createSession(store);
         await store.close();
         const raw = new DatabaseSync(path);
-        raw.exec('PRAGMA application_id = 0');
+        // Such a database is at schema 1, before the schedules table.
+        raw.exec('DROP TABLE schedules; PRAGMA user_version = 1; PRAGMA application_id = 0');
         raw.close();
         const reopened = await Store.open(path);
-        assert.equal(reopened.movedAside, undefined);
-        assert.equal((await reopened.view(sessionId)).sessionId, sessionId);
-        await reopened.close();
+        try {
+            assert.equal(reopened.movedAside, undefined);
+            assert.equal((await reopened.view(sessionId)).sessionId, sessionId);
+            // Migrated to the current schema.
+            assert.deepEqual(await reopened.schedules(), []);
+        } finally {
+            await reopened.close();
+        }
     });
 
     it('deletes a session completely but refuses while it runs', async () => {

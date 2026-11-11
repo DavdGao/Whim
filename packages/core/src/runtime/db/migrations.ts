@@ -50,4 +50,22 @@ export const migrations: readonly string[] = [
         enabled INTEGER NOT NULL
     );
     `,
+    `
+    CREATE TABLE schedules (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        message TEXT NOT NULL,
+        at TEXT,
+        cron TEXT,
+        timezone TEXT,
+        missed TEXT NOT NULL,
+        paused INTEGER NOT NULL,
+        next_fire TEXT,
+        last_fire TEXT,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX schedules_session ON schedules (session_id);
+    CREATE INDEX schedules_next_fire ON schedules (next_fire);
+    `,
 ];

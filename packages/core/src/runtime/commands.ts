@@ -115,7 +115,7 @@ export const commandSchema = z.discriminatedUnion('type', [
         ...base,
         type: z.literal('start-run'),
         runId: idSchema,
-        trigger: z.enum(['user', 'continue', 'restart', 'job']),
+        trigger: z.enum(['user', 'continue', 'restart', 'job', 'schedule']),
     }),
     z.strictObject({ ...base, type: z.literal('prepare-step'), runId: idSchema, stepId: idSchema }),
     z.strictObject({

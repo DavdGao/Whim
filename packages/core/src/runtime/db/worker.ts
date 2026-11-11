@@ -10,12 +10,12 @@ import { applyRecord, foldSession } from '../../contracts/view.js';
 import { decide, needsRestartNotice, StoreError } from '../commands.js';
 
 import { migrations } from './migrations.js';
-import { requestSchema } from './protocol.js';
+import { requestSchema, scheduleRowSchema } from './protocol.js';
 
 import type { AgentRecord } from '../../contracts/records.js';
 import type { SessionView } from '../../contracts/view.js';
 import type { Command } from '../commands.js';
-import type { Request } from './protocol.js';
+import type { Request, ScheduleRow } from './protocol.js';
 
 const port = parentPort;
 if (!port) throw new Error('The database must run in a worker thread.');
@@ -197,80 +197,148 @@ function sessionView(sessionId: string): SessionView | null {
  * @returns The records the command produced (original ones on replay).
  */
 function execute(command: Command): AgentRecord[] {
-    return transaction(() => {
-        const hash = createHash('sha256').update(canonical(command)).digest('hex');
-        const receipt = db
-            .prepare('SELECT command_hash, record_ids FROM receipts WHERE operation_id = ?')
-            .get(command.operationId);
-        if (receipt) {
-            const previous = z
-                .object({ command_hash: z.string(), record_ids: z.string() })
-                .parse(receipt);
-            if (previous.command_hash !== hash)
-                throw new StoreError('conflict', 'Operation ID was reused with different input.');
-            return z
-                .array(z.string())
-                .parse(JSON.parse(previous.record_ids))
-                .map(recordId =>
-                    decodeRecord(
-                        rowBody.parse(
-                            db.prepare('SELECT body FROM journal WHERE id = ?').get(recordId)
-                        ).body
-                    )
-                );
-        }
-        const before = sessionView(command.sessionId);
-        const bodies = decide(before, command);
-        let seq = before?.head ?? 0;
-        const createdAt = new Date().toISOString();
-        const records = bodies.map(body =>
-            recordSchema.parse({
-                id: randomUUID(),
-                sessionId: command.sessionId,
-                seq: ++seq,
-                version: 1,
-                createdAt,
-                operationId: command.operationId,
-                body,
-            })
-        );
-        let after = before;
-        for (const record of records) after = after ? applyRecord(after, record) : null;
-        if (!after && records.length) after = foldSession(records);
-        const append = db.prepare(
-            'INSERT INTO journal (session_id, seq, id, type, version, body) VALUES (?, ?, ?, ?, ?, ?)'
-        );
-        for (const record of records)
-            append.run(
-                record.sessionId,
-                record.seq,
-                record.id,
-                record.body.type,
-                record.version,
-                JSON.stringify(record)
+    return transaction(() => executeInTransaction(command));
+}
+
+/**
+ * The body of `execute`, for callers that commit more in the same transaction.
+ * @param command The validated command.
+ * @returns The records the command produced (original ones on replay).
+ */
+function executeInTransaction(command: Command): AgentRecord[] {
+    const hash = createHash('sha256').update(canonical(command)).digest('hex');
+    const receipt = db
+        .prepare('SELECT command_hash, record_ids FROM receipts WHERE operation_id = ?')
+        .get(command.operationId);
+    if (receipt) {
+        const previous = z
+            .object({ command_hash: z.string(), record_ids: z.string() })
+            .parse(receipt);
+        if (previous.command_hash !== hash)
+            throw new StoreError('conflict', 'Operation ID was reused with different input.');
+        return z
+            .array(z.string())
+            .parse(JSON.parse(previous.record_ids))
+            .map(recordId =>
+                decodeRecord(
+                    rowBody.parse(db.prepare('SELECT body FROM journal WHERE id = ?').get(recordId))
+                        .body
+                )
             );
+    }
+    const before = sessionView(command.sessionId);
+    const bodies = decide(before, command);
+    let seq = before?.head ?? 0;
+    const createdAt = new Date().toISOString();
+    const records = bodies.map(body =>
+        recordSchema.parse({
+            id: randomUUID(),
+            sessionId: command.sessionId,
+            seq: ++seq,
+            version: 1,
+            createdAt,
+            operationId: command.operationId,
+            body,
+        })
+    );
+    let after = before;
+    for (const record of records) after = after ? applyRecord(after, record) : null;
+    if (!after && records.length) after = foldSession(records);
+    const append = db.prepare(
+        'INSERT INTO journal (session_id, seq, id, type, version, body) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    for (const record of records)
+        append.run(
+            record.sessionId,
+            record.seq,
+            record.id,
+            record.body.type,
+            record.version,
+            JSON.stringify(record)
+        );
+    db.prepare(
+        'INSERT INTO receipts (operation_id, session_id, command_hash, record_ids) VALUES (?, ?, ?, ?)'
+    ).run(command.operationId, command.sessionId, hash, JSON.stringify(records.map(r => r.id)));
+    if (after && records.length) {
         db.prepare(
-            'INSERT INTO receipts (operation_id, session_id, command_hash, record_ids) VALUES (?, ?, ?, ?)'
-        ).run(command.operationId, command.sessionId, hash, JSON.stringify(records.map(r => r.id)));
-        if (after && records.length) {
-            db.prepare(
-                `INSERT INTO sessions (id, title, card_id, created_at, updated_at, head, running, needs_recovery)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT (id) DO UPDATE SET title = excluded.title, card_id = excluded.card_id,
-                 updated_at = excluded.updated_at, head = excluded.head, running = excluded.running,
-                 needs_recovery = excluded.needs_recovery`
-            ).run(
-                after.sessionId,
-                after.title,
-                after.epoch.card.id,
-                after.createdAt,
-                after.updatedAt,
-                after.head,
-                after.run ? 1 : 0,
-                after.run || after.jobs.length > 0 || needsRestartNotice(after) ? 1 : 0
+            `INSERT INTO sessions (id, title, card_id, created_at, updated_at, head, running, needs_recovery)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (id) DO UPDATE SET title = excluded.title, card_id = excluded.card_id,
+             updated_at = excluded.updated_at, head = excluded.head, running = excluded.running,
+             needs_recovery = excluded.needs_recovery`
+        ).run(
+            after.sessionId,
+            after.title,
+            after.epoch.card.id,
+            after.createdAt,
+            after.updatedAt,
+            after.head,
+            after.run ? 1 : 0,
+            after.run || after.jobs.length > 0 || needsRestartNotice(after) ? 1 : 0
+        );
+        views.set(after.sessionId, after);
+    }
+    return records;
+}
+
+const scheduleColumns = z.object({
+    id: z.string(),
+    session_id: z.string(),
+    name: z.string(),
+    message: z.string(),
+    at: z.string().nullable(),
+    cron: z.string().nullable(),
+    timezone: z.string().nullable(),
+    missed: z.enum(['skip', 'once']),
+    paused: z.number(),
+    next_fire: z.string().nullable(),
+    last_fire: z.string().nullable(),
+    created_at: z.string(),
+});
+
+/**
+ * Decode a schedule row.
+ * @param row The stored row.
+ * @returns The schedule.
+ */
+function scheduleOf(row: unknown): ScheduleRow {
+    const value = scheduleColumns.parse(row);
+    return scheduleRowSchema.parse({
+        id: value.id,
+        sessionId: value.session_id,
+        name: value.name,
+        message: value.message,
+        timing:
+            value.at !== null
+                ? { kind: 'at', at: value.at }
+                : { kind: 'cron', cron: value.cron, timezone: value.timezone },
+        missed: value.missed,
+        paused: value.paused === 1,
+        nextFire: value.next_fire,
+        lastFire: value.last_fire,
+        createdAt: value.created_at,
+    });
+}
+
+/**
+ * Commit one fire: the delivery, if any, and the schedule's next fire in one transaction. A
+ * schedule whose next fire is no longer `due` was changed or already fired and is left alone.
+ * @param request The fire request.
+ * @returns The delivery's records, or null when nothing was done.
+ */
+function fire(request: Extract<Request, { op: 'schedule.fire' }>): AgentRecord[] | null {
+    return transaction(() => {
+        const row = db.prepare('SELECT * FROM schedules WHERE id = ?').get(request.scheduleId);
+        if (!row || scheduleOf(row).nextFire !== request.due) return null;
+        const records = request.command ? executeInTransaction(request.command) : [];
+        if (request.next === null && scheduleOf(row).timing.kind === 'at')
+            db.prepare('DELETE FROM schedules WHERE id = ?').run(request.scheduleId);
+        else
+            db.prepare('UPDATE schedules SET next_fire = ?, last_fire = ? WHERE id = ?').run(
+                request.next,
+                request.due,
+                request.scheduleId
             );
-            views.set(after.sessionId, after);
-        }
         return records;
     });
 }
@@ -330,6 +398,7 @@ function handle(request: Request): unknown {
                 for (const sql of [
                     'DELETE FROM journal WHERE session_id = ?',
                     'DELETE FROM receipts WHERE session_id = ?',
+                    'DELETE FROM schedules WHERE session_id = ?',
                     'DELETE FROM sessions WHERE id = ?',
                 ])
                     db.prepare(sql).run(request.sessionId);
@@ -455,6 +524,46 @@ function handle(request: Request): unknown {
             );
             return null;
         }
+        case 'schedule.list':
+            return (
+                request.sessionId === undefined
+                    ? db.prepare('SELECT * FROM schedules ORDER BY created_at').all()
+                    : db
+                          .prepare(
+                              'SELECT * FROM schedules WHERE session_id = ? ORDER BY created_at'
+                          )
+                          .all(request.sessionId)
+            ).map(scheduleOf);
+        case 'schedule.put': {
+            const value = request.schedule;
+            const timing = value.timing;
+            db.prepare(
+                `INSERT INTO schedules (id, session_id, name, message, at, cron, timezone, missed, paused, next_fire, last_fire, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (id) DO UPDATE SET name = excluded.name, message = excluded.message,
+                 at = excluded.at, cron = excluded.cron, timezone = excluded.timezone, missed = excluded.missed,
+                 paused = excluded.paused, next_fire = excluded.next_fire, last_fire = excluded.last_fire`
+            ).run(
+                value.id,
+                value.sessionId,
+                value.name,
+                value.message,
+                timing.kind === 'at' ? timing.at : null,
+                timing.kind === 'cron' ? timing.cron : null,
+                timing.kind === 'cron' ? timing.timezone : null,
+                value.missed,
+                value.paused ? 1 : 0,
+                value.nextFire,
+                value.lastFire,
+                value.createdAt
+            );
+            return null;
+        }
+        case 'schedule.delete':
+            db.prepare('DELETE FROM schedules WHERE id = ?').run(request.scheduleId);
+            return null;
+        case 'schedule.fire':
+            return fire(request);
         case 'close':
             db.close();
             return null;

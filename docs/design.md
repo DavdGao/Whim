@@ -79,12 +79,14 @@ Whim keeps working when its window is closed. The window is a view; work belongs
 
 #### 4.1.1 Schedules and triggers
 
-Background work that starts without the user is a **trigger** delivering input into a session's inbox, so it follows the same run, permission, and recovery rules as typed input.
+Background work that starts without the user is a **trigger** delivering input into a session's inbox, so it follows the same run, permission, and recovery rules as typed input. Schedules are the first kind; plugin event sources come later.
 
-- Core owns trigger records in SQLite: kind (`schedule` with a cron expression and time zone, or a plugin event source), target session, the input to deliver, and a missed-fire policy (`skip` or `once`).
-- Backend's scheduler computes the next fire from the records, never from in-memory timers alone. On start it evaluates fires missed while Whim was not running and applies the policy.
-- A fire commits a delivery with a stable id `(triggerId, fireTime)`, so a restart never fires twice, and starts a run with trigger `schedule` or `event`.
-- Plugins contribute trigger sources from their host entries (§5.5); a source emits events, and the trigger decides what to deliver.
+- **Records.** Core owns schedule rows in SQLite (`schedules`): the session it delivers to, a name, the message, its timing (a single fire `at` a time, or five `cron` fields read in an IANA time zone, the user's by default), the missed-fire policy (`skip` or `once`), whether it is paused, and its next and last fire. A row is deleted with its session and after its single fire. A conversation has at most 20 schedules, and a cron schedule fires at most every 5 minutes, so a schedule cannot spend tokens in a tight loop.
+- **Timer.** Backend's `Scheduler` is the only writer of schedule rows. It keeps one timer for the earliest next fire, read from the rows and never from memory alone, and reads them again at least hourly so a clock change is seen. It starts after recovery and stops before the database closes.
+- **Fire.** A fire commits, in one transaction, the delivery (a `schedule-fired` notice with the schedule id, name, due time, and whether it is late, carrying the message as its text) and the schedule's next fire, which is the first one after now. The commit applies only while the row still has the fire time read, so a restart or a concurrent change never fires twice. The session is then woken with trigger `schedule`. A fire more than a minute after its time was missed (Whim not running, the Mac asleep): `once` delivers it once, marked late, however many were missed; `skip` only moves to the next fire. A fire into a running session joins it at the next step; one that arrives as a run ends starts the next run, as a message does.
+- **Tools.** The main agent manages schedules with `ScheduleCreate`, `ScheduleList`, `ScheduleUpdate`, and `ScheduleDelete`. They change only the calling conversation's schedules; `ScheduleList` with `scope: all` shows every schedule, read-only for other conversations. They touch nothing outside Whim, so they run without a confirmation; every call shows in the chat. Errors in the input (a past time, a time without an offset, a cron expression that is malformed, too frequent, or in an unknown time zone) are returned to the model with the reason.
+- **Model input.** The notice renders as `<system-notification kind="schedule" schedule="…" name="…" due="…" time="…" late="true">message</system-notification>` ([agent.md §14.2](agent.md#142-marking-what-the-system-writes)); the chat shows a line naming the schedule.
+- **Planned.** A Settings page listing every schedule with pause and delete, information-source agents (which do not get the schedule tools), and plugin event sources.
 
 ## 5. Plugins
 

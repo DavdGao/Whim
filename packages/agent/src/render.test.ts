@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { toRequestMessages, transcriptText } from './render.js';
+import { renderNotice, toRequestMessages, transcriptText } from './render.js';
 
 import type { HistoryEntry, MediaBlock } from '@whimkit/core/contracts';
 
@@ -213,6 +213,28 @@ describe('conversation file', () => {
                 `<tool_result seq="3" time="${at}" call_id="c&quot;1" name="Read" status="success">\nline 1\nline 2\n<data id="img-0011aabb" uri="file:///tmp/s/media/0011aabb.png" media_type="image/png" name="a b.png"/>\n</tool_result>`,
                 `<notice seq="4" time="${at}" kind="interrupted">\nThe user interrupted you.\n</notice>`,
             ].join('\n\n')
+        );
+    });
+});
+
+describe('notices', () => {
+    it('renders a fired schedule as a notification with its metadata as attributes', () => {
+        assert.equal(
+            renderNotice({
+                type: 'notice',
+                id: 'n',
+                origin: { type: 'core', service: 'schedules' },
+                observedAt: '2026-11-11T01:00:20.000Z',
+                kind: 'schedule-fired',
+                payload: {
+                    scheduleId: 'a1b2c3d4',
+                    name: 'Say "hi" <now>',
+                    dueAt: '2026-11-11T01:00:00.000Z',
+                    late: true,
+                },
+                text: 'Write the briefing.\nKeep it short.',
+            }),
+            '<system-notification kind="schedule" schedule="a1b2c3d4" name="Say &quot;hi&quot; &lt;now>" due="2026-11-11T01:00:00.000Z" time="2026-11-11T01:00:20.000Z" late="true">\nWrite the briefing.\nKeep it short.\n</system-notification>'
         );
     });
 });

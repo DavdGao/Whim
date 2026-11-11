@@ -15,6 +15,14 @@ import type { ChatRequestMessage, InlineMedia, RequestBlock } from '@whimkit/cor
 export const rendererVersion = 2;
 
 /**
+ * Escape a value for an XML attribute.
+ * @param value The raw value.
+ * @returns The escaped value.
+ */
+const attribute = (value: string) =>
+    value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+
+/**
  * The model-facing text of a notice, without its wrapping tag.
  * @param notice The notice.
  * @returns The text.
@@ -33,6 +41,8 @@ function noticeText(notice: Notice): string {
             return `Background job ${notice.payload.jobId} (${notice.payload.tool}) was lost when the application restarted; its outcome is unknown.`;
         case 'workspace-changed':
             return `The user changed the working folder from ${notice.payload.from} to ${notice.payload.to}. Tools now run there and relative paths resolve against it; paths mentioned earlier in this conversation refer to the previous folder.`;
+        case 'schedule-fired':
+            return notice.text;
     }
 }
 
@@ -42,6 +52,11 @@ function noticeText(notice: Notice): string {
  * @returns The reminder text.
  */
 export function renderNotice(notice: Notice): string {
+    // Events of kinds added after agent.md §14 are notifications with their metadata as attributes.
+    if (notice.kind === 'schedule-fired') {
+        const { scheduleId, name, dueAt, late } = notice.payload;
+        return `<system-notification kind="schedule" schedule="${attribute(scheduleId)}" name="${attribute(name)}" due="${dueAt}" time="${notice.observedAt}"${late ? ' late="true"' : ''}>\n${notice.text}\n</system-notification>`;
+    }
     return `<system-reminder>${noticeText(notice)}</system-reminder>`;
 }
 
@@ -54,14 +69,6 @@ export interface MediaPolicy {
     /** Read stored bytes by `file:` URI. */
     readonly read: (uri: string) => Promise<Uint8Array>;
 }
-
-/**
- * Escape a value for an XML attribute.
- * @param value The raw value.
- * @returns The escaped value.
- */
-const attribute = (value: string) =>
-    value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
 
 /**
  * The text that stands in for media the model cannot read: an identifier and a `file:` URI.
