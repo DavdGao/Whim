@@ -68,8 +68,8 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
     - The last six entries (fewer when large) stay verbatim instead of everything after the latest input, never separating a call from its results, so a long autonomous run compacts; the latest user message stays verbatim; up to three compactions per step
     - A refused summary request summarizes the older half; a single covered entry has its longest texts shortened in the middle, halving until accepted
     - `output-limit` failure category, so a reply cut at the output limit no longer triggers compaction
+- [x] One conversation file per session (`conversation.md`) instead of chained per-compaction files: only the conversation's flow, no summaries; each message, tool result and notice tagged with its sequence number and time (`<user seq time>`, `<tool_result call_id name status>`, `<notice kind>`), thinking and tool calls included; rendered whole from the journal and renamed into place at each compaction, so a crash leaves no gap or repeat; renderer version 2
 - [ ] Compaction rework, part B:
-    - One append-only conversation file per session with `[seq N · time · role]` headers (thinking, tool calls and results, media references), filled from the journal so a crash gap refills; replaces the chained per-compaction files
     - Rendered summary followed by sections from local facts, each omitted when empty and naming only tools the session has: conversation file with Read/Grep guidance, running background jobs, recent user messages, recently read or written files; a task list once plans exist
     - Optional structured `parts` in the epoch context (old string summaries still decode); the compaction line shows the parts
 - [ ] Verify the summary request's prefix cache hit against live DashScope

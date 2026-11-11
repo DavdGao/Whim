@@ -299,8 +299,8 @@ class Backend {
         );
         this.agent = new Agent(store, models, this.tools, {
             compaction: {
-                transcriptPath: (sessionId, compactionId) =>
-                    join(this.tools.sessionDir(sessionId), 'history', `${compactionId}.md`),
+                transcriptPath: sessionId =>
+                    join(this.tools.sessionDir(sessionId), 'conversation.md'),
                 // A compaction refreshes the prefix like a model switch: current profile, tools,
                 // and card revision; a card that is no longer available keeps the frozen one.
                 epoch: async view => {

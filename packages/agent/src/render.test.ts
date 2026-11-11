@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { toRequestMessages } from './render.js';
+import { toRequestMessages, transcriptText } from './render.js';
 
 import type { HistoryEntry, MediaBlock } from '@whimkit/core/contracts';
 
@@ -145,6 +145,74 @@ describe('media in requests', () => {
         assert.equal(
             messages[2]?.role === 'tool' ? messages[2].content : undefined,
             'an image\n<data id="img-0011aabb" uri="file:///tmp/s/media/0011aabb.png" media_type="image/png" name="shot.png"/>'
+        );
+    });
+});
+
+describe('conversation file', () => {
+    it('writes each entry as one element tagged with its sequence number and time', () => {
+        const at = '2026-11-11T08:00:00.000Z';
+        const entries: HistoryEntry[] = [
+            {
+                seq: 1,
+                at,
+                item: {
+                    type: 'message',
+                    id: 'u',
+                    role: 'user',
+                    blocks: [{ type: 'text', text: 'read a' }],
+                },
+            },
+            {
+                seq: 2,
+                at,
+                status: 'interrupted',
+                item: {
+                    type: 'message',
+                    id: 'a',
+                    role: 'assistant',
+                    blocks: [
+                        { type: 'reasoning', text: 'look first' },
+                        { type: 'reasoning', text: '' },
+                        { type: 'text', text: 'Reading.' },
+                        { type: 'tool_call', callId: 'c"1', name: 'Read', arguments: '{"p":"a"}' },
+                    ],
+                },
+            },
+            {
+                seq: 3,
+                at,
+                item: {
+                    type: 'tool_result',
+                    id: 'r',
+                    callId: 'c"1',
+                    name: 'Read',
+                    status: 'success',
+                    content: 'line 1\nline 2',
+                    media: [image],
+                },
+            },
+            {
+                seq: 4,
+                at,
+                item: {
+                    type: 'notice',
+                    id: 'n',
+                    origin: { type: 'core', service: 'agent' },
+                    observedAt: at,
+                    kind: 'interrupted',
+                    payload: { runId: 'r1', reason: 'user' },
+                },
+            },
+        ];
+        assert.equal(
+            transcriptText(entries),
+            [
+                `<user seq="1" time="${at}">\nread a\n</user>`,
+                `<assistant seq="2" time="${at}" status="interrupted">\n<reasoning>\nlook first\n</reasoning>\nReading.\n<tool_call id="c&quot;1" name="Read">{"p":"a"}</tool_call>\n</assistant>`,
+                `<tool_result seq="3" time="${at}" call_id="c&quot;1" name="Read" status="success">\nline 1\nline 2\n<data id="img-0011aabb" uri="file:///tmp/s/media/0011aabb.png" media_type="image/png" name="a b.png"/>\n</tool_result>`,
+                `<notice seq="4" time="${at}" kind="interrupted">\nThe user interrupted you.\n</notice>`,
+            ].join('\n\n')
         );
     });
 });
