@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -157,8 +157,7 @@ const noTools = { run: async () => {} };
  */
 function compaction(): AgentCompaction {
     return {
-        transcriptPath: (sessionId, compactionId) =>
-            join(dir, 'transcripts', sessionId, `${compactionId}.md`),
+        transcriptPath: sessionId => join(dir, 'transcripts', sessionId, 'conversation.md'),
         epoch: async view => ({
             epochId: randomUUID(),
             system: view.epoch.system,
@@ -442,9 +441,14 @@ describe('Agent', () => {
             fileURLToPath(view.epoch.context?.transcript ?? 'file:///missing'),
             'utf8'
         );
+        const [u, a, v] = view.history;
         assert.equal(
             transcript,
-            `### User\n${long('u')}\n\n### Assistant\n${long('a')}\n\n### User\n${long('v')}\n`
+            [
+                `<user seq="${u?.seq}" time="${u?.at}">\n${long('u')}\n</user>`,
+                `<assistant seq="${a?.seq}" time="${a?.at}">\n${long('a')}\n</assistant>`,
+                `<user seq="${v?.seq}" time="${v?.at}">\n${long('v')}\n</user>\n`,
+            ].join('\n\n')
         );
         const [, summary, last] = requests;
         assert.equal(requests.length, 3);
@@ -466,6 +470,42 @@ describe('Agent', () => {
             { role: 'user', blocks: [{ type: 'text', text: long('v') }] },
         ]);
         assert.deepEqual(view.usage, { inputTokens: 15, outputTokens: 3 });
+    });
+
+    it('keeps one conversation file per session that grows with each compaction', async () => {
+        const long = (letter: string) => letter.repeat(900);
+        const { models } = scripted(async function* (request) {
+            yield { type: 'text-delta', text: isSummary(request) ? tagged('S') : long('a') };
+            yield { type: 'completed', usage: {} };
+        }, 3000);
+        const agent = new Agent(store, models, noTools, {
+            sleep: noSleep,
+            compaction: compaction(),
+        });
+        const sessionId = await sessionWith(long('u'), [], [], { ...card, contextWindow: 1000 });
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        for (const letter of ['v', 'w', 'x']) {
+            await say(sessionId, long(letter));
+            await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        }
+
+        const view = await store.view(sessionId);
+        const succeeded = view.compactions.filter(item => item.state === 'succeeded');
+        assert.ok(succeeded.length >= 2);
+        const uri = view.epoch.context?.transcript ?? 'file:///missing';
+        assert.equal(fileURLToPath(uri), join(dir, 'transcripts', sessionId, 'conversation.md'));
+        // Every entry before the latest cut, once and in order, and no summary.
+        const file = await readFile(fileURLToPath(uri), 'utf8');
+        const covered = view.history.filter(entry => entry.seq < (view.epoch.context?.from ?? 0));
+        assert.deepEqual(
+            [...file.matchAll(/^<(\w+) seq="(\d+)"/gm)].map(match => [match[1], Number(match[2])]),
+            covered.map(entry => [
+                entry.item.type === 'message' ? entry.item.role : entry.item.type,
+                entry.seq,
+            ])
+        );
+        assert.doesNotMatch(file, /<goal>/);
+        assert.deepEqual(await readdir(join(dir, 'transcripts', sessionId)), ['conversation.md']);
     });
 
     it('compacts and runs the step again when the provider reports the context limit', async () => {

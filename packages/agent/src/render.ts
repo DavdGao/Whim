@@ -8,8 +8,33 @@ import type {
 } from '@whimkit/core/contracts';
 import type { ChatRequestMessage, InlineMedia, RequestBlock } from '@whimkit/core/plugin';
 
-/** Version of the notice renderer; recorded in each epoch because it shapes the prompt. */
-export const rendererVersion = 1;
+/**
+ * Version of the renderer; recorded in each epoch because it shapes the prompt. Version 2 writes
+ * one tagged conversation file per session; version 1 epochs point to chained per-compaction files.
+ */
+export const rendererVersion = 2;
+
+/**
+ * The model-facing text of a notice, without its wrapping tag.
+ * @param notice The notice.
+ * @returns The text.
+ */
+function noticeText(notice: Notice): string {
+    switch (notice.kind) {
+        case 'interrupted':
+            return notice.payload.reason === 'user'
+                ? 'The user interrupted you.'
+                : 'Your previous response was interrupted because its model plugin was removed.';
+        case 'restarted':
+            return 'The application restarted and your previous response was cut off.';
+        case 'job-finished':
+            return `Background job ${notice.payload.jobId} (${notice.payload.tool}) ${notice.payload.status === 'completed' ? 'finished' : notice.payload.status}.${notice.text ? `\nOutput:\n${notice.text}` : ''}`;
+        case 'job-lost':
+            return `Background job ${notice.payload.jobId} (${notice.payload.tool}) was lost when the application restarted; its outcome is unknown.`;
+        case 'workspace-changed':
+            return `The user changed the working folder from ${notice.payload.from} to ${notice.payload.to}. Tools now run there and relative paths resolve against it; paths mentioned earlier in this conversation refer to the previous folder.`;
+    }
+}
 
 /**
  * Render a notice as model-facing text.
@@ -17,28 +42,7 @@ export const rendererVersion = 1;
  * @returns The reminder text.
  */
 export function renderNotice(notice: Notice): string {
-    let text: string;
-    switch (notice.kind) {
-        case 'interrupted':
-            text =
-                notice.payload.reason === 'user'
-                    ? 'The user interrupted you.'
-                    : 'Your previous response was interrupted because its model plugin was removed.';
-            break;
-        case 'restarted':
-            text = 'The application restarted and your previous response was cut off.';
-            break;
-        case 'job-finished':
-            text = `Background job ${notice.payload.jobId} (${notice.payload.tool}) ${notice.payload.status === 'completed' ? 'finished' : notice.payload.status}.${notice.text ? `\nOutput:\n${notice.text}` : ''}`;
-            break;
-        case 'job-lost':
-            text = `Background job ${notice.payload.jobId} (${notice.payload.tool}) was lost when the application restarted; its outcome is unknown.`;
-            break;
-        case 'workspace-changed':
-            text = `The user changed the working folder from ${notice.payload.from} to ${notice.payload.to}. Tools now run there and relative paths resolve against it; paths mentioned earlier in this conversation refer to the previous folder.`;
-            break;
-    }
-    return `<system-reminder>${text}</system-reminder>`;
+    return `<system-reminder>${noticeText(notice)}</system-reminder>`;
 }
 
 /** How media in history reaches a request. */
@@ -210,7 +214,7 @@ export function estimateTokens(
 
 /**
  * The request messages of the current epoch: after a compaction, a reminder carrying the summary
- * and the transcript's `file:` URI, the kept user message when it is older than the epoch's start,
+ * and the conversation file's `file:` URI, the kept user message when it is older than the epoch's start,
  * then the history the summary does not cover.
  * @param view The session view.
  * @param media Media policy of the session's model.
@@ -232,18 +236,27 @@ export async function epochMessages(
     );
     if (!context) return messages;
     return [
-        { role: 'user', blocks: [{ type: 'text', text: summaryReminder(context) }] },
+        {
+            role: 'user',
+            blocks: [{ type: 'text', text: summaryReminder(context, view.epoch.renderer) }],
+        },
         ...messages,
     ];
 }
 
 /**
- * How a compacted epoch opens.
+ * How a compacted epoch opens. Its text stays as its epoch's renderer wrote it, so the prefix of an
+ * epoch never changes.
  * @param context The epoch's compaction context.
+ * @param renderer The epoch's renderer version.
  * @returns The reminder text.
  */
-export function summaryReminder(context: EpochContext): string {
-    return `<system-reminder>The earlier part of this conversation was compacted to save context. Its full transcript is at ${context.transcript}; Read it when you need exact earlier details.${context.input === undefined ? '' : " The user's latest message follows verbatim."}\n\nSummary of the earlier conversation:\n${context.summary}</system-reminder>`;
+export function summaryReminder(context: EpochContext, renderer: number): string {
+    const record =
+        renderer < 2
+            ? `Its full transcript is at ${context.transcript}; Read it when you need exact earlier details.`
+            : `The conversation before the messages that follow, without summaries, is recorded in ${context.transcript}: each message, tool result and notice is one element tagged with its sequence number and time, such as <user seq="3" time="…">. Read or Grep it when you need exact earlier details.`;
+    return `<system-reminder>The earlier part of this conversation was compacted to save context. ${record}${context.input === undefined ? '' : " The user's latest message follows verbatim."}\n\nSummary of the earlier conversation:\n${context.summary}</system-reminder>`;
 }
 
 /**
@@ -266,49 +279,52 @@ export function entryTokens(entry: HistoryEntry): number {
 }
 
 /**
- * Plain-text transcript of history entries, written to the session folder before a compaction
- * and given to the summary call. Media appear as references or, for text files, their content.
- * Reasoning and opaque provider state are left out.
- * @param history The entries to transcribe.
- * @returns Markdown text.
+ * The conversation file's text for history entries: one tagged element per message, tool result,
+ * and notice, with its sequence number and time, so it can be searched and cited. Media appear as
+ * references or, for text files, their content; opaque provider state is left out. Rendering
+ * depends only on the entries, so the text of a prefix of history never changes.
+ * @param history The entries, in order.
+ * @returns The text.
  */
 export function transcriptText(history: readonly HistoryEntry[]): string {
     const parts: string[] = [];
-    for (const { item } of history) {
+    for (const { seq, at, item, status } of history) {
+        const head = `seq="${seq}" time="${attribute(at)}"`;
         if (item.type === 'notice') {
-            parts.push(`### Notice\n${renderNotice(item)}`);
+            parts.push(`<notice ${head} kind="${item.kind}">\n${noticeText(item)}\n</notice>`);
             continue;
         }
         if (item.type === 'tool_result') {
+            const body = [item.content, ...(item.media ?? []).map(mediaReference)]
+                .filter(Boolean)
+                .join('\n');
             parts.push(
-                [
-                    `### Tool result (${item.name}, ${item.status})`,
-                    item.content,
-                    ...(item.media ?? []).map(mediaReference),
-                ]
-                    .filter(Boolean)
-                    .join('\n')
+                `<tool_result ${head} call_id="${attribute(item.callId)}" name="${attribute(item.name)}" status="${item.status}">\n${body}\n</tool_result>`
             );
             continue;
         }
         const lines: string[] = [];
         for (const block of item.blocks) {
             if (block.type === 'text') lines.push(block.text);
-            else if (block.type === 'media')
+            else if (block.type === 'reasoning') {
+                if (block.text) lines.push(`<reasoning>\n${block.text}\n</reasoning>`);
+            } else if (block.type === 'media')
                 lines.push(
                     block.text !== undefined
                         ? textFile({ ...block, text: block.text })
                         : mediaReference(block)
                 );
             else if (block.type === 'tool_call')
-                lines.push(`[Called ${block.name} with ${block.arguments}]`);
+                lines.push(
+                    `<tool_call id="${attribute(block.callId)}" name="${attribute(block.name)}">${block.arguments}</tool_call>`
+                );
             else if (block.type === 'native_tool_call')
                 lines.push(
-                    `[Provider ${block.tool}${block.query ? `: ${block.query}` : ''}${block.urls?.length ? ` (${block.urls.join(', ')})` : ''}]`
+                    `<provider_tool_call name="${attribute(block.tool)}" status="${block.status}"${block.query ? ` query="${attribute(block.query)}"` : ''}>${(block.urls ?? []).join('\n')}</provider_tool_call>`
                 );
         }
-        if (lines.length)
-            parts.push(`### ${item.role === 'user' ? 'User' : 'Assistant'}\n${lines.join('\n')}`);
+        const state = status === 'interrupted' ? ' status="interrupted"' : '';
+        parts.push(`<${item.role} ${head}${state}>\n${lines.join('\n')}\n</${item.role}>`);
     }
     return parts.join('\n\n');
 }

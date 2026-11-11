@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -72,8 +72,8 @@ export interface AgentOptions {
 
 /** What compaction needs from the host. */
 export interface AgentCompaction {
-    /** Absolute path of a compaction's transcript, inside the session's own folder. */
-    transcriptPath(sessionId: string, compactionId: string): string;
+    /** Absolute path of the session's conversation file, inside its own folder. */
+    transcriptPath(sessionId: string): string;
     /** The prefix of the epoch after a compaction: the current prompt, tools, and model. */
     epoch(view: SessionView): Promise<Extract<Command, { type: 'switch-model' }>['epoch']>;
 }
@@ -424,17 +424,21 @@ export class Agent {
                 else throw new Error('The summary came back empty.');
             }
 
-            const previous = view.epoch.context;
-            const covered = view.history.filter(
-                entry => entry.seq >= (previous?.from ?? 0) && entry.seq < cut.from
-            );
-            const path = port.transcriptPath(sessionId, compactionId);
-            // Published before anything refers to it.
+            // The file holds everything before the cut and grows with each compaction. It is
+            // written whole from the journal and renamed into place before anything refers to it,
+            // so a crash between writing and committing leaves no partial or repeated part.
+            const path = port.transcriptPath(sessionId);
             await mkdir(dirname(path), { recursive: true });
-            await writeFile(
-                path,
-                `${previous ? `Earlier transcript: ${previous.transcript}\n\n` : ''}${transcriptText(covered)}\n`
-            );
+            const staged = `${path}.${compactionId}.tmp`;
+            try {
+                await writeFile(
+                    staged,
+                    `${transcriptText(view.history.filter(entry => entry.seq < cut.from))}\n`
+                );
+                await rename(staged, path);
+            } finally {
+                await rm(staged, { force: true });
+            }
             const epoch = await port.epoch(view);
             await this.#exec(sessionId, {
                 type: 'finish-compaction',
