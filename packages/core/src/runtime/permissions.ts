@@ -62,6 +62,8 @@ function matches(rule: PermissionRule, name: string, access: Access): boolean {
             return commandKey(access.command) === rule.pattern;
         case 'network':
             return hostOf(access.url) === rule.pattern;
+        case 'mcp':
+            return `${access.server}/${access.tool}` === rule.pattern;
     }
 }
 
@@ -118,6 +120,8 @@ export function rulesFor(
                 return { tool: name, kind: 'execute', pattern: commandKey(item.command) };
             case 'network':
                 return { tool: name, kind: 'network', pattern: hostOf(item.url) };
+            case 'mcp':
+                return { tool: name, kind: 'mcp', pattern: `${item.server}/${item.tool}` };
         }
     });
 }

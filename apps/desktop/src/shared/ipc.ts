@@ -1,4 +1,4 @@
-import { idSchema, thinkingLevelSchema } from '@whimkit/core/contracts';
+import { idSchema, mcpServerSchema, thinkingLevelSchema } from '@whimkit/core/contracts';
 import { z } from 'zod';
 
 import { localeSchema } from './main-protocol.js';
@@ -9,6 +9,8 @@ import type {
     Card,
     Failure,
     HistoryEntry,
+    McpServerConfig,
+    McpServerState,
     PendingDelivery,
     SessionView,
     ThinkingLevel,
@@ -183,6 +185,16 @@ export const methodSchemas = {
         destination: codingHostSchema.shape.destination,
     }),
     'coding.removeHost': z.strictObject({ id: idSchema }),
+    /** Add or change an MCP server (design.md §7.7); secret values travel only this way. */
+    'mcp.save': z.strictObject({
+        server: mcpServerSchema.omit({ secrets: true }),
+        /** Whether it replaces an existing server with the same id. */
+        replace: z.boolean(),
+        /** New secret values by name; secrets not named keep their stored values. */
+        secretValues: z.record(z.string().min(1), z.string().min(1)),
+        removeSecrets: z.array(z.string()),
+    }),
+    'mcp.remove': z.strictObject({ id: mcpServerSchema.shape.id }),
     /** The tmux sessions of a host. */
     'coding.sessions': z.strictObject({ hostId: codingHostIdSchema }),
     /** Start a coding agent in a new tmux session. */
@@ -360,7 +372,14 @@ export interface AppState {
     readonly sessions: readonly SessionInfo[];
     readonly codingAgents: readonly CodingAgentInfo[];
     readonly codingHosts: readonly CodingHost[];
+    readonly mcpServers: readonly McpServerInfo[];
 }
+
+/** An MCP server as Renderer sees it: the names of its secrets, never their values. */
+export type McpServerInfo = Omit<McpServerConfig, 'secrets'> & {
+    readonly secrets: readonly string[];
+    readonly status: McpServerState;
+};
 
 /** A session view with the inbox as an array, safe to copy across context bridges. */
 export type SessionSnapshot = Omit<SessionView, 'inbox'> & {
@@ -411,6 +430,8 @@ export interface Results {
     'workspace.git': GitStatus | null;
     'coding.saveHost': { id: string };
     'coding.removeHost': null;
+    'mcp.save': null;
+    'mcp.remove': null;
     'coding.sessions': CodingInventory;
     'coding.create': { key: string };
     'coding.kill': null;

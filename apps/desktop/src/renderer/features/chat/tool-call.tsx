@@ -353,7 +353,9 @@ function AccessLine({ access }: { access: Access }) {
             ? ['tool.access.execute', access.command]
             : access.kind === 'network'
               ? ['tool.access.network', access.url]
-              : [access.kind === 'read' ? 'tool.access.read' : 'tool.access.write', access.path];
+              : access.kind === 'mcp'
+                ? ['tool.access.mcp', `${access.server} · ${access.tool}`]
+                : [access.kind === 'read' ? 'tool.access.read' : 'tool.access.write', access.path];
     return (
         <span className="flex min-w-0 gap-2">
             <span className="shrink-0">{t(key)}</span>

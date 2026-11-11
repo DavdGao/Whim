@@ -202,6 +202,8 @@ export const accessSchema = z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.enum(['read', 'write']), path: z.string().min(1) }),
     z.strictObject({ kind: z.literal('execute'), command: z.string() }),
     z.strictObject({ kind: z.literal('network'), url: z.string() }),
+    /** A tool of an MCP server the user has not trusted (design.md §7.7). */
+    z.strictObject({ kind: z.literal('mcp'), server: z.string(), tool: z.string() }),
 ]);
 export type Access = z.infer<typeof accessSchema>;
 
@@ -212,8 +214,8 @@ export type ReviewOutcome = z.infer<typeof reviewOutcomeSchema>;
 /** A session-scoped permission grant. */
 export const permissionRuleSchema = z.strictObject({
     tool: z.string(),
-    kind: z.enum(['read', 'write', 'execute', 'network']),
-    /** Path prefix, command word, or host. */
+    kind: z.enum(['read', 'write', 'execute', 'network', 'mcp']),
+    /** Path prefix, command word, host, or `<server>/<tool>`. */
     pattern: z.string(),
 });
 export type PermissionRule = z.infer<typeof permissionRuleSchema>;

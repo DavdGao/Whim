@@ -40,6 +40,7 @@ import { pluginClientUrl, themeImageUrl } from '../shared/main-protocol.js';
 
 import { Coding } from './coding.js';
 import { gitStatus } from './git.js';
+import { McpServers } from './mcp.js';
 
 import type {
     AgentProfile,
@@ -245,6 +246,7 @@ class Backend {
     readonly agent: Agent;
     readonly tools: ToolRuntime;
     readonly scheduler: Scheduler;
+    readonly mcp: McpServers;
     readonly #baseTools: ReturnType<typeof baseTools>;
     /** Attachments wait here between staging and sending; cleared at start. */
     readonly #stagingDir: string;
@@ -266,6 +268,7 @@ class Backend {
      * @param userData The application data directory; session files live in `sessions/`.
      * @param version Application version.
      * @param toMain Sends Main activity and attention for background operation (design.md §4.1).
+     * @param secrets Encrypts and decrypts secrets with `safeStorage`, for MCP server secrets.
      */
     constructor(
         readonly store: Store,
@@ -275,9 +278,11 @@ class Backend {
         readonly models: ModelService,
         userData: string,
         version: string,
-        toMain: (message: Activity | Attention | PluginClients) => void
+        toMain: (message: Activity | Attention | PluginClients) => void,
+        secrets: SecretCipher
     ) {
         this.#toMain = toMain;
+        this.mcp = new McpServers(store, secrets, version, () => this.#emit({ type: 'state' }));
         this.coding = new Coding(store, host, event =>
             this.#emit(
                 event.type === 'output'
@@ -303,7 +308,8 @@ class Backend {
             join(userData, 'sessions'),
             join(userData, 'artifacts'),
             sessionId => this.schedule(sessionId, 'job'),
-            () => this.#reviewer()
+            () => this.#reviewer(),
+            this.mcp.host
         );
         this.agent = new Agent(store, models, this.tools, {
             compaction: {
@@ -665,6 +671,12 @@ class Backend {
                 await this.setWorkspace(params.sessionId, params.workspace);
                 return null;
             }
+            case 'mcp.save':
+            case 'mcp.remove': {
+                const result = await this.mcp.dispatch(method, raw);
+                this.#emit({ type: 'state' });
+                return result;
+            }
             case 'coding.saveHost':
             case 'coding.removeHost': {
                 const result = await this.coding.dispatch(method, raw, this.#rendererAbort.signal);
@@ -787,6 +799,7 @@ class Backend {
                 name: entry.agent.name,
             })),
             codingHosts: await this.coding.hosts(),
+            mcpServers: await this.mcp.views(),
         };
     }
 
@@ -1328,6 +1341,7 @@ class Backend {
         ]);
         await this.#reporting;
         await this.tools.shutdown();
+        await this.mcp.stop();
         this.catalog.stop();
         await this.host.stop();
         await this.store.close();
@@ -1441,8 +1455,10 @@ async function start(userData: string, version: string): Promise<void> {
             new ModelService(host, credentials),
             userData,
             version,
-            message => parentPort.postMessage(message)
+            message => parentPort.postMessage(message),
+            cipher
         );
+        await backend.mcp.start();
         await backend.recover();
         backend.scheduler.start();
         for (const port of pendingPorts.splice(0)) backend.attach(port);
