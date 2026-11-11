@@ -26,7 +26,7 @@ import {
     SquareTerminalIcon,
     Trash2Icon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { ChoiceMenu } from '../../components/choice-menu';
 import { StatusAlert } from '../../components/status-alert';
@@ -35,6 +35,7 @@ import { useT } from '../../lib/i18n';
 
 import { agentName } from './agent-name';
 import { ConfirmDialog, HostDialog, NewSessionDialog } from './coding-dialogs';
+import { readLastView, writeLastView } from './last-view';
 import { TerminalView } from './terminal-view';
 import { useInventory } from './use-inventory';
 
@@ -134,17 +135,45 @@ function SessionRow({
  */
 export function CodingPage({ state }: PageProps) {
     const { t } = useT();
-    const [chosenHost, setChosenHost] = useState('local');
+    // The page opens on the computer and session last opened, each computer keeping its own.
+    const [view, setView] = useState(readLastView);
+    useEffect(() => writeLastView(view), [view]);
     // A removed host falls back to this Mac.
     const hostId =
-        chosenHost === 'local' || state.codingHosts.some(host => host.id === chosenHost)
-            ? chosenHost
+        view.hostId === 'local' || state.codingHosts.some(host => host.id === view.hostId)
+            ? view.hostId
             : 'local';
     const host = state.codingHosts.find(item => item.id === hostId);
-    const [selected, setSelected] = useState<{ hostId: string; key: string }>();
-    const openKey = selected?.hostId === hostId ? selected.key : undefined;
     const [dialog, setDialog] = useState<Dialog>();
     const { inventory, error, refresh } = useInventory(hostId);
+    const chooseHost = (id: string) => setView(current => ({ ...current, hostId: id }));
+    // A remembered session opens once a listing shows it still exists (a restarted tmux server
+    // gives sessions new keys); once open, a failed listing does not close its terminal.
+    const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
+    const remembered = view.sessions[hostId];
+    const listed =
+        remembered !== undefined && inventory?.status === 'ok'
+            ? inventory.sessions.some(session => session.key === remembered)
+            : undefined;
+    const rememberedId = remembered === undefined ? undefined : `${hostId}:${remembered}`;
+    const openKey = rememberedId && (listed || opened.has(rememberedId)) ? remembered : undefined;
+    // Settled while rendering, as each new listing arrives, so no effect re-renders the page.
+    if (rememberedId && listed && !opened.has(rememberedId))
+        setOpened(new Set(opened).add(rememberedId));
+    if (rememberedId && listed === false && !opened.has(rememberedId)) {
+        const sessions = { ...view.sessions };
+        delete sessions[hostId];
+        setView({ ...view, sessions });
+    }
+    const select = (key: string | undefined) => {
+        if (key) setOpened(current => new Set(current).add(`${hostId}:${key}`));
+        setView(current => {
+            const sessions = { ...current.sessions };
+            if (key) sessions[hostId] = key;
+            else delete sessions[hostId];
+            return { hostId, sessions };
+        });
+    };
 
     return (
         <div className="flex h-full min-h-0">
@@ -164,7 +193,7 @@ export function CodingPage({ state }: PageProps) {
                                 icon: <ServerIcon />,
                             })),
                         ]}
-                        onChange={setChosenHost}
+                        onChange={chooseHost}
                         icon={<LaptopIcon />}
                         placeholder={t('coding.host')}
                         aria-label={t('coding.host')}
@@ -250,7 +279,7 @@ export function CodingPage({ state }: PageProps) {
                                     state={state}
                                     session={session}
                                     selected={session.key === openKey}
-                                    onSelect={() => setSelected({ hostId, key: session.key })}
+                                    onSelect={() => select(session.key)}
                                     onEnd={() => setDialog({ kind: 'end', session })}
                                 />
                             ))
@@ -299,7 +328,7 @@ export function CodingPage({ state }: PageProps) {
             {dialog?.kind === 'host' && (
                 <HostDialog
                     host={dialog.host}
-                    onSaved={setChosenHost}
+                    onSaved={chooseHost}
                     onClose={() => setDialog(undefined)}
                 />
             )}
@@ -317,7 +346,7 @@ export function CodingPage({ state }: PageProps) {
                     state={state}
                     hostId={hostId}
                     onStarted={key => {
-                        setSelected({ hostId, key });
+                        select(key);
                         refresh();
                     }}
                     onClose={() => setDialog(undefined)}
@@ -330,7 +359,7 @@ export function CodingPage({ state }: PageProps) {
                     confirm={t('coding.end')}
                     action={async () => {
                         await call('coding.kill', { hostId, key: dialog.session.key });
-                        if (openKey === dialog.session.key) setSelected(undefined);
+                        if (openKey === dialog.session.key) select(undefined);
                         refresh();
                     }}
                     onClose={() => setDialog(undefined)}

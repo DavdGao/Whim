@@ -126,6 +126,7 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [x] Coding page: computer picker with SSH hosts, session list, new session with agent and folder, xterm.js terminal with reconnect, end session
 - [x] Fix SSH on macOS: quote `ControlPath` (the data folder has a space) and keep sockets in a short private `/tmp/whim-<uid>` so they fit `sun_path`
 - [x] Terminal fills its panel; fixed dark palette, and a matching tmux status line for sessions Whim starts
+- [x] Open on the last computer and its last session (Renderer `localStorage`, per computer); a session that is gone is not opened. Verified in Electron under Xvfb against a separate tmux server: navigating away and back, restarting Whim, and a session ended while Whim was closed
 - [ ] Verify an SSH host end to end (listing, start, attach, a broken connection)
 - [x] Fix `posix_spawnp failed` on macOS: `node-pty` 1.1.0 ships `spawn-helper` without the execute bit; pinned to 1.2.0-beta.18
 - [ ] Run on a Mac: packaged `node-pty`, IME, paste, Ctrl+C, alternate screen
