@@ -23,6 +23,10 @@ import {
     TraceTitle,
 } from '@whimkit/ui/components/trace';
 import {
+    CalendarCogIcon,
+    CalendarIcon,
+    CalendarPlusIcon,
+    CalendarXIcon,
     CheckIcon,
     CircleStopIcon,
     FilePenIcon,
@@ -141,6 +145,38 @@ const known: Record<string, { icon: LucideIcon; titles: Record<Phase, MessageKey
             running: 'tool.JobStop.running',
             done: 'tool.JobStop.done',
             failed: 'tool.JobStop.failed',
+        },
+    },
+    ScheduleCreate: {
+        icon: CalendarPlusIcon,
+        titles: {
+            running: 'tool.ScheduleCreate.running',
+            done: 'tool.ScheduleCreate.done',
+            failed: 'tool.ScheduleCreate.failed',
+        },
+    },
+    ScheduleList: {
+        icon: CalendarIcon,
+        titles: {
+            running: 'tool.ScheduleList.running',
+            done: 'tool.ScheduleList.done',
+            failed: 'tool.ScheduleList.failed',
+        },
+    },
+    ScheduleUpdate: {
+        icon: CalendarCogIcon,
+        titles: {
+            running: 'tool.ScheduleUpdate.running',
+            done: 'tool.ScheduleUpdate.done',
+            failed: 'tool.ScheduleUpdate.failed',
+        },
+    },
+    ScheduleDelete: {
+        icon: CalendarXIcon,
+        titles: {
+            running: 'tool.ScheduleDelete.running',
+            done: 'tool.ScheduleDelete.done',
+            failed: 'tool.ScheduleDelete.failed',
         },
     },
 };

@@ -33,6 +33,25 @@ export const sessionSummarySchema = z.strictObject({
 });
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;
 
+/** A schedule delivering a message into its session (design.md §4.1.1). */
+export const scheduleRowSchema = z.strictObject({
+    id: idSchema,
+    sessionId: idSchema,
+    name: z.string().min(1).max(80),
+    message: z.string().min(1).max(4000),
+    timing: z.discriminatedUnion('kind', [
+        z.strictObject({ kind: z.literal('at'), at: z.iso.datetime() }),
+        z.strictObject({ kind: z.literal('cron'), cron: z.string(), timezone: z.string() }),
+    ]),
+    missed: z.enum(['skip', 'once']),
+    paused: z.boolean(),
+    /** When it fires next; null while paused or after a single fire. */
+    nextFire: z.iso.datetime().nullable(),
+    lastFire: z.iso.datetime().nullable(),
+    createdAt: z.iso.datetime(),
+});
+export type ScheduleRow = z.infer<typeof scheduleRowSchema>;
+
 const id = z.number().int().nonnegative();
 
 /** Requests from the async store to its DB worker. */
@@ -67,6 +86,19 @@ export const requestSchema = z.discriminatedUnion('op', [
     z.strictObject({ id, op: z.literal('secret.get'), credentialId: idSchema }),
     z.strictObject({ id, op: z.literal('plugin.list') }),
     z.strictObject({ id, op: z.literal('plugin.put'), plugin: pluginRowSchema }),
+    z.strictObject({ id, op: z.literal('schedule.list'), sessionId: idSchema.optional() }),
+    z.strictObject({ id, op: z.literal('schedule.put'), schedule: scheduleRowSchema }),
+    z.strictObject({ id, op: z.literal('schedule.delete'), scheduleId: idSchema }),
+    z.strictObject({
+        id,
+        op: z.literal('schedule.fire'),
+        scheduleId: idSchema,
+        /** The fire time the caller read; a schedule changed since then is left alone. */
+        due: z.iso.datetime(),
+        next: z.iso.datetime().nullable(),
+        /** The delivery to commit with the fire; absent when a missed fire is skipped. */
+        command: commandSchema.optional(),
+    }),
     z.strictObject({ id, op: z.literal('close') }),
 ]);
 export type Request = z.infer<typeof requestSchema>;

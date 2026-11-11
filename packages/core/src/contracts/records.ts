@@ -121,6 +121,20 @@ export const noticeSchema = z.discriminatedUnion('kind', [
         kind: z.literal('job-lost'),
         payload: z.strictObject({ jobId: idSchema, callId: idSchema, tool: z.string() }),
     }),
+    /** A schedule of the session fired (design.md §4.1.1); `text` is its message. */
+    z.strictObject({
+        ...noticeBase,
+        kind: z.literal('schedule-fired'),
+        payload: z.strictObject({
+            scheduleId: idSchema,
+            name: z.string(),
+            /** The time it was due, which is earlier than `observedAt` when it fired late. */
+            dueAt: z.iso.datetime(),
+            /** It was due while Whim was not running or the Mac was asleep. */
+            late: z.boolean(),
+        }),
+        text: z.string(),
+    }),
     /** The user moved the chat to another folder between runs. */
     z.strictObject({
         ...noticeBase,
@@ -301,7 +315,7 @@ export const bodySchema = z.discriminatedUnion('type', [
     z.strictObject({
         type: z.literal('run.started'),
         runId: idSchema,
-        trigger: z.enum(['user', 'continue', 'restart', 'job']),
+        trigger: z.enum(['user', 'continue', 'restart', 'job', 'schedule']),
     }),
     z.strictObject({
         type: z.literal('step.prepared'),

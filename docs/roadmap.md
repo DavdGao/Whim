@@ -106,7 +106,9 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [x] Notifications for finished, failed, and waiting chats while no window is focused; clicking opens the chat
 - [x] Hold `prevent-app-suspension` while chats run
 - [ ] Launch at login without opening a window; optional Dock icon hiding
-- [ ] Schedules and triggers (design.md §4.1.1)
+- [x] Schedules (design.md §4.1.1): rows in SQLite, one timer, each fire committed with its delivery so restarts never fire twice, missed-fire policy, `schedule-fired` notice as `<system-notification>`; `ScheduleCreate`/`List`/`Update`/`Delete` for the calling conversation (cron via `croner`, at most every 5 minutes, 20 per conversation); tested against a real SQLite database with an injected clock
+- [ ] Settings page listing every schedule with pause and delete
+- [ ] Plugin event sources as triggers
 
 ## PR 8 — Plugin API (design.md §5.7)
 

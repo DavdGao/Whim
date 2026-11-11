@@ -16,6 +16,7 @@ import {
     ModelService,
     PluginCallError,
     PluginHost,
+    Scheduler,
     Store,
     StoreError,
     storeMedia,
@@ -233,7 +234,7 @@ function toIpcError(error: unknown): IpcError {
     return { code: 'internal', message: describeError(error) };
 }
 
-type RunTrigger = 'user' | 'continue' | 'restart' | 'job';
+type RunTrigger = 'user' | 'continue' | 'restart' | 'job' | 'schedule';
 
 /** Owns Core services, the agent, run scheduling, and the Renderer connection. */
 class Backend {
@@ -243,6 +244,7 @@ class Backend {
     #accepting = true;
     readonly agent: Agent;
     readonly tools: ToolRuntime;
+    readonly scheduler: Scheduler;
     readonly #baseTools: ReturnType<typeof baseTools>;
     /** Attachments wait here between staging and sending; cleared at start. */
     readonly #stagingDir: string;
@@ -285,13 +287,19 @@ class Backend {
         );
         this.#baseTools = baseTools(version);
         this.#stagingDir = join(userData, 'staging');
+        // A fired schedule wakes its session like a finished job does.
+        this.scheduler = new Scheduler(store, {
+            wake: sessionId => this.schedule(sessionId, 'schedule'),
+            timezone: () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+            onError: error => console.error('Schedules failed:', describeError(error)),
+        });
         // A finished background job wakes an idle session so the agent can react to it.
         this.tools = new ToolRuntime(
             store,
             host,
             models,
             credentials,
-            this.#baseTools,
+            [...this.#baseTools, ...this.scheduler.tools()],
             join(userData, 'sessions'),
             join(userData, 'artifacts'),
             sessionId => this.schedule(sessionId, 'job'),
@@ -1243,8 +1251,11 @@ class Backend {
         if (next) this.schedule(next.sessionId, next.trigger);
         try {
             const view = await this.store.view(sessionId);
+            // A schedule that fired as the run ended starts the next one, as a message does.
             const waiting = [...view.inbox.values()].some(
-                pending => pending.item.type === 'message'
+                pending =>
+                    pending.item.type === 'message' ||
+                    (pending.item.type === 'notice' && pending.item.kind === 'schedule-fired')
             );
             if (waiting && view.lastRun?.result.outcome === 'completed')
                 this.schedule(sessionId, 'user');
@@ -1303,6 +1314,7 @@ class Backend {
     async shutdown(): Promise<void> {
         this.#accepting = false;
         this.#queue.length = 0;
+        await this.scheduler.stop();
         // Detach every view; tmux sessions keep running past Quit (design.md §11.4).
         this.coding.terminals.closeAll();
         const stopping = [...this.#runs.keys()].map(sessionId =>
@@ -1432,6 +1444,7 @@ async function start(userData: string, version: string): Promise<void> {
             message => parentPort.postMessage(message)
         );
         await backend.recover();
+        backend.scheduler.start();
         for (const port of pendingPorts.splice(0)) backend.attach(port);
         backend.reportPluginClients();
         parentPort.postMessage({ type: 'ready' });

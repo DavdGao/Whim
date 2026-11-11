@@ -9,7 +9,7 @@ export {
     credentialInputSchema,
 } from './credentials.js';
 export type { CredentialInput, CredentialView, SecretCipher } from './credentials.js';
-export type { CredentialRow, PluginRow, SessionSummary } from './db/protocol.js';
+export type { CredentialRow, PluginRow, ScheduleRow, SessionSummary } from './db/protocol.js';
 export { CompiledSchema } from './json-schema.js';
 export type { SchemaIssue } from './json-schema.js';
 export { ModelService } from './models.js';
@@ -34,6 +34,15 @@ export type {
 } from './plugin-host.js';
 export { Store } from './store.js';
 export { ToolRuntime, maxResultBytes } from './tools.js';
+export {
+    ScheduleError,
+    Scheduler,
+    lateAfterMs,
+    localTime,
+    maxSchedules,
+    minIntervalMs,
+} from './schedules.js';
+export type { ScheduleInput, SchedulePatch, SchedulerOptions, Timing } from './schedules.js';
 export type { ToolCredentials, ToolModels } from './tools.js';
 export { evaluate, isInside, rulesFor } from './permissions.js';
 export type { PermissionEnv } from './permissions.js';

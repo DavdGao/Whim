@@ -6,12 +6,23 @@ import { z } from 'zod';
 import { recordSchema } from '../contracts/records.js';
 
 import { StoreError } from './commands.js';
-import { credentialRowSchema, pluginRowSchema, sessionSummarySchema } from './db/protocol.js';
+import {
+    credentialRowSchema,
+    pluginRowSchema,
+    scheduleRowSchema,
+    sessionSummarySchema,
+} from './db/protocol.js';
 
 import type { Command } from './commands.js';
 import type { AgentRecord } from '../contracts/records.js';
 import type { SessionView } from '../contracts/view.js';
-import type { CredentialRow, PluginRow, RequestInput, SessionSummary } from './db/protocol.js';
+import type {
+    CredentialRow,
+    PluginRow,
+    RequestInput,
+    ScheduleRow,
+    SessionSummary,
+} from './db/protocol.js';
 
 const responseSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal('ready') }),
@@ -302,6 +313,66 @@ export class Store {
      */
     async putPlugin(plugin: PluginRow): Promise<void> {
         await this.#request({ op: 'plugin.put', plugin });
+    }
+
+    /**
+     * List schedules, oldest first.
+     * @param sessionId Only this session's; all when omitted.
+     * @returns The schedules.
+     */
+    async schedules(sessionId?: string): Promise<ScheduleRow[]> {
+        return z.array(scheduleRowSchema).parse(
+            await this.#request({
+                op: 'schedule.list',
+                ...(sessionId === undefined ? {} : { sessionId }),
+            })
+        );
+    }
+
+    /**
+     * Insert or replace a schedule.
+     * @param schedule The schedule.
+     */
+    async putSchedule(schedule: ScheduleRow): Promise<void> {
+        await this.#request({ op: 'schedule.put', schedule });
+    }
+
+    /**
+     * Delete a schedule.
+     * @param scheduleId The schedule.
+     */
+    async deleteSchedule(scheduleId: string): Promise<void> {
+        await this.#request({ op: 'schedule.delete', scheduleId });
+    }
+
+    /**
+     * Commit a schedule's fire atomically: the delivery, when given, and its next fire time.
+     * @param scheduleId The schedule.
+     * @param due The fire time read; nothing happens when the schedule no longer has it.
+     * @param next The following fire time, or null when there is none.
+     * @param command The delivery to commit; omitted when a missed fire is skipped.
+     * @returns Whether the fire was committed.
+     */
+    async fireSchedule(
+        scheduleId: string,
+        due: string,
+        next: string | null,
+        command?: Command
+    ): Promise<boolean> {
+        const result = z
+            .array(recordSchema)
+            .nullable()
+            .parse(
+                await this.#request({
+                    op: 'schedule.fire',
+                    scheduleId,
+                    due,
+                    next,
+                    ...(command ? { command } : {}),
+                })
+            );
+        if (result?.length) for (const listener of this.#listeners) listener(result);
+        return result !== null;
     }
 
     /** Close the database after outstanding requests. */

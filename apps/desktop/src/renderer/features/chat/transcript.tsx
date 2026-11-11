@@ -447,6 +447,11 @@ function NoticeLine({ notice }: { notice: Notice }) {
         case 'job-lost':
             text = t('tool.jobLost', { tool: notice.payload.tool });
             break;
+        case 'schedule-fired':
+            text = t(notice.payload.late ? 'chat.scheduleFiredLate' : 'chat.scheduleFired', {
+                name: notice.payload.name,
+            });
+            break;
         case 'workspace-changed':
             text = t('chat.workspace.changed', {
                 name: notice.payload.to.split(/[\\/]/).filter(Boolean).at(-1) ?? notice.payload.to,
