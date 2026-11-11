@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
+import { CompiledSchema } from './json-schema.js';
 import { Scheduler } from './schedules.js';
 import { Store } from './store.js';
 
@@ -132,6 +133,11 @@ async function fired(sessionId: string) {
 }
 
 describe('Scheduler', () => {
+    it('declares tool schemas that compile as Core compiles every tool schema', () => {
+        const { scheduler: instance } = scheduler('2026-11-11T00:00:00Z');
+        for (const tool of instance.tools()) assert.ok(new CompiledSchema(tool.inputSchema));
+    });
+
     it('refuses timings it cannot keep, with the reason', async () => {
         const sessionId = await createSession();
         const { scheduler: instance } = scheduler('2026-11-11T00:00:00Z');
@@ -159,6 +165,14 @@ describe('Scheduler', () => {
         assert.deepEqual(await create({ at: '2026-11-12 09:00' }), {
             content:
                 '"2026-11-12 09:00" is not a date and time with a UTC offset, such as 2026-11-12T09:00:00+08:00.',
+            isError: true,
+        });
+        assert.deepEqual(await create({}), {
+            content: 'Give exactly one of at (a single fire) and cron (repeating).',
+            isError: true,
+        });
+        assert.deepEqual(await create({ at: '2026-11-12T09:00:00+08:00', cron: '0 9 * * *' }), {
+            content: 'Give exactly one of at (a single fire) and cron (repeating).',
             isError: true,
         });
         assert.deepEqual(await store.schedules(sessionId), []);
