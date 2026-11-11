@@ -132,6 +132,31 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [ ] Run on a Mac: packaged `node-pty`, IME, paste, Ctrl+C, alternate screen
 - [ ] Session lifecycle, recording, and Whim-agent control (coding-agents.md §11 slices 2–5)
 
+## Information retrieval ([sources](research/feed-sources.md), [access](feed-source-access.md), design.md §4.2)
+
+Infrastructure:
+
+- [x] Schedules for the main agent (design.md §4.1.1)
+- [ ] MCP host in Core (design.md §7.7): server configurations in Settings (stdio and streamable HTTP), one shared connection per server across agents, tools as `mcp__<server>__<tool>` under permissions, restart with backoff, bounded concurrency per server
+- [ ] Source agents (agent.md §15): each information source is a long-lived agent with one session, its own workspace and memory folder, and its own model (a default, overridable); created from a plugin's source template, hidden from the chat list, and deleted with all its data
+- [ ] Messages between agents (agent.md §15): `SendMessage` for the main agent, `Reply` for a source agent with a short summary and result files copied into the receiver's media; delivered as `<system-notification kind="message" from time request>`; a running receiver gets it at its next step, an idle one is woken, and every reply wakes the main agent
+- [ ] Health before a run: a source whose account or connection is not ready is not started; the sender gets an immediate reply naming the state, the user a notification, and the source page a reconnect action
+
+Sources (each a first-party plugin with its tools and source template):
+
+- [ ] arXiv: Atom query API search and category announcements, paper id and version kept
+- [ ] GitHub: Trending (period, language) in page order, and repository search through REST
+- [ ] Feeds and pages: RSS/Atom with conditional requests and feed discovery; a page's main text for change tracking
+- [ ] Zhihu: hot list through the web JSON route
+- [ ] Reddit: subreddit listings (hot, new, top with its window) and search through the Data API with app-only OAuth
+- [ ] X: recent search and user timelines through the API with an app bearer token
+- [ ] Xiaohongshu: note search and detail through a local MCP server whose login state persists, QR login shown in Whim
+
+Frontend and prompts:
+
+- [ ] Feed page: sources with their state, new source from a template with its model, open a source's conversation, reconnect, delete
+- [ ] Source agent prompt (agent.md §14): research loop (expanding and following queries, verifying against primary and independent sources), quality checks against ads and generated filler, increments from its earlier reports, delivery by files
+
 ## Later
 
 - [ ] Remote card catalog refresh
