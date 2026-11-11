@@ -25,6 +25,7 @@
         "test": "node --test \"dist/**/*.test.js\""
     },
     "dependencies": {
+        "@modelcontextprotocol/sdk": "1.32.2",
         "ajv": "^8.17.1",
         "croner": "10.0.1",
         "node-pty": "1.2.0-beta.18",

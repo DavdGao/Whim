@@ -436,6 +436,17 @@ The choice depends only on the card and the adapter, never on per-request option
 
 Provider-only tools without a Core equivalent (for example DashScope `code_interpreter`) are declared by the adapter as additional native tool ids, namespaced by plugin, and are opt-in per session.
 
+### 7.7 MCP servers
+
+Core connects MCP servers centrally, as it runs tools and schedules: one connection per configured server, shared by every agent and session. A server's sign-in state belongs to its account, so two connections would sign each other out or ask twice.
+
+- **Configuration.** Settings → MCP servers stores each server in the setting `mcp.servers`: an id (lowercase letters, digits, `-`, at most 20 characters, used in tool names), a name, whether it is enabled, whether its tools run without asking, and its transport: a local command (stdio: command, arguments, environment) or a remote URL (streamable HTTP: URL, headers). Secret environment variables and headers are entered separately, stored as `safeStorage` ciphertext, shown by name only, and decrypted only to start the server. An unreadable entry is skipped.
+- **Lifecycle.** Backend's `McpServers` owns the configuration and Core's `McpHost` the connections. Enabled servers connect at start, before recovery; a saved change reconnects that server; disabling or removing it closes it; shutdown closes all after tool calls stop. A server that fails to start or closes its connection is reported with the reason and retried after 1 s, doubling to at most 5 minutes. A stdio server inherits only the SDK's safe default environment plus its configured variables.
+- **Tools.** A ready server's tools are offered as `mcp__<server>__<tool>`; a name that would be invalid or longer than 64 characters is skipped and counted. The description is the server's, cut at 4,000 characters, and names the server. Like every tool set, MCP tools are frozen into an epoch: a server that connects later, or whose tool list changes, reaches a session at its next compaction or model switch. Core does not validate arguments against the server's schema (servers write draft-07 and other dialects that Whim's strict 2020-12 validator refuses); it passes a JSON object and the server validates it.
+- **Calls.** Each server runs at most 4 calls at once; more wait. A call has a 10-minute limit and is aborted by Stop. Text, images, audio, embedded resources, and resource links become the tool result; structured content is used as JSON when there is no text. A call while the server is not connected returns an error result.
+- **Permissions.** Calls to a server the user has not trusted ask first, with an access `{ kind: 'mcp', server, tool }`; "Allow for this session" grants that one tool. A trusted server's calls run without asking. `readOnlyHint` only marks a tool safe to run in parallel.
+- **Core services.** Core can call a server's tool directly (`McpHost.call`), for checks such as a source's sign-in state (§4.2).
+
 ## 8. Attachments
 
 A media type is admissible for a session when the card's `input` declares it (native) or an active processor converts it into a type the card accepts.

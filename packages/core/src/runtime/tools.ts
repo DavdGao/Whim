@@ -158,6 +158,14 @@ function race<T>(
     });
 }
 
+/** Tools that come and go at run time, such as those of MCP servers (design.md §7.7). */
+export interface DynamicTools {
+    /** The tools available now, for a new epoch. */
+    tools(): readonly ToolDefinition<unknown>[];
+    /** One tool by name, or undefined when it is not available now. */
+    tool(name: string): ToolDefinition<unknown> | undefined;
+}
+
 /**
  * Runs tool calls: validation, permissions, scheduling, jobs, background handoff, and
  * truncation. It is the only writer of tool records.
@@ -186,6 +194,7 @@ export class ToolRuntime {
      * @param onJobEnded Called after a background job's end is committed.
      * @param reviewer The reviewer answering asks first in auto mode, read at each ask; undefined
      * in manual mode. Throwing is a review failure.
+     * @param dynamic Tools that come and go at run time, such as those of MCP servers.
      */
     constructor(
         private readonly store: Store,
@@ -196,7 +205,8 @@ export class ToolRuntime {
         readonly sessionsDir: string,
         private readonly legacyArtifactsDir: string | undefined,
         private readonly onJobEnded: (sessionId: string) => void,
-        private readonly reviewer: () => Promise<Reviewer | undefined> = async () => undefined
+        private readonly reviewer: () => Promise<Reviewer | undefined> = async () => undefined,
+        private readonly dynamic: DynamicTools = { tools: () => [], tool: () => undefined }
     ) {
         this.#base = baseTools;
         this.#builtins = [...baseTools, this.#jobOutputTool(), this.#jobStopTool()];
@@ -229,9 +239,10 @@ export class ToolRuntime {
         nativeTools: readonly string[],
         credentialTypes: ReadonlySet<string> = new Set()
     ): ToolDeclaration[] {
-        const plugins = [...this.host.tools.values()]
-            .map(entry => entry.tool)
-            .filter(tool => !this.#builtins.some(builtin => builtin.name === tool.name));
+        const plugins = [
+            ...[...this.host.tools.values()].map(entry => entry.tool),
+            ...this.dynamic.tools(),
+        ].filter(tool => !this.#builtins.some(builtin => builtin.name === tool.name));
         const tools = [...this.#base, ...plugins].filter(
             tool =>
                 (workspace || !tool.needsWorkspace) &&
@@ -328,7 +339,11 @@ export class ToolRuntime {
      */
     #resolveTool(view: SessionView, name: string): ToolDefinition<unknown> | undefined {
         if (!view.epoch.tools.some(tool => tool.name === name)) return undefined;
-        return this.#builtins.find(tool => tool.name === name) ?? this.host.tools.get(name)?.tool;
+        return (
+            this.#builtins.find(tool => tool.name === name) ??
+            this.host.tools.get(name)?.tool ??
+            this.dynamic.tool(name)
+        );
     }
 
     /**
@@ -342,7 +357,8 @@ export class ToolRuntime {
             return { error: `There is no tool named ${call.name}.` };
         const builtin = this.#builtins.find(item => item.name === call.name);
         const registered = builtin ? undefined : this.host.tools.get(call.name);
-        const tool = builtin ?? registered?.tool;
+        // Dynamic tools (MCP) carry the server's own schema, which the server validates.
+        const tool = builtin ?? registered?.tool ?? this.dynamic.tool(call.name);
         if (!tool) return { error: `The tool ${call.name} is not available right now.` };
         let input: unknown;
         try {

@@ -137,7 +137,7 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 Infrastructure:
 
 - [x] Schedules for the main agent (design.md §4.1.1)
-- [ ] MCP host in Core (design.md §7.7): server configurations in Settings (stdio and streamable HTTP), one shared connection per server across agents, tools as `mcp__<server>__<tool>` under permissions, restart with backoff, bounded concurrency per server
+- [x] MCP host in Core (design.md §7.7): server configurations in Settings (stdio and streamable HTTP), one shared connection per server across agents, tools as `mcp__<server>__<tool>` under permissions, restart with backoff, bounded concurrency per server
 - [ ] Source agents (agent.md §15): each information source is a long-lived agent with one session, its own workspace and memory folder, and its own model (a default, overridable); created from a plugin's source template, hidden from the chat list, and deleted with all its data
 - [ ] Messages between agents (agent.md §15): `SendMessage` for the main agent, `Reply` for a source agent with a short summary and result files copied into the receiver's media; delivered as `<system-notification kind="message" from time request>`; a running receiver gets it at its next step, an idle one is woken, and every reply wakes the main agent
 - [ ] Health before a run: a source whose account or connection is not ready is not started; the sender gets an immediate reply naming the state, the user a notification, and the source page a reconnect action

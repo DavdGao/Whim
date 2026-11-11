@@ -21,6 +21,7 @@ import {
     PuzzleIcon,
     SaveIcon,
     PaletteIcon,
+    ServerIcon,
     SlidersHorizontalIcon,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -39,6 +40,7 @@ import { ModelSettings } from '../models/models-page';
 import { PluginSettings } from '../plugins/plugins-page';
 
 import { AgentSettings } from './agent-settings';
+import { McpSettings } from './mcp-settings';
 
 import type { AppState } from '../../../shared/ipc';
 import type { PageProps, SettingsSectionEntry } from '../../lib/navigation';
@@ -68,6 +70,7 @@ const sections: readonly SettingsSectionEntry[] = [
     },
     { id: 'models', title: 'nav.models', icon: BoxesIcon, component: ModelSettings },
     { id: 'plugins', title: 'nav.plugins', icon: PuzzleIcon, component: PluginSettings },
+    { id: 'mcp', title: 'settings.mcp', icon: ServerIcon, component: McpSettings },
 ];
 
 /**

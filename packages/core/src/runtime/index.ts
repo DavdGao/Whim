@@ -43,7 +43,9 @@ export {
     minIntervalMs,
 } from './schedules.js';
 export type { ScheduleInput, SchedulePatch, SchedulerOptions, Timing } from './schedules.js';
-export type { ToolCredentials, ToolModels } from './tools.js';
+export type { DynamicTools, ToolCredentials, ToolModels } from './tools.js';
+export { McpHost, mcpToolName, toolOutput } from './mcp.js';
+export type { McpHostOptions } from './mcp.js';
 export { evaluate, isInside, rulesFor } from './permissions.js';
 export type { PermissionEnv } from './permissions.js';
 export { storeMedia } from './media.js';

@@ -835,6 +835,67 @@ describe('Agent', () => {
             assert.equal((await store.view(sessionId)).lastRun?.result.outcome, 'completed');
         });
 
+        it('declares and runs tools that come and go, such as an MCP server', async () => {
+            const host = new PluginHost(store, []);
+            host.tools.set(echo.name, {
+                pluginId: 'test',
+                tool: echo as ToolDefinition<unknown>,
+                inputSchema: new CompiledSchema(echo.inputSchema),
+            });
+            let available: ToolDefinition<unknown>[] = [
+                { ...(echo as ToolDefinition<unknown>), name: 'mcp__fixture__echo' },
+            ];
+            const runtime = new ToolRuntime(
+                store,
+                host,
+                { open: () => Promise.reject(new Error('No provider tools here.')) },
+                {
+                    list: async () => [],
+                    resolve: () => Promise.reject(new Error('No credentials.')),
+                },
+                [],
+                join(dir, 'sessions'),
+                undefined,
+                () => undefined,
+                async () => undefined,
+                {
+                    tools: () => available,
+                    tool: name => available.find(tool => tool.name === name),
+                }
+            );
+            const declarations = runtime.declarations(undefined, []);
+            assert.deepEqual(
+                declarations.map(tool => tool.name),
+                ['Echo', 'mcp__fixture__echo', 'JobOutput', 'JobStop']
+            );
+            const sessionId = await sessionWith('use it', declarations);
+            const first = callingModel('mcp__fixture__echo', '{"text":"hi"}');
+            await drain(
+                new Agent(store, first.models, runtime, { sleep: noSleep }).run(
+                    sessionId,
+                    'user',
+                    new AbortController().signal
+                )
+            );
+            assert.deepEqual((await transcript(sessionId))[2], ['tool', 'success', 'echo: hi']);
+            // Its server went away: the frozen declaration stays, the call fails.
+            available = [];
+            await say(sessionId, 'again');
+            const second = callingModel('mcp__fixture__echo', '{"text":"hi"}');
+            await drain(
+                new Agent(store, second.models, runtime, { sleep: noSleep }).run(
+                    sessionId,
+                    'user',
+                    new AbortController().signal
+                )
+            );
+            assert.deepEqual((await transcript(sessionId)).at(-2), [
+                'tool',
+                'error',
+                'The tool mcp__fixture__echo is not available right now.',
+            ]);
+        });
+
         it('runs a provider tool through the adapter and counts its tokens apart from context', async () => {
             const calls: unknown[] = [];
             const fetcher = { ...echo, name: 'WebFetch', standard: 'web_fetch' as const };
