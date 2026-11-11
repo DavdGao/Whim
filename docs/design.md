@@ -88,6 +88,16 @@ Background work that starts without the user is a **trigger** delivering input i
 - **Model input.** The notice renders as `<system-notification kind="schedule" schedule="…" name="…" due="…" time="…" late="true">message</system-notification>` ([agent.md §14.2](agent.md#142-marking-what-the-system-writes)); the chat shows a line naming the schedule.
 - **Planned.** A Settings page listing every schedule with pause and delete, information-source agents (which do not get the schedule tools), and plugin event sources.
 
+### 4.2 Information sources
+
+Whim gathers information from sources such as arXiv, GitHub Trending, Zhihu, Reddit, X, Xiaohongshu, and user-supplied feeds and pages ([research/feed-sources.md](research/feed-sources.md), [feed-source-access.md](feed-source-access.md)). One agent cannot search them all in reasonable time, so each source has an agent of its own:
+
+- **Source agents.** A source is a long-lived agent with one session, its own workspace and memory, and its own model. It knows its platform: how to search it, how to judge its content, and what it reported before. It is created from a source template a plugin contributes (§5.5): instructions, the tools it needs, and a health check. Deleting a source deletes its session and files.
+- **Messages.** The main agent sends a source a request; a running source receives it at its next step and an idle one is woken. The source answers with a short summary and files, which are copied into the requester's session, so the requester reads them with Read and they outlive the source ([agent.md §15](agent.md#15-source-agents-and-messages)). Each reply wakes the requester, which decides whether to answer the user now or wait for more.
+- **Increments.** What changed since last time comes from files, not from conversation memory: a source keeps its reports in its workspace and reads the previous one before writing the next, so compaction or a restart does not lose it.
+- **Accounts.** Sign-in happens once, when the source is set up, and its state persists in the connector (an API credential, a browser profile, or an MCP server's own storage). A source whose health check fails is not run; the requester is told at once and the user gets a notification with a reconnect action. Agents never sign in.
+- **Schedules.** Regular updates are schedules of the main agent (§4.1.1); source agents have no schedule tools.
+
 ## 5. Plugins
 
 ### 5.1 Manifest
