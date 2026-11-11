@@ -77,6 +77,11 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [ ] Skills
 - [ ] MEMORY.md plugin
 
+## Prompts (agent.md §14)
+
+- [x] Rules for writing prompts: four parts with one place per rule, XML elements with attributes for everything Whim inserts, writing rules
+- [ ] Audit the shipped prompts against them: system prompt, base tool and plugin tool descriptions and parameters, tool-result notes, notices (`<system-notification>` for events, with `time` and ids as attributes), compaction request and reminder; renderer version bump where history rendering changes
+
 ## PR 6 — Tools
 
 - [x] Foundation: tool definitions and plugin registration, `tool_call`/`native_tool_call` blocks, tool results, permission/tool/job records, epoch tool sets, session workspace
