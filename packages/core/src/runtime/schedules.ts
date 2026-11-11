@@ -477,6 +477,15 @@ export class Scheduler {
                 ...common,
                 execute: run(async (input, sessionId) => {
                     const value = createInput.parse(input);
+                    // Checked here rather than with oneOf, which strict schema compilation refuses.
+                    if ((value.at === undefined) === (value.cron === undefined))
+                        throw new ScheduleError(
+                            'Give exactly one of at (a single fire) and cron (repeating).'
+                        );
+                    if (value.at !== undefined && value.timezone !== undefined)
+                        throw new ScheduleError(
+                            'timezone applies only to cron; at carries its own UTC offset.'
+                        );
                     const timing: Timing =
                         value.at !== undefined
                             ? { kind: 'at', at: value.at }
@@ -630,7 +639,6 @@ const createSchema: JsonSchema = {
         missed: missedProperty,
     },
     required: ['name', 'message'],
-    oneOf: [{ required: ['at'] }, { required: ['cron'] }],
     additionalProperties: false,
 };
 const listSchema: JsonSchema = {
@@ -671,7 +679,6 @@ const updateSchema: JsonSchema = {
         paused: { type: 'boolean', description: 'true to pause, false to resume' },
     },
     required: ['id'],
-    not: { required: ['at', 'cron'] },
     additionalProperties: false,
 };
 const deleteSchema: JsonSchema = {
