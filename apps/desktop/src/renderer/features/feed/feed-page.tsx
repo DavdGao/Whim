@@ -34,10 +34,17 @@ import { ActionButton } from '../../components/action-button';
 import { ChoiceMenu } from '../../components/choice-menu';
 import { call, ClientError } from '../../lib/client';
 import { useT } from '../../lib/i18n';
+import { pluginText } from '../../lib/messages';
 import { modelChoices } from '../chat/model-choices';
 import { ModelPicker } from '../chat/model-picker';
 
-import type { AppState, ChatSlot, SourceInfo, SourceTemplateInfo } from '../../../shared/ipc';
+import type {
+    AppState,
+    ChatSlot,
+    Locale,
+    SourceInfo,
+    SourceTemplateInfo,
+} from '../../../shared/ipc';
 import type { PageProps } from '../../lib/navigation';
 import type { SourceLogin } from '@whimkit/core/plugin';
 
@@ -51,6 +58,28 @@ function notify(error: unknown, fallback: string): void {
 }
 
 /**
+ * A template's name or description in the UI language, from its plugin's catalogs.
+ * @param state Application state.
+ * @param locale The UI language.
+ * @param template The template.
+ * @param key Which text.
+ * @returns The text.
+ */
+function templateText(
+    state: AppState,
+    locale: Locale,
+    template: SourceTemplateInfo,
+    key: 'name' | 'description'
+): string {
+    return pluginText(
+        state.plugins.find(plugin => plugin.id === template.pluginId)?.locales,
+        locale,
+        template[key],
+        template[key]
+    );
+}
+
+/**
  * The Feed page: information sources with their state, and the actions on them.
  * @param props Application state and navigation.
  * @param props.state Application state.
@@ -58,7 +87,7 @@ function notify(error: unknown, fallback: string): void {
  * @returns The page.
  */
 export function FeedPage({ state, navigate }: PageProps) {
-    const { t } = useT();
+    const { t, locale } = useT();
     const [adding, setAdding] = useState(false);
     const [signingIn, setSigningIn] = useState<SourceInfo | undefined>();
     const [removing, setRemoving] = useState<SourceInfo | undefined>();
@@ -97,18 +126,24 @@ export function FeedPage({ state, navigate }: PageProps) {
                 </Empty>
             ) : (
                 <ul className="flex flex-col gap-3">
-                    {state.sources.map(source => (
-                        <SourceRow
-                            key={source.id}
-                            source={source}
-                            template={state.sourceTemplates.find(
-                                item => item.id === source.template
-                            )}
-                            onOpen={() => navigate('chat', { sessionId: source.sessionId })}
-                            onSignIn={() => setSigningIn(source)}
-                            onRemove={() => setRemoving(source)}
-                        />
-                    ))}
+                    {state.sources.map(source => {
+                        const template = state.sourceTemplates.find(
+                            item => item.id === source.template
+                        );
+                        return (
+                            <SourceRow
+                                key={source.id}
+                                source={source}
+                                template={template}
+                                templateName={
+                                    template && templateText(state, locale, template, 'name')
+                                }
+                                onOpen={() => navigate('chat', { sessionId: source.sessionId })}
+                                onSignIn={() => setSigningIn(source)}
+                                onRemove={() => setRemoving(source)}
+                            />
+                        );
+                    })}
                 </ul>
             )}
             {adding && (
@@ -131,6 +166,7 @@ export function FeedPage({ state, navigate }: PageProps) {
  * @param props The row.
  * @param props.source The source.
  * @param props.template Its template, absent when the plugin is not active.
+ * @param props.templateName Its name in the UI language.
  * @param props.onOpen Open its conversation.
  * @param props.onSignIn Start its sign-in.
  * @param props.onRemove Ask to delete it.
@@ -139,12 +175,14 @@ export function FeedPage({ state, navigate }: PageProps) {
 function SourceRow({
     source,
     template,
+    templateName,
     onOpen,
     onSignIn,
     onRemove,
 }: {
     source: SourceInfo;
     template: SourceTemplateInfo | undefined;
+    templateName: string | undefined;
     onOpen: () => void;
     onSignIn: () => void;
     onRemove: () => void;
@@ -162,7 +200,7 @@ function SourceRow({
                     </Badge>
                 </div>
                 <p className="text-muted-foreground truncate text-sm">
-                    {template?.name ?? source.template}
+                    {templateName ?? source.template}
                     {health.state !== 'ready' && ` · ${health.detail}`}
                 </p>
             </div>
@@ -215,7 +253,7 @@ function AddSourceDialog({
     onCreated: (sessionId: string) => void;
     onClose: () => void;
 }) {
-    const { t } = useT();
+    const { t, locale } = useT();
     const choices = modelChoices(state);
     const first = choices[0];
     const [templateId, setTemplateId] = useState(state.sourceTemplates[0]?.id);
@@ -230,7 +268,9 @@ function AddSourceDialog({
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle>{t('feed.add')}</DialogTitle>
-                    <DialogDescription>{template?.description}</DialogDescription>
+                    <DialogDescription>
+                        {template && templateText(state, locale, template, 'description')}
+                    </DialogDescription>
                 </DialogHeader>
                 <FieldGroup>
                     <Field>
@@ -239,7 +279,7 @@ function AddSourceDialog({
                             value={templateId}
                             choices={state.sourceTemplates.map(item => ({
                                 value: item.id,
-                                label: item.name,
+                                label: templateText(state, locale, item, 'name'),
                             }))}
                             icon={<RssIcon />}
                             placeholder={t('feed.template')}
@@ -253,7 +293,7 @@ function AddSourceDialog({
                             id="feed-name"
                             value={name}
                             maxLength={60}
-                            placeholder={template?.name}
+                            placeholder={template && templateText(state, locale, template, 'name')}
                             onChange={event => setName(event.currentTarget.value)}
                         />
                     </Field>
@@ -282,7 +322,9 @@ function AddSourceDialog({
                             try {
                                 const { sessionId } = await call('source.create', {
                                     template: template.id,
-                                    name: name.trim() || template.name,
+                                    name:
+                                        name.trim() ||
+                                        templateText(state, locale, template, 'name'),
                                     slot,
                                 });
                                 onCreated(sessionId);

@@ -144,7 +144,7 @@ Infrastructure:
 
 Sources (each a first-party plugin with its tools and source template):
 
-- [ ] arXiv: Atom query API search and category announcements, paper id and version kept
+- [x] arXiv: Atom query API search with category, author and date filters, paper id and version kept (category announcement feeds are not used: a category query sorted by date covers them)
 - [ ] GitHub: Trending (period, language) in page order, and repository search through REST
 - [ ] Feeds and pages: RSS/Atom with conditional requests and feed discovery; a page's main text for change tracking
 - [ ] Zhihu: hot list through the web JSON route
