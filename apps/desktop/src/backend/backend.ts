@@ -1487,6 +1487,9 @@ function bundledPlugins(): { dir: string; source: 'bundled' }[] {
         '@whimkit/plugin-claude-code',
         '@whimkit/plugin-codex',
         '@whimkit/plugin-arxiv',
+        '@whimkit/plugin-x',
+        '@whimkit/plugin-reddit',
+        '@whimkit/plugin-xiaohongshu',
     ].map(name => ({
         dir: dirname(require.resolve(`${name}/package.json`)),
         source: 'bundled' as const,

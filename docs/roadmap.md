@@ -148,9 +148,9 @@ Sources (each a first-party plugin with its tools and source template):
 - [ ] GitHub: Trending (period, language) in page order, and repository search through REST
 - [ ] Feeds and pages: RSS/Atom with conditional requests and feed discovery; a page's main text for change tracking
 - [ ] Zhihu: hot list through the web JSON route
-- [ ] Reddit: subreddit listings (hot, new, top with its window) and search through the Data API with app-only OAuth
-- [ ] X: recent search and user timelines through the API with an app bearer token
-- [ ] Xiaohongshu: note search and detail through a local MCP server whose login state persists, QR login shown in Whim
+- [x] Reddit: subreddit listings (hot, new, top with its window), search and comment threads through the Data API with app-only OAuth (client-credentials, or the installed-client grant without a secret)
+- [x] X: recent search (last 7 days) and user timelines through the API with an app bearer token
+- [x] Xiaohongshu: note search, detail and author pages through a local xiaohongshu-mcp server (MCP server id `xiaohongshu`) whose login persists, QR login shown in Whim; only its read tools reach the source agent (`mcpTools`)
 
 Frontend and prompts:
 

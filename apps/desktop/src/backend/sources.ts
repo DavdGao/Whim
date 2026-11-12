@@ -346,7 +346,10 @@ export class Sources {
                 name === 'Reply' ||
                 sourceBaseTools.includes(name) ||
                 (template?.tools.includes(name) ?? false) ||
-                (server !== undefined && name.startsWith(`mcp__${server}__`));
+                (server !== undefined &&
+                    (template?.mcpTools
+                        ? template.mcpTools.some(tool => name === `mcp__${server}__${tool}`)
+                        : name.startsWith(`mcp__${server}__`)));
         }
         const reserved = new Set<string>();
         const servers: string[] = [];

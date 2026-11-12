@@ -1,0 +1,9 @@
+{
+    "plugin.name": "Reddit",
+    "plugin.description": "Follow subreddits and search Reddit through the Data API, with a source agent.",
+    "credential.@whimkit/plugin-reddit#oauth-app": "Reddit API app",
+    "schema.@whimkit/plugin-reddit#oauth-app./clientId.title": "Client ID",
+    "schema.@whimkit/plugin-reddit#oauth-app./clientSecret.title": "Client secret (leave empty for an installed app)",
+    "source.reddit.name": "Reddit",
+    "source.reddit.description": "Reddit posts and discussions: what is hot, new or top in chosen subreddits, and searches by topic."
+}

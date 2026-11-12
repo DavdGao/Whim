@@ -1,0 +1,8 @@
+{
+    "plugin.name": "X",
+    "plugin.description": "Follow X accounts and topics through the X API, with a source agent.",
+    "credential.@whimkit/plugin-x#bearer-token": "X API bearer token",
+    "schema.@whimkit/plugin-x#bearer-token./bearerToken.title": "Bearer token",
+    "source.x.name": "X",
+    "source.x.description": "Posts on X: recent search by topic and what chosen accounts have posted."
+}

@@ -1,0 +1,6 @@
+{
+    "plugin.name": "小红书",
+    "plugin.description": "通过本地 xiaohongshu-mcp 服务搜索小红书笔记,由信息源 agent 整理。",
+    "source.xiaohongshu.name": "小红书",
+    "source.xiaohongshu.description": "小红书笔记:按关键词搜索、笔记详情和评论、作者主页。需要在本机运行 xiaohongshu-mcp 服务(MCP 服务 id 为 \"xiaohongshu\"),并扫码登录。"
+}
