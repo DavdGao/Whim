@@ -452,6 +452,12 @@ function NoticeLine({ notice }: { notice: Notice }) {
                 name: notice.payload.name,
             });
             break;
+        case 'agent-message':
+            text = t('chat.agentMessage', { name: notice.payload.fromName });
+            break;
+        case 'agent-reply':
+            text = t('chat.agentReply', { name: notice.payload.sourceName });
+            break;
         case 'workspace-changed':
             text = t('chat.workspace.changed', {
                 name: notice.payload.to.split(/[\\/]/).filter(Boolean).at(-1) ?? notice.payload.to,

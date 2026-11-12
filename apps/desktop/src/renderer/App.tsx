@@ -15,13 +15,14 @@ import {
 import { Skeleton } from '@whimkit/ui/components/skeleton';
 import { Toaster } from '@whimkit/ui/components/sonner';
 import { TooltipProvider } from '@whimkit/ui/components/tooltip';
-import { MessageSquareIcon, SettingsIcon, SquareTerminalIcon } from 'lucide-react';
+import { MessageSquareIcon, RssIcon, SettingsIcon, SquareTerminalIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { AgentAvatar } from './components/agent-avatar';
 import { ChatPage } from './features/chat/chat-page';
 import { CodingPage } from './features/coding/coding-page';
+import { FeedPage } from './features/feed/feed-page';
 import { SettingsPage } from './features/settings/settings-page';
 import { AppStateProvider } from './lib/app-state';
 import { useAppState } from './lib/app-state-context';
@@ -51,6 +52,13 @@ const pages: readonly PageEntry[] = [
         icon: SquareTerminalIcon,
         placement: 'main',
         component: CodingPage,
+    },
+    {
+        id: 'feed',
+        title: 'nav.feed',
+        icon: RssIcon,
+        placement: 'main',
+        component: FeedPage,
     },
     {
         id: 'settings',

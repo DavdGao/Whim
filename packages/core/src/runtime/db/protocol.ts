@@ -52,6 +52,17 @@ export const scheduleRowSchema = z.strictObject({
 });
 export type ScheduleRow = z.infer<typeof scheduleRowSchema>;
 
+/** An information source: a long-lived agent session made from a template (design.md §4.2). */
+export const sourceRowSchema = z.strictObject({
+    /** Short and readable, so agents can name it: lowercase letters, digits, and `-`. */
+    id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/),
+    sessionId: idSchema,
+    template: idSchema,
+    name: z.string().min(1).max(60),
+    createdAt: z.iso.datetime(),
+});
+export type SourceRow = z.infer<typeof sourceRowSchema>;
+
 const id = z.number().int().nonnegative();
 
 /** Requests from the async store to its DB worker. */
@@ -99,6 +110,10 @@ export const requestSchema = z.discriminatedUnion('op', [
         /** The delivery to commit with the fire; absent when a missed fire is skipped. */
         command: commandSchema.optional(),
     }),
+    z.strictObject({ id, op: z.literal('source.list') }),
+    z.strictObject({ id, op: z.literal('source.put'), source: sourceRowSchema }),
+    /** Delete a source with its session's journal, receipts, and schedules. */
+    z.strictObject({ id, op: z.literal('source.delete'), sourceId: idSchema }),
     z.strictObject({ id, op: z.literal('close') }),
 ]);
 export type Request = z.infer<typeof requestSchema>;

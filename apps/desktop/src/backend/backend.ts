@@ -41,6 +41,7 @@ import { pluginClientUrl, themeImageUrl } from '../shared/main-protocol.js';
 import { Coding } from './coding.js';
 import { gitStatus } from './git.js';
 import { McpServers } from './mcp.js';
+import { sourcePrompt, Sources } from './sources.js';
 
 import type {
     AgentProfile,
@@ -235,7 +236,7 @@ function toIpcError(error: unknown): IpcError {
     return { code: 'internal', message: describeError(error) };
 }
 
-type RunTrigger = 'user' | 'continue' | 'restart' | 'job' | 'schedule';
+type RunTrigger = 'user' | 'continue' | 'restart' | 'job' | 'schedule' | 'message';
 
 /** Owns Core services, the agent, run scheduling, and the Renderer connection. */
 class Backend {
@@ -247,6 +248,7 @@ class Backend {
     readonly tools: ToolRuntime;
     readonly scheduler: Scheduler;
     readonly mcp: McpServers;
+    readonly sources: Sources;
     readonly #baseTools: ReturnType<typeof baseTools>;
     /** Attachments wait here between staging and sending; cleared at start. */
     readonly #stagingDir: string;
@@ -283,6 +285,25 @@ class Backend {
     ) {
         this.#toMain = toMain;
         this.mcp = new McpServers(store, secrets, version, () => this.#emit({ type: 'state' }));
+        this.sources = new Sources(store, host, this.mcp.host, credentials, {
+            sessionDir: sessionId => this.tools.sessionDir(sessionId),
+            // A message starts the receiver's run, like a finished job does.
+            wake: sessionId => this.schedule(sessionId, 'message'),
+            notify: (source, health) => {
+                this.#toMain({
+                    type: 'attention',
+                    sessionId: source.sessionId,
+                    title: source.name,
+                    kind: health.state === 'needs-login' ? 'signin' : 'setup',
+                });
+                this.#emit({ type: 'state' });
+            },
+            requesterName: async sessionId => {
+                const { name } = await this.#profile();
+                const { title } = await this.store.view(sessionId);
+                return title ? `${name} (chat "${title}")` : name;
+            },
+        });
         this.coding = new Coding(store, host, event =>
             this.#emit(
                 event.type === 'output'
@@ -304,7 +325,7 @@ class Backend {
             host,
             models,
             credentials,
-            [...this.#baseTools, ...this.scheduler.tools()],
+            [...this.#baseTools, ...this.scheduler.tools(), ...this.sources.tools()],
             join(userData, 'sessions'),
             join(userData, 'artifacts'),
             sessionId => this.schedule(sessionId, 'job'),
@@ -424,7 +445,7 @@ class Backend {
         const locale = localeSchema.safeParse(await this.store.getSetting('locale'));
         const running: Activity['running'] = [];
         for (const session of await this.store.sessions()) {
-            if (!session.running) continue;
+            if (!session.running || this.sources.bySession(session.sessionId)) continue;
             const view = await this.store.view(session.sessionId);
             running.push({
                 sessionId: session.sessionId,
@@ -456,7 +477,8 @@ class Backend {
                 kinds.push('waiting');
         }
         const kind = kinds.at(-1);
-        if (!kind) return;
+        // A source's runs answer agents, not the user; only its sign-in needs them.
+        if (!kind || this.sources.bySession(sessionId)) return;
         this.store
             .view(sessionId)
             .then(view => this.#toMain({ type: 'attention', sessionId, title: view.title, kind }))
@@ -644,6 +666,38 @@ class Backend {
                 this.#emit({ type: 'state' });
                 return null;
             }
+            case 'source.create': {
+                const params = methodSchemas[method].parse(raw);
+                return this.createSource(params.template, params.name, params.slot);
+            }
+            case 'source.remove': {
+                const { id } = methodSchemas[method].parse(raw);
+                const source = await this.sources.remove(id);
+                await rm(this.tools.sessionDir(source.sessionId), { recursive: true, force: true });
+                this.#emit({ type: 'state' });
+                return null;
+            }
+            case 'source.check': {
+                const { id } = methodSchemas[method].parse(raw);
+                const source = this.sources.list().find(row => row.id === id);
+                if (!source) throw new StoreError('not-found', 'The source no longer exists.');
+                await this.sources.health(source, true);
+                this.#emit({ type: 'state' });
+                return (
+                    this.sources.infos().find(info => info.id === id)?.health ?? { state: 'ready' }
+                );
+            }
+            case 'source.login': {
+                const { id } = methodSchemas[method].parse(raw);
+                const login = await this.sources.login(id);
+                // A finished sign-in changes health; check again so the page shows it.
+                if (login.kind === 'done') {
+                    const source = this.sources.list().find(row => row.id === id);
+                    if (source) await this.sources.health(source, true);
+                    this.#emit({ type: 'state' });
+                }
+                return login;
+            }
             case 'session.continue':
                 this.schedule(methodSchemas[method].parse(raw).sessionId, 'continue');
                 return null;
@@ -784,15 +838,18 @@ class Backend {
             catalog: this.catalog.entries(),
             credentials: await this.credentials.list(),
             agent: { ...profile, isDefault: !savedProfile },
-            sessions: (await this.store.sessions()).map(session => ({
-                sessionId: session.sessionId,
-                title: session.title,
-                cardId: session.cardId,
-                createdAt: session.createdAt,
-                updatedAt: session.updatedAt,
-                running: session.running,
-                pinned: pinned.includes(session.sessionId),
-            })),
+            // Sources are listed on the Feed page, not among the chats.
+            sessions: (await this.store.sessions())
+                .filter(session => !this.sources.bySession(session.sessionId))
+                .map(session => ({
+                    sessionId: session.sessionId,
+                    title: session.title,
+                    cardId: session.cardId,
+                    createdAt: session.createdAt,
+                    updatedAt: session.updatedAt,
+                    running: session.running,
+                    pinned: pinned.includes(session.sessionId),
+                })),
             codingAgents: [...this.host.codingAgents.values()].map(entry => ({
                 id: entry.agent.id,
                 pluginId: entry.pluginId,
@@ -800,6 +857,14 @@ class Backend {
             })),
             codingHosts: await this.coding.hosts(),
             mcpServers: await this.mcp.views(),
+            sources: this.sources.infos(),
+            sourceTemplates: [...this.host.sources.values()].map(({ pluginId, template }) => ({
+                id: template.id,
+                pluginId,
+                name: template.name,
+                description: template.description,
+                login: template.login !== undefined,
+            })),
         };
     }
 
@@ -951,17 +1016,34 @@ class Backend {
                 .filter(credential => credential.available)
                 .map(credential => credential.typeId)
         );
-        const tools = this.tools.declarations(workspace, nativeTools, credentialTypes);
+        const tools = this.tools.declarations(
+            workspace,
+            nativeTools,
+            credentialTypes,
+            this.sources.toolFilter(sessionId)
+        );
+        const source = this.sources.bySession(sessionId);
         const profile = await this.#profile();
+        const sessionDir = this.tools.sessionDir(sessionId);
+        const template = source ? this.sources.template(source) : undefined;
         return {
             epochId: randomUUID(),
-            system: systemPrompt(
-                profile,
-                await this.#userName(),
-                this.tools.sessionDir(sessionId),
-                workspace,
-                tools.length + nativeTools.length > 0
-            ),
+            system:
+                source && workspace
+                    ? sourcePrompt(
+                          source,
+                          template,
+                          template?.template.name ?? source.template,
+                          sessionDir,
+                          workspace
+                      )
+                    : systemPrompt(
+                          profile,
+                          await this.#userName(),
+                          sessionDir,
+                          workspace,
+                          tools.length + nativeTools.length > 0
+                      ),
             card: freeze(card),
             renderer: rendererVersion,
             tools,
@@ -1005,16 +1087,17 @@ class Backend {
      * Create a session from a chat slot.
      * @param slot Credential, card, and thinking level.
      * @param chosen Absolute directory the session works in; the default folder when absent.
+     * @param presetId A session id decided by the caller, for sessions that others refer to.
      * @returns The session id.
      */
-    async createSession(slot: ChatSlot, chosen?: string): Promise<string> {
+    async createSession(slot: ChatSlot, chosen?: string, presetId?: string): Promise<string> {
         const card = await this.#checkBinding(slot.cardId, slot.credentialId);
         if (chosen !== undefined) {
             const info = isAbsolute(chosen) ? await stat(chosen).catch(() => null) : null;
             if (!info?.isDirectory())
                 throw new StoreError('invalid', 'The workspace folder does not exist.');
         }
-        const sessionId = randomUUID();
+        const sessionId = presetId ?? randomUUID();
         const workspace = chosen ?? this.defaultWorkspace(sessionId);
         if (chosen === undefined) await mkdir(workspace, { recursive: true });
         await this.store.execute({
@@ -1029,6 +1112,46 @@ class Backend {
         });
         await this.store.setSetting('slot.chat', slot);
         return sessionId;
+    }
+
+    /**
+     * Create an information source: its record first, so the session's first epoch is the
+     * source's, then the session with the chosen model.
+     * @param template The template id.
+     * @param name What the source is called.
+     * @param slot Model, credential and thinking level.
+     * @returns The source and its session.
+     */
+    async createSource(
+        template: string,
+        name: string,
+        slot: ChatSlot
+    ): Promise<{ id: string; sessionId: string }> {
+        if (!this.host.sources.has(template))
+            throw new StoreError('invalid', 'This template is not available.');
+        const row = {
+            id: this.sources.newId(name),
+            sessionId: randomUUID(),
+            template,
+            name,
+            createdAt: new Date().toISOString(),
+        };
+        await this.sources.add(row);
+        try {
+            await this.createSession(slot, undefined, row.sessionId);
+            await this.store.execute({
+                type: 'update',
+                operationId: randomUUID(),
+                sessionId: row.sessionId,
+                title: name,
+            });
+        } catch (error) {
+            await this.sources.remove(row.id).catch(() => undefined);
+            await rm(this.tools.sessionDir(row.sessionId), { recursive: true, force: true });
+            throw error;
+        }
+        this.#emit({ type: 'state' });
+        return { id: row.id, sessionId: row.sessionId };
     }
 
     /**
@@ -1268,7 +1391,10 @@ class Backend {
             const waiting = [...view.inbox.values()].some(
                 pending =>
                     pending.item.type === 'message' ||
-                    (pending.item.type === 'notice' && pending.item.kind === 'schedule-fired')
+                    (pending.item.type === 'notice' &&
+                        (pending.item.kind === 'schedule-fired' ||
+                            pending.item.kind === 'agent-message' ||
+                            pending.item.kind === 'agent-reply'))
             );
             if (waiting && view.lastRun?.result.outcome === 'completed')
                 this.schedule(sessionId, 'user');
@@ -1459,6 +1585,7 @@ async function start(userData: string, version: string): Promise<void> {
             cipher
         );
         await backend.mcp.start();
+        await backend.sources.load();
         await backend.recover();
         backend.scheduler.start();
         for (const port of pendingPorts.splice(0)) backend.attach(port);

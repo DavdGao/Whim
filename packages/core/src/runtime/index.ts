@@ -9,7 +9,13 @@ export {
     credentialInputSchema,
 } from './credentials.js';
 export type { CredentialInput, CredentialView, SecretCipher } from './credentials.js';
-export type { CredentialRow, PluginRow, ScheduleRow, SessionSummary } from './db/protocol.js';
+export type {
+    CredentialRow,
+    PluginRow,
+    ScheduleRow,
+    SessionSummary,
+    SourceRow,
+} from './db/protocol.js';
 export { CompiledSchema } from './json-schema.js';
 export type { SchemaIssue } from './json-schema.js';
 export { ModelService } from './models.js';
@@ -29,6 +35,7 @@ export type {
     RegisteredAdapter,
     RegisteredCodingAgent,
     RegisteredMethod,
+    RegisteredSourceTemplate,
     RegisteredTool,
     TopicValue,
 } from './plugin-host.js';

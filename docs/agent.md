@@ -365,7 +365,25 @@ Everything Whim inserts that is not the user's own message is marked with an XML
 
 Changing how history renders into requests is prompt-affecting: it raises `rendererVersion` (§4), and epochs keep rendering as their version did, so a frozen prefix never changes.
 
-## 15. Acceptance
+## 15. Source agents and messages
+
+An information source ([design.md §4.2](design.md#42-information-sources)) is an ordinary session with a different system prompt, tool set, and visibility. Nothing in the runner is special-cased for it.
+
+- **Identity.** A `sources` row maps a source id to its session id, template, and name. The session is created together with the row, uses the model chosen at creation (changed like any session's model), works in `workspace/` inside its session folder, and is excluded from the chat list, attention notifications, and activity. Deleting the source deletes the session, its records, and its folder in one operation.
+- **Prompt.** `sourcePrompt` builds the system prompt: the goal, how the system works (requests arrive as `<system-notification kind="message">`, answers go through `Reply`), the workspace layout (`MEMORY.md`, `reports/<topic>/<date>-<title>.md`), the research loop (pin down the question and window, read memory and the previous report, search in rounds, verify against primary and independent sources, judge quality, compare with the previous report, write the report, reply), the report format, and the template's own instructions. It follows §14.
+- **Tools.** A source gets the base tools without the main agent's reserved ones, `Reply`, its template's tools, and the tools of its template's MCP server. A chat gets everything except `Reply` and tools reserved by source templates. The filter is applied when an epoch is built, so it freezes with the epoch.
+- **`SendMessage` and `ListSources`.** Only chats have them. `SendMessage` names a source and a request that stands alone. Before delivering, Core checks the source's health; a source that cannot run is refused at once with the reason, and the user is notified. Otherwise a `agent-message` notice is committed to the source's session in the same transaction as its inbox entry, and the source is woken.
+- **`Reply`.** Takes the request id, a summary of at most 2000 characters, and up to 10 files of at most 20 MiB. Core copies each file into the requester's `media/` (content-addressed), commits an `agent-reply` notice carrying the copies' media blocks, and wakes the requester. Every reply wakes the requester; it decides whether to answer the user now or wait for other replies. A source that does not reply leaves the request unanswered; there is no timeout notice.
+- **Timing.** A running receiver includes the notice at its next step like any inbox item; an idle one starts a run with trigger `message`.
+- **Health.** `needs-login`, `needs-setup`, and `unavailable` come from checking, in order, that the plugin is active, the template's MCP server is ready, the template's credential type has a credential, and the template's own check passes. A result is reused for 60 seconds. When health turns bad, the user gets one notification (`signin` or `setup`), and the Feed page offers the reconnect action. Agents never sign in.
+- **Increments.** Whatever changed since last time is found by reading the source's own previous report, not conversation memory; compaction or a restart cannot lose it.
+
+## 16. Acceptance
+
+- A request to a healthy source is delivered once, the source is woken, and its reply puts the summary and copies of its files into the requester's session and wakes it.
+- A request to a source that needs sign-in is refused immediately with the state, the source does not run, and the user is notified once per change of state.
+- Chats do not see `Reply` or a source's template tools; sources do not see `SendMessage`, schedules, or the main agent's other reserved tools.
+- Deleting a source removes its session, records, and files.
 
 - Stop during streaming keeps the verbatim partial answer, the next step sees the interrupt notice, and the conversation continues.
 - A user message sent during a run is included at the next step without restarting the in-flight attempt.

@@ -13,7 +13,7 @@ import type {
  * The plugin API version this Core implements, `MAJOR.MINOR` (design.md §5.7). A plugin's
  * `whim.api` must have the same major and a minor no greater than this one.
  */
-export const pluginApiVersion = '1.1';
+export const pluginApiVersion = '1.2';
 
 /** A JSON Schema 2020-12 object. Core validates it before use. */
 export type JsonSchema = Readonly<Record<string, unknown>>;
@@ -282,6 +282,63 @@ export interface CodingAgentDefinition {
     readonly command: readonly string[];
 }
 
+/** Whether a source can run now; checked before each request (design.md §4.2). */
+export type SourceHealth =
+    | { readonly state: 'ready' }
+    | {
+          /** `needs-login`: the account must sign in again; `needs-setup`: something to set up first. */
+          readonly state: 'needs-login' | 'needs-setup' | 'unavailable';
+          /** What is wrong, for the user and the requesting agent. */
+          readonly detail: string;
+      };
+
+/** What a source's sign-in shows the user. */
+export type SourceLogin =
+    | {
+          readonly kind: 'qr';
+          /** The code as a `data:image/…;base64,` URL. */
+          readonly image: string;
+          /** When the code stops working, if known. */
+          readonly expiresAt?: string;
+      }
+    | { readonly kind: 'done' };
+
+/** Services a source's health check and sign-in receive. */
+export interface SourceContext {
+    readonly signal: AbortSignal;
+    /** Call a tool of the template's MCP server; an error result when it is not connected. */
+    callMcp(tool: string, input: Record<string, unknown>): Promise<ToolOutput>;
+    /** The newest credential of the template's credential type, decrypted, when there is one. */
+    readonly credential?: ResolvedCredential;
+}
+
+/**
+ * A kind of information source the user can add (design.md §4.2). Each source made from it is
+ * a long-lived agent with its own session. Experimental: later versions may add fields.
+ */
+export interface SourceTemplateDefinition {
+    /** `<pluginId>#<name>`; the name is declared in `whim.contributes.sources`. */
+    readonly id: string;
+    /** Keys in the plugin's locale catalogs. */
+    readonly name: string;
+    readonly description: string;
+    /**
+     * Model-facing instructions for this platform, in English, added to the source agent's
+     * system prompt: what it holds, how its tools search it, and how to judge its content.
+     */
+    readonly instructions: string;
+    /** The plugin's tools the source agent gets; other agents do not get them. */
+    readonly tools: readonly string[];
+    /** An MCP server (design.md §7.7) whose tools the source agent gets, by server id. */
+    readonly mcpServer?: string;
+    /** A credential type the tools need; without one the source needs setup. */
+    readonly credentialType?: string;
+    /** Check that the source can run; without it, a source is ready when its needs are met. */
+    health?(context: SourceContext): Promise<SourceHealth>;
+    /** Start or continue a sign-in the user completes, such as a QR code to scan. */
+    login?(context: SourceContext): Promise<SourceLogin>;
+}
+
 export interface ServiceDefinition {
     /** Declared in `whim.contributes.services`. */
     readonly id: string;
@@ -326,6 +383,7 @@ export interface PluginContext {
     };
     readonly services: { register(service: ServiceDefinition): Disposer };
     readonly coding: { registerAgent(agent: CodingAgentDefinition): Disposer };
+    readonly sources: { register(template: SourceTemplateDefinition): Disposer };
     /** Calls and subscriptions for the plugin's own client entry, nobody else's. */
     readonly rpc: {
         // Plugins type their own input and output; Core validates both against the schemas.

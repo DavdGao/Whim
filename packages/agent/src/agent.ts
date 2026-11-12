@@ -218,7 +218,7 @@ export class Agent {
      */
     async *run(
         sessionId: string,
-        trigger: 'user' | 'continue' | 'restart' | 'job' | 'schedule',
+        trigger: 'user' | 'continue' | 'restart' | 'job' | 'schedule' | 'message',
         signal: AbortSignal
     ): AsyncGenerator<AgentEvent> {
         const runId = randomUUID();

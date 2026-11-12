@@ -42,7 +42,10 @@ function noticeText(notice: Notice): string {
         case 'workspace-changed':
             return `The user changed the working folder from ${notice.payload.from} to ${notice.payload.to}. Tools now run there and relative paths resolve against it; paths mentioned earlier in this conversation refer to the previous folder.`;
         case 'schedule-fired':
+        case 'agent-message':
             return notice.text;
+        case 'agent-reply':
+            return [notice.text, ...notice.payload.files.map(mediaReference)].join('\n');
     }
 }
 
@@ -56,6 +59,14 @@ export function renderNotice(notice: Notice): string {
     if (notice.kind === 'schedule-fired') {
         const { scheduleId, name, dueAt, late } = notice.payload;
         return `<system-notification kind="schedule" schedule="${attribute(scheduleId)}" name="${attribute(name)}" due="${dueAt}" time="${notice.observedAt}"${late ? ' late="true"' : ''}>\n${notice.text}\n</system-notification>`;
+    }
+    if (notice.kind === 'agent-message') {
+        const { requestId, fromName } = notice.payload;
+        return `<system-notification kind="message" from="${attribute(fromName)}" request="${attribute(requestId)}" time="${notice.observedAt}">\n${notice.text}\n</system-notification>`;
+    }
+    if (notice.kind === 'agent-reply') {
+        const { requestId, sourceId, sourceName } = notice.payload;
+        return `<system-notification kind="reply" from="${attribute(sourceName)}" source="${attribute(sourceId)}" request="${attribute(requestId)}" time="${notice.observedAt}">\n${noticeText(notice)}\n</system-notification>`;
     }
     return `<system-reminder>${noticeText(notice)}</system-reminder>`;
 }

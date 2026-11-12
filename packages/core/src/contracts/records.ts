@@ -135,6 +135,31 @@ export const noticeSchema = z.discriminatedUnion('kind', [
         }),
         text: z.string(),
     }),
+    /** Another agent asks this source agent for something (design.md §4.2); `text` is the request. */
+    z.strictObject({
+        ...noticeBase,
+        kind: z.literal('agent-message'),
+        payload: z.strictObject({
+            requestId: idSchema,
+            /** The asking session, which the reply goes to. */
+            fromSessionId: idSchema,
+            fromName: z.string(),
+        }),
+        text: z.string(),
+    }),
+    /** A source agent answered a request of this session; `text` is its summary. */
+    z.strictObject({
+        ...noticeBase,
+        kind: z.literal('agent-reply'),
+        payload: z.strictObject({
+            requestId: idSchema,
+            sourceId: idSchema,
+            sourceName: z.string(),
+            /** The result files, copied into this session's media. */
+            files: z.array(mediaBlockSchema),
+        }),
+        text: z.string(),
+    }),
     /** The user moved the chat to another folder between runs. */
     z.strictObject({
         ...noticeBase,
@@ -317,7 +342,7 @@ export const bodySchema = z.discriminatedUnion('type', [
     z.strictObject({
         type: z.literal('run.started'),
         runId: idSchema,
-        trigger: z.enum(['user', 'continue', 'restart', 'job', 'schedule']),
+        trigger: z.enum(['user', 'continue', 'restart', 'job', 'schedule', 'message']),
     }),
     z.strictObject({
         type: z.literal('step.prepared'),

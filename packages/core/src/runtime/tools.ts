@@ -232,12 +232,14 @@ export class ToolRuntime {
      * @param nativeTools Standard ids the provider executes inside its chat call. Local tools with
      * these ids are left out; tools the adapter runs as separate calls keep their local declaration.
      * @param credentialTypes Credential types the user has; tools needing another are left out.
+     * @param allowed Whether the session may use a tool by name; others are left out.
      * @returns Base tools, then plugin tools in registration order, then the job tools.
      */
     declarations(
         workspace: string | undefined,
         nativeTools: readonly string[],
-        credentialTypes: ReadonlySet<string> = new Set()
+        credentialTypes: ReadonlySet<string> = new Set(),
+        allowed: (name: string) => boolean = () => true
     ): ToolDeclaration[] {
         const plugins = [
             ...[...this.host.tools.values()].map(entry => entry.tool),
@@ -247,7 +249,8 @@ export class ToolRuntime {
             tool =>
                 (workspace || !tool.needsWorkspace) &&
                 !nativeTools.includes(tool.standard ?? '') &&
-                (!tool.credentialType || credentialTypes.has(tool.credentialType))
+                (!tool.credentialType || credentialTypes.has(tool.credentialType)) &&
+                allowed(tool.name)
         );
         if (tools.length === 0) return [];
         return [...tools, ...this.#builtins.slice(this.#base.length)].map(tool => ({

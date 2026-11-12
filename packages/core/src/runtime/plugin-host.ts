@@ -12,6 +12,7 @@ import { CompiledSchema } from './json-schema.js';
 import type { Store } from './store.js';
 import type {
     CodingAgentDefinition,
+    SourceTemplateDefinition,
     ModelAdapter,
     CredentialType,
     Disposer,
@@ -39,6 +40,7 @@ const contributesSchema = z
         chatTools: contributionNames,
         composerActions: contributionNames,
         codingAgents: contributionNames,
+        sources: contributionNames,
     })
     .default({
         credentialTypes: [],
@@ -52,6 +54,7 @@ const contributesSchema = z
         chatTools: [],
         composerActions: [],
         codingAgents: [],
+        sources: [],
     });
 export type PluginContributions = z.infer<typeof contributesSchema>;
 
@@ -367,6 +370,11 @@ export interface RegisteredTool {
     readonly inputSchema: CompiledSchema;
 }
 
+export interface RegisteredSourceTemplate {
+    readonly pluginId: string;
+    readonly template: SourceTemplateDefinition;
+}
+
 export interface RegisteredCodingAgent {
     readonly pluginId: string;
     readonly agent: CodingAgentDefinition;
@@ -463,6 +471,8 @@ export class PluginHost {
     readonly tools = new Map<string, RegisteredTool>();
     /** Coding agents by id (design.md §11.4). */
     readonly codingAgents = new Map<string, RegisteredCodingAgent>();
+    /** Source templates by id (design.md §4.2). */
+    readonly sources = new Map<string, RegisteredSourceTemplate>();
     /** Client-facing methods, keyed `<pluginId>/<name>`. */
     readonly #methods = new Map<string, RegisteredMethod>();
     /** Topic values, keyed `<pluginId>/<name>`. */
@@ -686,6 +696,7 @@ export class PluginHost {
             adapters: RegisteredAdapter[];
             tools: RegisteredTool[];
             codingAgents: RegisteredCodingAgent[];
+            sources: RegisteredSourceTemplate[];
             services: { service: ServiceDefinition; stop: AbortController }[];
             methods: RegisteredMethod[];
             topics: (TopicValue & { schema: CompiledSchema })[];
@@ -694,6 +705,7 @@ export class PluginHost {
             adapters: [],
             tools: [],
             codingAgents: [],
+            sources: [],
             services: [],
             methods: [],
             topics: [],
@@ -772,6 +784,17 @@ export class PluginHost {
                         throw new Error(`Coding agent ${agent.id} exists.`);
                     staged.codingAgents.push({ pluginId: id, agent });
                     return () => this.codingAgents.delete(agent.id);
+                },
+            },
+            sources: {
+                register: template => {
+                    if (!template.id.startsWith(prefix))
+                        throw new Error(`Source template ids must start with ${prefix}.`);
+                    ensureDeclared('sources', template.id.slice(prefix.length));
+                    if (staged.sources.some(entry => entry.template.id === template.id))
+                        throw new Error(`Source template ${template.id} exists.`);
+                    staged.sources.push({ pluginId: id, template });
+                    return () => this.sources.delete(template.id);
                 },
             },
             services: {
@@ -868,6 +891,10 @@ export class PluginHost {
             for (const entry of staged.codingAgents) {
                 this.codingAgents.set(entry.agent.id, entry);
                 disposers.push(() => this.codingAgents.delete(entry.agent.id));
+            }
+            for (const entry of staged.sources) {
+                this.sources.set(entry.template.id, entry);
+                disposers.push(() => this.sources.delete(entry.template.id));
             }
             for (const entry of staged.methods) {
                 const key = `${id}/${entry.method.name}`;
