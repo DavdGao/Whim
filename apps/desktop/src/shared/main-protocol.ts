@@ -62,6 +62,6 @@ export const attentionSchema = z.strictObject({
     type: z.literal('attention'),
     sessionId: z.string().min(1),
     title: z.string(),
-    kind: z.enum(['completed', 'failed', 'waiting']),
+    kind: z.enum(['completed', 'failed', 'waiting', 'signin', 'setup']),
 });
 export type Attention = z.infer<typeof attentionSchema>;

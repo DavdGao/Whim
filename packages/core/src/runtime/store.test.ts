@@ -279,8 +279,10 @@ describe('Store', () => {
         const sessionId = await createSession(store);
         await store.close();
         const raw = new DatabaseSync(path);
-        // Such a database is at schema 1, before the schedules table.
-        raw.exec('DROP TABLE schedules; PRAGMA user_version = 1; PRAGMA application_id = 0');
+        // Such a database is at schema 1, before the schedules and sources tables.
+        raw.exec(
+            'DROP TABLE schedules; DROP TABLE sources; PRAGMA user_version = 1; PRAGMA application_id = 0'
+        );
         raw.close();
         const reopened = await Store.open(path);
         try {
@@ -288,6 +290,7 @@ describe('Store', () => {
             assert.equal((await reopened.view(sessionId)).sessionId, sessionId);
             // Migrated to the current schema.
             assert.deepEqual(await reopened.schedules(), []);
+            assert.deepEqual(await reopened.sources(), []);
         } finally {
             await reopened.close();
         }
@@ -307,6 +310,26 @@ describe('Store', () => {
         assert.deepEqual(await store.sessions(), []);
         await assert.rejects(store.view(sessionId), { code: 'not-found' });
         assert.deepEqual(await store.read(sessionId), []);
+        await store.close();
+    });
+
+    it('records sources and deletes a source with its session', async () => {
+        const store = await Store.open(join(dir, 'sources.sqlite'));
+        const sessionId = await createSession(store);
+        const row = {
+            id: 'arxiv',
+            sessionId,
+            template: 'arxiv',
+            name: 'arXiv',
+            createdAt: '2026-11-12T00:00:00.000Z',
+        };
+        await store.putSource(row);
+        assert.deepEqual(await store.sources(), [row]);
+        // One session belongs to at most one source.
+        await assert.rejects(store.putSource({ ...row, id: 'other' }), /UNIQUE/);
+        await store.deleteSource('arxiv');
+        assert.deepEqual(await store.sources(), []);
+        assert.deepEqual(await store.sessions(), []);
         await store.close();
     });
 

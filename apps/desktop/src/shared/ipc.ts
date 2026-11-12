@@ -15,6 +15,7 @@ import type {
     SessionView,
     ThinkingLevel,
 } from '@whimkit/core/contracts';
+import type { SourceHealth, SourceLogin } from '@whimkit/core/plugin';
 
 export { localeSchema };
 export type { Locale };
@@ -195,6 +196,17 @@ export const methodSchemas = {
         removeSecrets: z.array(z.string()),
     }),
     'mcp.remove': z.strictObject({ id: mcpServerSchema.shape.id }),
+    /** Create an information source from a plugin's template, answering with the given model. */
+    'source.create': z.strictObject({
+        template: z.string().min(1).max(200),
+        name: z.string().trim().min(1).max(60),
+        slot: chatSlotSchema,
+    }),
+    'source.remove': z.strictObject({ id: z.string().min(1).max(40) }),
+    /** Check a source's health now, bypassing the recent result. */
+    'source.check': z.strictObject({ id: z.string().min(1).max(40) }),
+    /** Start or continue a source's sign-in. */
+    'source.login': z.strictObject({ id: z.string().min(1).max(40) }),
     /** The tmux sessions of a host. */
     'coding.sessions': z.strictObject({ hostId: codingHostIdSchema }),
     /** Start a coding agent in a new tmux session. */
@@ -373,6 +385,32 @@ export interface AppState {
     readonly codingAgents: readonly CodingAgentInfo[];
     readonly codingHosts: readonly CodingHost[];
     readonly mcpServers: readonly McpServerInfo[];
+    readonly sources: readonly SourceInfo[];
+    /** Source templates of active plugins, for creating sources. */
+    readonly sourceTemplates: readonly SourceTemplateInfo[];
+}
+
+export type SourceState = SourceHealth & { readonly checkedAt?: string };
+
+/** One source as the Feed page shows it. */
+export interface SourceInfo {
+    readonly id: string;
+    readonly sessionId: string;
+    readonly name: string;
+    readonly template: string;
+    /** The template's plugin, for its names and icon; absent when the plugin is gone. */
+    readonly pluginId?: string;
+    readonly health: SourceState;
+}
+
+/** A template a source can be created from. */
+export interface SourceTemplateInfo {
+    readonly id: string;
+    readonly pluginId: string;
+    readonly name: string;
+    readonly description: string;
+    /** Whether the source has a sign-in the user completes. */
+    readonly login: boolean;
 }
 
 /** An MCP server as Renderer sees it: the names of its secrets, never their values. */
@@ -432,6 +470,10 @@ export interface Results {
     'coding.removeHost': null;
     'mcp.save': null;
     'mcp.remove': null;
+    'source.create': { id: string; sessionId: string };
+    'source.remove': null;
+    'source.check': SourceState;
+    'source.login': SourceLogin;
     'coding.sessions': CodingInventory;
     'coding.create': { key: string };
     'coding.kill': null;

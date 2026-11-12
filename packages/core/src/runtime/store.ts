@@ -11,6 +11,7 @@ import {
     pluginRowSchema,
     scheduleRowSchema,
     sessionSummarySchema,
+    sourceRowSchema,
 } from './db/protocol.js';
 
 import type { Command } from './commands.js';
@@ -22,6 +23,7 @@ import type {
     RequestInput,
     ScheduleRow,
     SessionSummary,
+    SourceRow,
 } from './db/protocol.js';
 
 const responseSchema = z.discriminatedUnion('type', [
@@ -373,6 +375,30 @@ export class Store {
             );
         if (result?.length) for (const listener of this.#listeners) listener(result);
         return result !== null;
+    }
+
+    /**
+     * List information sources, oldest first.
+     * @returns The sources.
+     */
+    async sources(): Promise<SourceRow[]> {
+        return z.array(sourceRowSchema).parse(await this.#request({ op: 'source.list' }));
+    }
+
+    /**
+     * Insert a source or rename it.
+     * @param source The source.
+     */
+    async putSource(source: SourceRow): Promise<void> {
+        await this.#request({ op: 'source.put', source });
+    }
+
+    /**
+     * Delete a source together with its session, at the user's request; refused while it runs.
+     * @param sourceId The source.
+     */
+    async deleteSource(sourceId: string): Promise<void> {
+        await this.#request({ op: 'source.delete', sourceId });
     }
 
     /** Close the database after outstanding requests. */

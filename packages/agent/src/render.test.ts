@@ -218,6 +218,48 @@ describe('conversation file', () => {
 });
 
 describe('notices', () => {
+    it('renders a request and its reply with who, which request and when as attributes', () => {
+        assert.equal(
+            renderNotice({
+                type: 'notice',
+                id: 'n',
+                origin: { type: 'core', service: 'agents' },
+                observedAt: '2026-11-12T01:00:00.000Z',
+                kind: 'agent-message',
+                payload: { requestId: 'r1', fromSessionId: 's', fromName: 'Whim "main"' },
+                text: 'Any new papers on agents?',
+            }),
+            '<system-notification kind="message" from="Whim &quot;main&quot;" request="r1" time="2026-11-12T01:00:00.000Z">\nAny new papers on agents?\n</system-notification>'
+        );
+        assert.equal(
+            renderNotice({
+                type: 'notice',
+                id: 'n',
+                origin: { type: 'core', service: 'agents' },
+                observedAt: '2026-11-12T02:00:00.000Z',
+                kind: 'agent-reply',
+                payload: {
+                    requestId: 'r1',
+                    sourceId: 'arxiv',
+                    sourceName: 'arXiv',
+                    files: [
+                        {
+                            type: 'media',
+                            id: 'doc-1',
+                            mediaType: 'text/markdown',
+                            name: 'report.md',
+                            uri: 'file:///tmp/s/media/a.md',
+                            bytes: 3,
+                            sha256: 'a'.repeat(64),
+                        },
+                    ],
+                },
+                text: 'Found 3 papers.',
+            }),
+            '<system-notification kind="reply" from="arXiv" source="arxiv" request="r1" time="2026-11-12T02:00:00.000Z">\nFound 3 papers.\n<data id="doc-1" uri="file:///tmp/s/media/a.md" media_type="text/markdown" name="report.md"/>\n</system-notification>'
+        );
+    });
+
     it('renders a fired schedule as a notification with its metadata as attributes', () => {
         assert.equal(
             renderNotice({

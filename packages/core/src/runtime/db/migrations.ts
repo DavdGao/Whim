@@ -68,4 +68,13 @@ export const migrations: readonly string[] = [
     CREATE INDEX schedules_session ON schedules (session_id);
     CREATE INDEX schedules_next_fire ON schedules (next_fire);
     `,
+    `
+    CREATE TABLE sources (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL UNIQUE,
+        template TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    `,
 ];

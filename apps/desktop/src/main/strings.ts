@@ -17,6 +17,8 @@ const en = {
     completed: 'Finished',
     failed: 'Stopped with an error',
     waiting: 'Waiting for your approval',
+    signin: 'Sign in again to keep it running',
+    setup: 'Needs setup before it can run',
 };
 
 export type MainStringKey = keyof typeof en;
@@ -38,6 +40,8 @@ const catalogs: Record<Locale, Record<MainStringKey, string>> = {
         completed: '已完成',
         failed: '出错停止',
         waiting: '等待你的批准',
+        signin: '需要重新登录才能继续运行',
+        setup: '需要先完成设置才能运行',
     },
 };
 

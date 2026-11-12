@@ -10,7 +10,7 @@ import { applyRecord, foldSession } from '../../contracts/view.js';
 import { decide, needsRestartNotice, StoreError } from '../commands.js';
 
 import { migrations } from './migrations.js';
-import { requestSchema, scheduleRowSchema } from './protocol.js';
+import { requestSchema, scheduleRowSchema, sourceRowSchema } from './protocol.js';
 
 import type { AgentRecord } from '../../contracts/records.js';
 import type { SessionView } from '../../contracts/view.js';
@@ -354,6 +354,29 @@ const sessionRow = z.object({
 });
 
 /**
+ * Delete a session's journal, receipts, schedules, and projection in one transaction, refused
+ * while it runs or has background jobs.
+ * @param sessionId The session.
+ * @param also More to delete in the same transaction.
+ */
+function deleteSession(sessionId: string, also?: () => void): void {
+    const view = sessionView(sessionId);
+    if (view?.run || view?.jobs.length)
+        throw new StoreError('conflict', 'Stop the chat before deleting it.');
+    transaction(() => {
+        for (const sql of [
+            'DELETE FROM journal WHERE session_id = ?',
+            'DELETE FROM receipts WHERE session_id = ?',
+            'DELETE FROM schedules WHERE session_id = ?',
+            'DELETE FROM sessions WHERE id = ?',
+        ])
+            db.prepare(sql).run(sessionId);
+        also?.();
+    });
+    views.delete(sessionId);
+}
+
+/**
  * Handle one validated request.
  * @param request The request.
  * @returns The result value to post back.
@@ -391,19 +414,7 @@ function handle(request: Request): unknown {
                     };
                 });
         case 'session.delete': {
-            const view = sessionView(request.sessionId);
-            if (view?.run || view?.jobs.length)
-                throw new StoreError('conflict', 'Stop the chat before deleting it.');
-            transaction(() => {
-                for (const sql of [
-                    'DELETE FROM journal WHERE session_id = ?',
-                    'DELETE FROM receipts WHERE session_id = ?',
-                    'DELETE FROM schedules WHERE session_id = ?',
-                    'DELETE FROM sessions WHERE id = ?',
-                ])
-                    db.prepare(sql).run(request.sessionId);
-            });
-            views.delete(request.sessionId);
+            deleteSession(request.sessionId);
             return null;
         }
         case 'setting.get': {
@@ -564,6 +575,46 @@ function handle(request: Request): unknown {
             return null;
         case 'schedule.fire':
             return fire(request);
+        case 'source.list':
+            return db
+                .prepare('SELECT * FROM sources ORDER BY created_at')
+                .all()
+                .map(row => {
+                    const value = z
+                        .object({
+                            id: z.string(),
+                            session_id: z.string(),
+                            template: z.string(),
+                            name: z.string(),
+                            created_at: z.string(),
+                        })
+                        .parse(row);
+                    return sourceRowSchema.parse({
+                        id: value.id,
+                        sessionId: value.session_id,
+                        template: value.template,
+                        name: value.name,
+                        createdAt: value.created_at,
+                    });
+                });
+        case 'source.put': {
+            const value = request.source;
+            db.prepare(
+                `INSERT INTO sources (id, session_id, template, name, created_at) VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT (id) DO UPDATE SET name = excluded.name`
+            ).run(value.id, value.sessionId, value.template, value.name, value.createdAt);
+            return null;
+        }
+        case 'source.delete': {
+            const row = db
+                .prepare('SELECT session_id FROM sources WHERE id = ?')
+                .get(request.sourceId);
+            if (!row) return null;
+            deleteSession(z.object({ session_id: z.string() }).parse(row).session_id, () =>
+                db.prepare('DELETE FROM sources WHERE id = ?').run(request.sourceId)
+            );
+            return null;
+        }
         case 'close':
             db.close();
             return null;
