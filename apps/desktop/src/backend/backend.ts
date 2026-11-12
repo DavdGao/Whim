@@ -1033,7 +1033,7 @@ class Backend {
                     ? sourcePrompt(
                           source,
                           template,
-                          template?.template.name ?? source.template,
+                          source.template.split('#').at(-1) ?? source.template,
                           sessionDir,
                           workspace
                       )
@@ -1486,6 +1486,7 @@ function bundledPlugins(): { dir: string; source: 'bundled' }[] {
         '@whimkit/plugin-typesafe',
         '@whimkit/plugin-claude-code',
         '@whimkit/plugin-codex',
+        '@whimkit/plugin-arxiv',
     ].map(name => ({
         dir: dirname(require.resolve(`${name}/package.json`)),
         source: 'bundled' as const,

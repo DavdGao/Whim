@@ -1,0 +1,6 @@
+{
+    "plugin.name": "arXiv",
+    "plugin.description": "Search arXiv papers and follow categories through a source agent.",
+    "source.arxiv.name": "arXiv",
+    "source.arxiv.description": "Papers on arXiv: searches by topic, author or category, and what is new since the last report."
+}

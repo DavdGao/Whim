@@ -14,6 +14,7 @@
     "dependencies": {
         "@whimkit/agent": "workspace:*",
         "@whimkit/core": "workspace:*",
+        "@whimkit/plugin-arxiv": "workspace:*",
         "@whimkit/plugin-claude-code": "workspace:*",
         "@whimkit/plugin-codex": "workspace:*",
         "@whimkit/plugin-dashscope": "workspace:*",

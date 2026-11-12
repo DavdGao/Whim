@@ -98,6 +98,8 @@ Whim gathers information from sources such as arXiv, GitHub Trending, Zhihu, Red
 - **Accounts.** Sign-in happens once, when the source is set up, and its state persists in the connector (an API credential, a browser profile, or an MCP server's own storage). A source whose health check fails is not run; the requester is told at once and the user gets a notification with a reconnect action. Agents never sign in.
 - **Schedules.** Regular updates are schedules of the main agent (§4.1.1); source agents have no schedule tools.
 
+First-party source plugins: `@whimkit/plugin-arxiv` offers `ArxivSearch` (the public query API: fields, boolean queries, date ranges, newest or most recently updated first, id and version kept so a revision is told from a new paper; calls spaced three seconds apart as arXiv asks). A template's `name` and `description` are locale keys; its `instructions` are English text added to the source agent's prompt.
+
 ## 5. Plugins
 
 ### 5.1 Manifest

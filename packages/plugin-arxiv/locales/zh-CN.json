@@ -1,0 +1,6 @@
+{
+    "plugin.name": "arXiv",
+    "plugin.description": "通过信息源 agent 检索 arXiv 论文、关注各个分类。",
+    "source.arxiv.name": "arXiv",
+    "source.arxiv.description": "arXiv 论文：按主题、作者或分类检索，并汇报上次报告以来的新论文。"
+}
