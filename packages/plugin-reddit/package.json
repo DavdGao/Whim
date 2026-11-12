@@ -1,0 +1,52 @@
+{
+    "name": "@whimkit/plugin-reddit",
+    "version": "0.1.0",
+    "type": "module",
+    "whim": {
+        "api": "1.2",
+        "host": "./dist/host.js",
+        "contributes": {
+            "credentialTypes": [
+                "oauth-app"
+            ],
+            "tools": [
+                "RedditListing",
+                "RedditSearch",
+                "RedditComments"
+            ],
+            "sources": [
+                "reddit"
+            ]
+        },
+        "category": "tools",
+        "locales": "./locales",
+        "icon": "./icons/reddit.svg"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/host.d.ts",
+            "import": "./dist/host.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "dist",
+        "locales",
+        "icons"
+    ],
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "test": "node --test \"dist/**/*.test.js\""
+    },
+    "dependencies": {
+        "zod": "^4.1.12"
+    },
+    "peerDependencies": {
+        "@whimkit/core": "0.1.0"
+    },
+    "devDependencies": {
+        "@whimkit/core": "workspace:*",
+        "@types/node": "^24.10.0"
+    }
+}

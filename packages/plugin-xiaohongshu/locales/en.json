@@ -1,0 +1,6 @@
+{
+    "plugin.name": "Xiaohongshu",
+    "plugin.description": "Search Xiaohongshu notes through a local xiaohongshu-mcp server, with a source agent.",
+    "source.xiaohongshu.name": "Xiaohongshu",
+    "source.xiaohongshu.description": "Xiaohongshu notes: searches by keyword, note details with comments, and authors' profiles. Needs the local xiaohongshu-mcp server (MCP server id \"xiaohongshu\") and a QR sign-in."
+}

@@ -1,0 +1,8 @@
+{
+    "plugin.name": "X",
+    "plugin.description": "通过 X API 关注账号和话题,由信息源 agent 整理。",
+    "credential.@whimkit/plugin-x#bearer-token": "X API Bearer Token",
+    "schema.@whimkit/plugin-x#bearer-token./bearerToken.title": "Bearer Token",
+    "source.x.name": "X",
+    "source.x.description": "X 上的帖子:按话题搜索近期内容,以及指定账号最近发了什么。"
+}
