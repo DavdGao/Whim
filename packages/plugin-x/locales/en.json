@@ -4,5 +4,6 @@
     "credential.@whimkit/plugin-x#bearer-token": "X API bearer token",
     "schema.@whimkit/plugin-x#bearer-token./bearerToken.title": "Bearer token",
     "source.x.name": "X",
-    "source.x.description": "Posts on X: recent search by topic and what chosen accounts have posted."
+    "source.x.description": "Posts on X: recent search by topic and what chosen accounts have posted.",
+    "source.x.setup": "Create an app in the X developer portal, copy its Bearer Token, and add it in Settings → Models → Credentials as “X API Bearer Token”."
 }

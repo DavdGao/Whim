@@ -22,12 +22,13 @@ import {
     MessageSquareIcon,
     PlusIcon,
     QrCodeIcon,
+    SettingsIcon,
     RefreshCwIcon,
     RssIcon,
     Trash2Icon,
     XIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import { ActionButton } from '../../components/action-button';
@@ -42,6 +43,7 @@ import type {
     AppState,
     ChatSlot,
     Locale,
+    SourceFix,
     SourceInfo,
     SourceTemplateInfo,
 } from '../../../shared/ipc';
@@ -69,13 +71,15 @@ function templateText(
     state: AppState,
     locale: Locale,
     template: SourceTemplateInfo,
-    key: 'name' | 'description'
+    key: 'name' | 'description' | 'setup'
 ): string {
+    // The setup text sits beside the name in the plugin's catalog: `source.<x>.setup`.
+    const id = key === 'setup' ? template.name.replace(/\.name$/, '.setup') : template[key];
     return pluginText(
         state.plugins.find(plugin => plugin.id === template.pluginId)?.locales,
         locale,
-        template[key],
-        template[key]
+        id,
+        key === 'setup' ? '' : id
     );
 }
 
@@ -91,6 +95,12 @@ export function FeedPage({ state, navigate }: PageProps) {
     const [adding, setAdding] = useState(false);
     const [signingIn, setSigningIn] = useState<SourceInfo | undefined>();
     const [removing, setRemoving] = useState<SourceInfo | undefined>();
+    // Coming back from Settings or a sign-in: check again instead of showing a stale result.
+    const ids = state.sources.map(source => source.id).join(',');
+    useEffect(() => {
+        for (const id of ids ? ids.split(',') : [])
+            void call('source.check', { id }).catch(() => undefined);
+    }, [ids]);
     return (
         <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-6">
             <div className="flex items-center justify-between gap-4">
@@ -138,6 +148,16 @@ export function FeedPage({ state, navigate }: PageProps) {
                                 templateName={
                                     template && templateText(state, locale, template, 'name')
                                 }
+                                setupHint={
+                                    template
+                                        ? templateText(state, locale, template, 'setup')
+                                        : undefined
+                                }
+                                onSetup={fix =>
+                                    navigate('settings', {
+                                        section: fix.kind === 'mcp' ? 'mcp' : 'models',
+                                    })
+                                }
                                 onOpen={() => navigate('chat', { sessionId: source.sessionId })}
                                 onSignIn={() => setSigningIn(source)}
                                 onRemove={() => setRemoving(source)}
@@ -167,6 +187,8 @@ export function FeedPage({ state, navigate }: PageProps) {
  * @param props.source The source.
  * @param props.template Its template, absent when the plugin is not active.
  * @param props.templateName Its name in the UI language.
+ * @param props.setupHint How to set it up, from its plugin; empty when the plugin has none.
+ * @param props.onSetup Open the settings that fix it.
  * @param props.onOpen Open its conversation.
  * @param props.onSignIn Start its sign-in.
  * @param props.onRemove Ask to delete it.
@@ -176,6 +198,8 @@ function SourceRow({
     source,
     template,
     templateName,
+    setupHint,
+    onSetup,
     onOpen,
     onSignIn,
     onRemove,
@@ -183,6 +207,8 @@ function SourceRow({
     source: SourceInfo;
     template: SourceTemplateInfo | undefined;
     templateName: string | undefined;
+    setupHint: string | undefined;
+    onSetup: (fix: SourceFix) => void;
     onOpen: () => void;
     onSignIn: () => void;
     onRemove: () => void;
@@ -201,10 +227,28 @@ function SourceRow({
                 </div>
                 <p className="text-muted-foreground truncate text-sm">
                     {templateName ?? source.template}
-                    {health.state !== 'ready' && ` · ${health.detail}`}
+                    {health.state !== 'ready' &&
+                        health.state !== 'needs-setup' &&
+                        ` · ${health.detail}`}
+                    {health.state === 'needs-setup' &&
+                        ` · ${t(`feed.fix.${health.fix?.kind ?? 'other'}`)}`}
                 </p>
+                {health.state === 'needs-setup' && setupHint && (
+                    <p className="text-muted-foreground mt-2 text-sm whitespace-pre-line">
+                        {setupHint}
+                    </p>
+                )}
             </div>
             <div className="flex flex-wrap items-center gap-1">
+                {health.state === 'needs-setup' && health.fix && (
+                    <Button
+                        size="sm"
+                        className="rounded-full"
+                        onClick={() => health.fix && onSetup(health.fix)}
+                    >
+                        <SettingsIcon /> {t('feed.openSettings')}
+                    </Button>
+                )}
                 {health.state === 'needs-login' && template?.login && (
                     <Button size="sm" className="rounded-full" onClick={onSignIn}>
                         <QrCodeIcon /> {t('feed.signIn')}
