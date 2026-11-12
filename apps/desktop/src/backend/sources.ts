@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { storeMedia, StoreError } from '@whimkit/core';
 import { z } from 'zod';
 
-import type { SourceInfo, SourceState } from '../shared/ipc.js';
+import type { SourceFix, SourceInfo, SourceState } from '../shared/ipc.js';
 import type {
     CredentialService,
     McpHost,
@@ -164,7 +164,11 @@ export class Sources {
                     ? {
                           ...(health.state === 'ready'
                               ? { state: 'ready' as const }
-                              : { state: health.state, detail: health.detail }),
+                              : {
+                                    state: health.state,
+                                    detail: health.detail,
+                                    ...(health.fix ? { fix: health.fix } : {}),
+                                }),
                           checkedAt: new Date(health.at).toISOString(),
                       }
                     : { state: 'ready' },
@@ -248,7 +252,7 @@ export class Sources {
      * @param fresh Check again even when a recent result exists.
      * @returns Its health.
      */
-    async health(source: SourceRow, fresh = false): Promise<SourceHealth> {
+    async health(source: SourceRow, fresh = false): Promise<SourceHealth & { fix?: SourceFix }> {
         const cached = this.#health.get(source.id);
         if (!fresh && cached && Date.now() - cached.at < healthTtlMs) return cached;
         const health = await this.#check(source);
@@ -263,7 +267,7 @@ export class Sources {
      * @param source The source.
      * @returns Its health.
      */
-    async #check(source: SourceRow): Promise<SourceHealth> {
+    async #check(source: SourceRow): Promise<SourceHealth & { fix?: SourceFix }> {
         const registered = this.template(source);
         if (!registered)
             return {
@@ -276,6 +280,7 @@ export class Sources {
             if (state.state !== 'ready')
                 return {
                     state: 'needs-setup',
+                    fix: { kind: 'mcp', server: template.mcpServer },
                     detail:
                         state.state === 'failed'
                             ? `Its MCP server "${template.mcpServer}" does not connect: ${state.detail}`
@@ -290,6 +295,7 @@ export class Sources {
         )
             return {
                 state: 'needs-setup',
+                fix: { kind: 'credential', typeId: template.credentialType },
                 detail: 'It needs an account key in Settings → Models.',
             };
         if (!template.health) return { state: 'ready' };

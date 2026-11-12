@@ -154,7 +154,7 @@ Sources (each a first-party plugin with its tools and source template):
 
 Frontend and prompts:
 
-- [x] Feed page: sources with their state, new source from a template with its model, open a source's conversation, reconnect, delete
+- [x] Feed page: sources with their state, new source from a template with its model, open a source's conversation, reconnect, delete; setup guidance with a link to the settings that fix it, and a check on open
 - [x] Source agent prompt (agent.md §14): research loop (expanding and following queries, verifying against primary and independent sources), quality checks against ads and generated filler, increments from its earlier reports, delivery by files
 
 ## Later

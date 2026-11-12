@@ -5,5 +5,6 @@
     "schema.@whimkit/plugin-reddit#oauth-app./clientId.title": "Client ID",
     "schema.@whimkit/plugin-reddit#oauth-app./clientSecret.title": "Client secret (leave empty for an installed app)",
     "source.reddit.name": "Reddit",
-    "source.reddit.description": "Reddit posts and discussions: what is hot, new or top in chosen subreddits, and searches by topic."
+    "source.reddit.description": "Reddit posts and discussions: what is hot, new or top in chosen subreddits, and searches by topic.",
+    "source.reddit.setup": "Create an app at reddit.com/prefs/apps, then add its client ID (and the secret, if it has one) in Settings → Models → Credentials as “Reddit API app”."
 }

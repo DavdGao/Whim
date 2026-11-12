@@ -390,7 +390,15 @@ export interface AppState {
     readonly sourceTemplates: readonly SourceTemplateInfo[];
 }
 
-export type SourceState = SourceHealth & { readonly checkedAt?: string };
+/** Where the user fixes a source that needs setup. */
+export type SourceFix =
+    | { readonly kind: 'credential'; readonly typeId: string }
+    | { readonly kind: 'mcp'; readonly server: string };
+
+export type SourceState = SourceHealth & {
+    readonly checkedAt?: string;
+    readonly fix?: SourceFix;
+};
 
 /** One source as the Feed page shows it. */
 export interface SourceInfo {

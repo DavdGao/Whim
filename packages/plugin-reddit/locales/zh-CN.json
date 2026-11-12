@@ -5,5 +5,6 @@
     "schema.@whimkit/plugin-reddit#oauth-app./clientId.title": "Client ID",
     "schema.@whimkit/plugin-reddit#oauth-app./clientSecret.title": "Client secret(已安装应用类型可留空)",
     "source.reddit.name": "Reddit",
-    "source.reddit.description": "Reddit 的帖子和讨论:指定子版块的热门、最新、榜单,以及按话题搜索。"
+    "source.reddit.description": "Reddit 的帖子和讨论:指定子版块的热门、最新、榜单,以及按话题搜索。",
+    "source.reddit.setup": "在 reddit.com/prefs/apps 创建应用,到 设置 → 模型 → 凭据 中添加“Reddit API 应用”,填入 client ID(有 secret 的话一并填入)。"
 }

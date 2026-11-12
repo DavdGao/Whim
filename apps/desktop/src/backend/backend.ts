@@ -1150,6 +1150,8 @@ class Backend {
             await rm(this.tools.sessionDir(row.sessionId), { recursive: true, force: true });
             throw error;
         }
+        // A new source has no health yet; check it so the Feed page never shows an unchecked one as ready.
+        await this.sources.health(row, true);
         this.#emit({ type: 'state' });
         return { id: row.id, sessionId: row.sessionId };
     }

@@ -4,5 +4,6 @@
     "credential.@whimkit/plugin-x#bearer-token": "X API Bearer Token",
     "schema.@whimkit/plugin-x#bearer-token./bearerToken.title": "Bearer Token",
     "source.x.name": "X",
-    "source.x.description": "X 上的帖子:按话题搜索近期内容,以及指定账号最近发了什么。"
+    "source.x.description": "X 上的帖子:按话题搜索近期内容,以及指定账号最近发了什么。",
+    "source.x.setup": "在 X 开发者后台创建应用,复制它的 Bearer Token,到 设置 → 模型 → 凭据 中添加“X API Bearer Token”。"
 }
