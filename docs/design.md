@@ -546,6 +546,8 @@ Pages and Settings sections are entries in registries (`PageEntry`, `SettingsSec
 
 Configuration lives in Settings; the rail is for feature pages. Planned feature pages include Music; each is added when its feature exists. The language selector is persistent and every string is in typed en/zh-CN catalogs.
 
+Feature and footer menus use an 8px (`gap-2`) vertical gap between items through the application's `SidebarMenu` props. Acceptance requires this gap in expanded and icon-only modes, with existing button sizes and keyboard behavior preserved.
+
 ### 11.2 Data flow
 
 Chat retains the AI Elements Conversation's bottom-following behavior. Its scroll viewport uses shadcn's `scroll-fade-y` utility: both edges fade when more content exists in that direction, and short transcripts have no fade. Running sessions display the existing Spinner with a localized accessible label instead of a pulsing dot, respecting reduced motion. Acceptance covers the running/idle indicator, English and Simplified Chinese labels, and fade behavior at the top, middle, bottom, and without overflow. Sending a message does not introduce top anchoring.

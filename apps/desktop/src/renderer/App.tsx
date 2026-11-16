@@ -253,7 +253,7 @@ function Shell() {
                     <SidebarContent>
                         <SidebarGroup>
                             <SidebarGroupContent>
-                                <SidebarMenu>
+                                <SidebarMenu className="gap-2">
                                     {main.map(item => (
                                         <NavItem
                                             key={item.id}
@@ -268,7 +268,7 @@ function Shell() {
                     </SidebarContent>
                     {footer.length > 0 && (
                         <SidebarFooter>
-                            <SidebarMenu>
+                            <SidebarMenu className="gap-2">
                                 {footer.map(item => (
                                     <NavItem
                                         key={item.id}
