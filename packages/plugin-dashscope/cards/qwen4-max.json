@@ -1,0 +1,29 @@
+{
+    "id": "dashscope/qwen4-max",
+    "revision": 1,
+    "kind": "chat",
+    "adapter": "@whimkit/plugin-dashscope#responses",
+    "model": "qwen4-max",
+    "name": "Qwen4 Max",
+    "contextWindow": 1048576,
+    "maxOutputTokens": 393216,
+    "input": {
+        "text/plain": {},
+        "image/png": {
+            "delivery": ["inline"],
+            "maxBytes": 14680064
+        },
+        "image/jpeg": {
+            "delivery": ["inline"],
+            "maxBytes": 14680064
+        },
+        "image/webp": {
+            "delivery": ["inline"],
+            "maxBytes": 14680064
+        }
+    },
+    "output": ["text/plain"],
+    "nativeTools": ["web_search", "web_fetch"],
+    "options": {},
+    "icon": "qwen"
+}

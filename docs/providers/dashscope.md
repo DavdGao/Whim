@@ -86,6 +86,16 @@ Codes are compared case-insensitively; snake_case aliases map identically. `resp
 
 ## Seed cards
 
+### Qwen4 Max
+
+The Beijing [Qwen4-Max model page](https://bailian.console.aliyun.com/cn-beijing/model/market/detail/qwen4-max?serviceSite=asia-pacific-china&ref=list), supplied as a console screenshot on 2026-11-16, identifies the released model as `qwen4-max`, distinct from `qwen4-max-preview`. It lists a 1M context window, 384K maximum output in both modes, and a 256K thinking limit. The seed interprets these binary token units as 1,048,576 context tokens and 393,216 output tokens. Maximum input is listed as 991K normally and 983K in thinking mode; the adapter's existing 75% input budget remains below both.
+
+The page lists text, image, and video input with text output, function calling, structured output, and Responses tools including Web Search and Web Extractor. The seed exposes text and the adapter's implemented inline PNG/JPEG/WebP inputs (14 MiB each), plus `web_search` and `web_fetch`. Video and other built-in tools remain undeclared because this adapter does not implement them.
+
+The screenshot does not specify supported reasoning effort values or their default. The seed therefore omits `thinking` and effort overrides, leaving reasoning at the provider default rather than copying preview or Qwen3.8 settings. This does not mean the model lacks thinking; selectable levels require separate verification. No live model request was performed.
+
+Acceptance: the new seed must pass Core's card schema and the Responses adapter's validation, preserve existing model cards, and retain the limits and implemented capabilities above without pricing or source metadata in the card.
+
 `qwen3.8-max` and `qwen3.8-flash` ship with conservative, unverified limits (262144-token context, 32768 output tokens), because the official model list did not state their limits on 2026-11-04.
 
 | Card                       | Context   | Output    | Native tools                              | Documented input (declared: text only) |
