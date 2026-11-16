@@ -92,7 +92,7 @@ The Beijing [Qwen4-Max model page](https://bailian.console.aliyun.com/cn-beijing
 
 The page lists text, image, and video input with text output, function calling, structured output, and Responses tools including Web Search and Web Extractor. The seed exposes text and the adapter's implemented inline PNG/JPEG/WebP inputs (14 MiB each), plus `web_search` and `web_fetch`. Video and other built-in tools remain undeclared because this adapter does not implement them.
 
-The screenshot does not specify supported reasoning effort values or their default. The seed therefore omits `thinking` and effort overrides, leaving reasoning at the provider default rather than copying preview or Qwen3.8 settings. This does not mean the model lacks thinking; selectable levels require separate verification. No live model request was performed.
+The screenshot confirms thinking support but does not specify effort values or their default. Per the product requirement on 2026-11-16, the seed uses the same thinking levels as Qwen3.8 Max: `off`, `low`, `medium`, and `high`, with `high` sent as `xhigh`. Qwen4 Max defaults to `medium`. This mapping has not been verified with a live Qwen4 request.
 
 Acceptance: the new seed must pass Core's card schema and the Responses adapter's validation, preserve existing model cards, and retain the limits and implemented capabilities above without pricing or source metadata in the card.
 
