@@ -1,6 +1,6 @@
 {
     "id": "dashscope/qwen4-max",
-    "revision": 2,
+    "revision": 3,
     "kind": "chat",
     "adapter": "@whimkit/plugin-dashscope#responses",
     "model": "qwen4-max",
@@ -30,6 +30,7 @@
     "nativeTools": ["web_search", "web_fetch"],
     "options": {
         "effort": {
+            "medium": "high",
             "high": "xhigh"
         }
     },
