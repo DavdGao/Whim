@@ -319,6 +319,8 @@ A card describes one model for one adapter. Core understands the top-level field
 
 Numeric values in this example are illustrative; seed card values are verified against provider documentation when the cards are written.
 
+The Qwen4 Max seed uses the released `qwen4-max` identifier and the console limits documented in [DashScope verification](providers/dashscope.md#qwen4-max). Until its effort values are verified, it exposes no thinking selector and sends no reasoning override; the provider chooses its default behavior. Its acceptance criteria are schema/adapter validation and declaration of only implemented media and tools.
+
 | Field         | Meaning                                                                                                                                                                         |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`          | Globally unique card id                                                                                                                                                         |
