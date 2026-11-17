@@ -12,7 +12,7 @@
         },
         "category": "tools",
         "locales": "./locales",
-        "icon": "./icons/xiaohongshu.svg"
+        "icon": "./icons/xiaohongshu.png"
     },
     "exports": {
         ".": {

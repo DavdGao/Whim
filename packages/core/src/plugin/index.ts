@@ -331,6 +331,8 @@ export interface SourceTemplateDefinition {
     readonly tools: readonly string[];
     /** An MCP server (design.md §7.7) whose tools the source agent gets, by server id. */
     readonly mcpServer?: string;
+    /** Default HTTP endpoint offered by the source's connection dialog. */
+    readonly mcpDefaultUrl?: string;
     /** The server's tools the source agent gets, by their own names; all of them when omitted. */
     readonly mcpTools?: readonly string[];
     /** A credential type the tools need; without one the source needs setup. */

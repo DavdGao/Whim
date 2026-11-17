@@ -45,6 +45,7 @@ export default definePlugin({
             instructions,
             tools: [],
             mcpServer: 'xiaohongshu',
+            mcpDefaultUrl: 'http://localhost:18060/mcp',
             mcpTools: readTools,
             async health(source) {
                 return readLoginStatus(await source.callMcp('check_login_status', {}));
