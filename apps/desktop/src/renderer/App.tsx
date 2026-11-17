@@ -15,7 +15,13 @@ import {
 import { Skeleton } from '@whimkit/ui/components/skeleton';
 import { Toaster } from '@whimkit/ui/components/sonner';
 import { TooltipProvider } from '@whimkit/ui/components/tooltip';
-import { MessageSquareIcon, RssIcon, SettingsIcon, SquareTerminalIcon } from 'lucide-react';
+import {
+    CalendarClockIcon,
+    MessageSquareIcon,
+    RssIcon,
+    SettingsIcon,
+    SquareTerminalIcon,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -23,6 +29,7 @@ import { AgentAvatar } from './components/agent-avatar';
 import { ChatPage } from './features/chat/chat-page';
 import { CodingPage } from './features/coding/coding-page';
 import { FeedPage } from './features/feed/feed-page';
+import { SchedulesPage } from './features/schedules/schedules-page';
 import { SettingsPage } from './features/settings/settings-page';
 import { AppStateProvider } from './lib/app-state';
 import { useAppState } from './lib/app-state-context';
@@ -59,6 +66,13 @@ const pages: readonly PageEntry[] = [
         icon: RssIcon,
         placement: 'main',
         component: FeedPage,
+    },
+    {
+        id: 'schedules',
+        title: 'nav.schedules',
+        icon: CalendarClockIcon,
+        placement: 'main',
+        component: SchedulesPage,
     },
     {
         id: 'settings',
