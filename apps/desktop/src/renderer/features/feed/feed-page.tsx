@@ -95,7 +95,7 @@ function templateText(
 export function FeedPage({ state, navigate }: PageProps) {
     const { t, locale } = useT();
     const [adding, setAdding] = useState(false);
-    const [signingIn, setSigningIn] = useState<SourceInfo | undefined>();
+    const [signingIn, setSigningIn] = useState<{ source: SourceInfo; login?: SourceLogin }>();
     const [removing, setRemoving] = useState<SourceInfo | undefined>();
     const [configuring, setConfiguring] = useState<SourceInfo | undefined>();
     // Recheck persisted sources when the page opens.
@@ -159,7 +159,7 @@ export function FeedPage({ state, navigate }: PageProps) {
                                 }
                                 onSetup={() => setConfiguring(source)}
                                 onOpen={() => navigate('chat', { sessionId: source.sessionId })}
-                                onSignIn={() => setSigningIn(source)}
+                                onSignIn={() => setSigningIn({ source })}
                                 onRemove={() => setRemoving(source)}
                             />
                         );
@@ -174,7 +174,11 @@ export function FeedPage({ state, navigate }: PageProps) {
                 />
             )}
             {signingIn && (
-                <SignInDialog source={signingIn} onClose={() => setSigningIn(undefined)} />
+                <SignInDialog
+                    source={signingIn.source}
+                    initialLogin={signingIn.login}
+                    onClose={() => setSigningIn(undefined)}
+                />
             )}
             {configuring && (
                 <SourceSettingsDialog
@@ -186,9 +190,9 @@ export function FeedPage({ state, navigate }: PageProps) {
                             notify(error, t('feed.checkFailed'))
                         );
                     }}
-                    onSignIn={() => {
+                    onSignIn={login => {
                         setConfiguring(undefined);
-                        setSigningIn(configuring);
+                        setSigningIn({ source: configuring, ...(login ? { login } : {}) });
                     }}
                 />
             )}
@@ -415,12 +419,21 @@ function AddSourceDialog({
  * Sign a source in: show the code to scan, then confirm.
  * @param props Dialog props.
  * @param props.source The source.
+ * @param props.initialLogin A QR code prepared by managed setup.
  * @param props.onClose Close the dialog.
  * @returns The dialog.
  */
-function SignInDialog({ source, onClose }: { source: SourceInfo; onClose: () => void }) {
+function SignInDialog({
+    source,
+    initialLogin,
+    onClose,
+}: {
+    source: SourceInfo;
+    initialLogin?: SourceLogin | undefined;
+    onClose: () => void;
+}) {
     const { t } = useT();
-    const [login, setLogin] = useState<SourceLogin | undefined>();
+    const [login, setLogin] = useState<SourceLogin | undefined>(initialLogin);
     const [failure, setFailure] = useState<string | undefined>();
     const step = async () => {
         try {

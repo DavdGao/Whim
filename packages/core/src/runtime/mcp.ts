@@ -178,7 +178,18 @@ class Connection {
         this.#set({ state: 'connecting' });
         const client = new Client(this.options.client, { capabilities: {} });
         try {
-            await client.connect(await this.#transport(), { timeout: 30_000 });
+            const transport = await this.#transport();
+            if (this.#stopped) {
+                await transport.close();
+                return;
+            }
+            this.#client = client;
+            await client.connect(transport, {
+                timeout:
+                    this.config.transport.kind === 'stdio'
+                        ? (this.config.transport.startupTimeoutMs ?? 30_000)
+                        : 30_000,
+            });
             if (this.#stopped) {
                 await client.close();
                 return;

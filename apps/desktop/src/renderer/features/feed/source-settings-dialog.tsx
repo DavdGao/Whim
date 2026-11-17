@@ -11,7 +11,7 @@ import { Field, FieldLabel } from '@whimkit/ui/components/field';
 import { Input } from '@whimkit/ui/components/input';
 import { Spinner } from '@whimkit/ui/components/spinner';
 import { CheckIcon, XIcon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { ActionButton } from '../../components/action-button';
 import { call } from '../../lib/client';
@@ -19,6 +19,7 @@ import { useT } from '../../lib/i18n';
 import { CredentialDialog } from '../models/models-page';
 
 import type { AppState, SourceInfo } from '../../../shared/ipc';
+import type { SourceLogin } from '@whimkit/core/plugin';
 
 /**
  * Configure a source in Feed using its plugin's credential type or connection preset.
@@ -38,7 +39,7 @@ export function SourceSettingsDialog({
     state: AppState;
     source: SourceInfo;
     onClose: () => void;
-    onSignIn: () => void;
+    onSignIn: (login?: SourceLogin) => void;
 }) {
     const { t } = useT();
     const template = state.sourceTemplates.find(item => item.id === source.template);
@@ -48,6 +49,13 @@ export function SourceSettingsDialog({
     );
     const [failure, setFailure] = useState<string>();
     const [connecting, setConnecting] = useState(false);
+    const mounted = useRef(true);
+    useEffect(() => {
+        mounted.current = true;
+        return () => {
+            mounted.current = false;
+        };
+    }, []);
     useEffect(() => {
         if (!connecting || !server || server.status.state === 'connecting') return;
         let active = true;
@@ -92,10 +100,14 @@ export function SourceSettingsDialog({
             <DialogContent className="flex max-h-[85svh] flex-col sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle>{t('feed.configure', { name: source.name })}</DialogTitle>
-                    <DialogDescription>{t('feed.connectionHint')}</DialogDescription>
+                    <DialogDescription>
+                        {t(template?.managedMcp ? 'feed.managedHint' : 'feed.connectionHint')}
+                    </DialogDescription>
                 </DialogHeader>
                 <div className="min-h-0 overflow-y-auto">
-                    {existingStdio ? (
+                    {template?.managedMcp ? (
+                        <p className="text-muted-foreground text-sm">{t('feed.managedLogin')}</p>
+                    ) : existingStdio ? (
                         <p className="text-muted-foreground text-sm">
                             {t('feed.existingConnection')}
                         </p>
@@ -124,11 +136,25 @@ export function SourceSettingsDialog({
                     <ActionButton
                         icon={connecting ? <Spinner /> : <CheckIcon />}
                         disabled={
-                            connecting || !template?.mcpServer || (!existingStdio && !validUrl)
+                            connecting ||
+                            !template?.mcpServer ||
+                            (!template.managedMcp && !existingStdio && !validUrl)
                         }
                         action={async () => {
                             if (!template?.mcpServer) return;
                             setFailure(undefined);
+                            if (template.managedMcp) {
+                                const health = await call('source.setup', { id: source.id });
+                                if (!mounted.current) return;
+                                if (health.state === 'ready') onClose();
+                                else if (health.state === 'needs-login') {
+                                    const login = await call('source.login', { id: source.id });
+                                    if (!mounted.current) return;
+                                    if (login.kind === 'done') onClose();
+                                    else onSignIn(login);
+                                } else setFailure(health.detail);
+                                return;
+                            }
                             await call('mcp.save', {
                                 server: {
                                     id: template.mcpServer,
@@ -154,7 +180,7 @@ export function SourceSettingsDialog({
                             setConnecting(true);
                         }}
                     >
-                        {t('feed.connect')}
+                        {t(template?.managedMcp ? 'feed.prepareLogin' : 'feed.connect')}
                     </ActionButton>
                 </DialogFooter>
             </DialogContent>

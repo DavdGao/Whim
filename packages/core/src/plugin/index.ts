@@ -333,6 +333,8 @@ export interface SourceTemplateDefinition {
     readonly mcpServer?: string;
     /** Default HTTP endpoint offered by the source's connection dialog. */
     readonly mcpDefaultUrl?: string;
+    /** Node MCP launcher owned by Core; receives a private data-directory argument. */
+    readonly mcpLaunch?: { readonly entry: string; readonly startupTimeoutMs: number };
     /** The server's tools the source agent gets, by their own names; all of them when omitted. */
     readonly mcpTools?: readonly string[];
     /** A credential type the tools need; without one the source needs setup. */

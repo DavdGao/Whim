@@ -329,6 +329,10 @@ importers:
         version: link:../core
 
   packages/plugin-xiaohongshu:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.32.2
+        version: 1.32.2(zod@4.6.5)
     devDependencies:
       '@types/node':
         specifier: ^24.10.0

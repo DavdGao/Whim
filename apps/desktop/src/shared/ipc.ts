@@ -216,6 +216,7 @@ export const methodSchemas = {
     'source.check': z.strictObject({ id: z.string().min(1).max(40) }),
     /** Start or continue a source's sign-in. */
     'source.login': z.strictObject({ id: z.string().min(1).max(40) }),
+    'source.setup': z.strictObject({ id: z.string().min(1).max(40) }),
     /** The tmux sessions of a host. */
     'coding.sessions': z.strictObject({ hostId: codingHostIdSchema }),
     /** Start a coding agent in a new tmux session. */
@@ -422,6 +423,7 @@ export interface SourceInfo {
 
 /** A template a source can be created from. */
 export interface SourceTemplateInfo {
+    readonly managedMcp?: boolean;
     readonly credentialType?: string;
     readonly mcpServer?: string;
     readonly mcpDefaultUrl?: string;
@@ -495,6 +497,7 @@ export interface Results {
     'schedule.list': ScheduleList;
     'source.check': SourceState;
     'source.login': SourceLogin;
+    'source.setup': SourceState;
     'coding.sessions': CodingInventory;
     'coding.create': { key: string };
     'coding.kill': null;
