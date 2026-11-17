@@ -1,6 +1,6 @@
 # Source and coding plugin icons
 
-Brand marks are centered without an extra tinted tile. SVGs keep their original aspect ratio; raster images with backgrounds are clipped to a circle. Retrieved on November 17, 2026.
+Brand marks are centered with their original aspect ratio; raster images with backgrounds are clipped to a circle. Plugin settings keep 24px marks inside the original 44px muted, rounded containers. The transparent SVG assets below are retained. Retrieved on November 17, 2026.
 
 | Plugin               | Asset and provenance                                                                                                                                                                                                                                                                                               |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

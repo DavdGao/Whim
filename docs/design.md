@@ -559,7 +559,7 @@ In Agent settings, clicking the avatar itself opens the image picker. It is keyb
 
 Plugin activation switches show no adjacent Enabled text. Their accessible labels retain the plugin name and localized activation label.
 
-Source and plugin icons prefer transparent SVG brand marks, centered with their original aspect ratio. Raster marks with a brand background are clipped to a circle. Plugin rows do not add a second tinted tile behind an existing brand image; generic fallback glyphs may keep that tile.
+Source and plugin icons prefer transparent SVG brand marks, centered with their original aspect ratio. Raster marks with a brand background are clipped to a circle. Plugin rows retain their original proportions: a 24px mark centered in a 44px muted, rounded container (`rounded-2xl`), including fallback glyphs. Changing a brand asset must not enlarge its display size or remove the container background. Acceptance verifies the same dimensions and centering in light and dark themes while preserving the current icon assets.
 
 Chat list timestamps use a monospace font; dates use a two-digit day with a leading zero for days 1–9. Tool activity titles, including WebFetch URLs, shrink and truncate within the message width, with the full title available on hover. Acceptance covers single- and double-digit days in English and Simplified Chinese, and long URLs in running, completed, and failed tool calls at narrow widths, including expanded details.
 
