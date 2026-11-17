@@ -548,6 +548,13 @@ export class Sources {
                             type: 'string',
                             description: "the source's id, as ListSources shows it, e.g. arxiv",
                         },
+                        title: {
+                            type: 'string',
+                            minLength: 1,
+                            maxLength: 80,
+                            description:
+                                'Provide a very short title (3–8 words, at most 80 characters) for the frontend UI, e.g. "Find recent reasoning papers". Summarize the request without repeating the recipient; put the full request in message.',
+                        },
                         message: {
                             type: 'string',
                             minLength: 1,

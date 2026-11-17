@@ -37,6 +37,7 @@ import {
     GlobeIcon,
     ListIcon,
     SearchIcon,
+    SendIcon,
     ShieldCheckIcon,
     TerminalIcon,
     WrenchIcon,
@@ -72,6 +73,14 @@ const known: Record<string, { icon: LucideIcon; titles: Record<Phase, MessageKey
             running: 'tool.Bash.running',
             done: 'tool.Bash.done',
             failed: 'tool.Bash.failed',
+        },
+    },
+    SendMessage: {
+        icon: SendIcon,
+        titles: {
+            running: 'tool.SendMessage.running',
+            done: 'tool.SendMessage.done',
+            failed: 'tool.SendMessage.failed',
         },
     },
     Read: {
@@ -303,7 +312,9 @@ function ActivityLine({
             <TraceIcon>
                 <Icon />
             </TraceIcon>
-            <TraceTitle title={title}>{title}</TraceTitle>
+            <TraceTitle title={title} className={detail ? 'max-w-[70%] shrink-0' : undefined}>
+                {title}
+            </TraceTitle>
             {detail && (
                 <TraceDescription className="min-w-0 shrink truncate">{detail}</TraceDescription>
             )}
@@ -391,12 +402,21 @@ export function ToolCallView({
     const { t } = useT();
     const renderer = usePluginRegistrations().chatTools.get(block.name);
     const input = parseArguments(block.arguments);
-    const target = subject(block.name, input);
+    let target = subject(block.name, input);
+    let detail = block.name === 'Bash' ? (commandSummary(input) ?? target) : undefined;
+    if (block.name === 'SendMessage') {
+        target = t('tool.SendMessage.recipient');
+        if (typeof input === 'object' && input !== null) {
+            if ('to' in input && typeof input.to === 'string' && input.to.trim())
+                target = input.to.trim();
+            if ('title' in input && typeof input.title === 'string' && input.title.trim())
+                detail = `· ${input.title.trim()}`;
+        }
+    }
     const tool = known[block.name];
     const Icon = tool?.icon ?? WrenchIcon;
     const shown = progress(open, result, jobRunning);
     const title = t((tool?.titles ?? generic)[shown.phase], { target, name: block.name });
-    const detail = block.name === 'Bash' ? (commandSummary(input) ?? target) : undefined;
     const decide = (decision: 'allow' | 'deny', scope: 'once' | 'session') =>
         call('session.decide', { sessionId, callId: block.callId, decision, scope });
     const failed = result !== undefined && !['success', 'background'].includes(result.status);
