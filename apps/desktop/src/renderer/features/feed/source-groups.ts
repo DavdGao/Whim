@@ -1,37 +1,33 @@
-import type { AppState, SourceInfo } from '../../../shared/ipc';
+import type { AppState, SourceInfo, SourceTemplateInfo } from '../../../shared/ipc';
 
-interface SourceGroup {
-    readonly id: 'ready' | 'invalid' | 'unconfigured';
-    readonly sources: SourceInfo[];
-}
+export type SourceCandidate =
+    | { readonly kind: 'new'; readonly template: SourceTemplateInfo }
+    | {
+          readonly kind: 'existing';
+          readonly source: SourceInfo;
+          readonly template?: SourceTemplateInfo;
+      };
 
 /**
- * Order sources by usability, distinguishing absent configuration from a broken connection.
- * @param state Current source health and saved connection settings.
- * @returns Nonempty groups in display order, preserving source order within each group.
+ * Show verified sources above candidates, reusing unfinished sessions instead of duplicating them.
+ * @param state Available templates and the current source health.
+ * @returns Ready sources and compact configuration candidates, in stable order.
  */
-export function groupSources(
-    state: Pick<AppState, 'sources' | 'credentials' | 'mcpServers'>
-): SourceGroup[] {
+export function groupSources(state: Pick<AppState, 'sources' | 'sourceTemplates'>): {
+    ready: SourceInfo[];
+    candidates: SourceCandidate[];
+} {
     const ready: SourceInfo[] = [];
-    const invalid: SourceInfo[] = [];
-    const unconfigured: SourceInfo[] = [];
+    const candidates: SourceCandidate[] = [];
+    const existing = new Set(state.sources.map(source => source.template));
     for (const source of state.sources) {
-        const { state: health, fix } = source.health;
-        if (health === 'ready') ready.push(source);
-        else if (
-            health === 'needs-setup' &&
-            ((fix?.kind === 'credential' &&
-                !state.credentials.some(credential => credential.typeId === fix.typeId)) ||
-                (fix?.kind === 'mcp' && !state.mcpServers.some(server => server.id === fix.server)))
-        )
-            unconfigured.push(source);
-        else invalid.push(source);
+        if (source.health.state === 'ready' && source.health.checkedAt) ready.push(source);
+        else {
+            const template = state.sourceTemplates.find(item => item.id === source.template);
+            candidates.push({ kind: 'existing', source, ...(template ? { template } : {}) });
+        }
     }
-    const groups: SourceGroup[] = [
-        { id: 'ready', sources: ready },
-        { id: 'invalid', sources: invalid },
-        { id: 'unconfigured', sources: unconfigured },
-    ];
-    return groups.filter(group => group.sources.length > 0);
+    for (const template of state.sourceTemplates)
+        if (!existing.has(template.id)) candidates.push({ kind: 'new', template });
+    return { ready, candidates };
 }

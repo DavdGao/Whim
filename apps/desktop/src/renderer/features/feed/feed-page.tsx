@@ -1,5 +1,6 @@
 import { Badge } from '@whimkit/ui/components/badge';
 import { Button } from '@whimkit/ui/components/button';
+import { Card } from '@whimkit/ui/components/card';
 import {
     Dialog,
     DialogContent,
@@ -8,20 +9,13 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@whimkit/ui/components/dialog';
-import {
-    Empty,
-    EmptyContent,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyTitle,
-} from '@whimkit/ui/components/empty';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@whimkit/ui/components/empty';
 import { Field, FieldGroup, FieldLabel } from '@whimkit/ui/components/field';
 import { Input } from '@whimkit/ui/components/input';
 import { Separator } from '@whimkit/ui/components/separator';
 import {
     CheckIcon,
     MessageSquareIcon,
-    PlusIcon,
     QrCodeIcon,
     SettingsIcon,
     RefreshCwIcon,
@@ -29,11 +23,10 @@ import {
     Trash2Icon,
     XIcon,
 } from 'lucide-react';
-import { Fragment, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { ActionButton } from '../../components/action-button';
-import { ChoiceMenu } from '../../components/choice-menu';
 import { EntityIcon } from '../../components/entity-icon';
 import { call, ClientError } from '../../lib/client';
 import { useT } from '../../lib/i18n';
@@ -96,11 +89,11 @@ function templateText(
  */
 export function FeedPage({ state, navigate }: PageProps) {
     const { t, locale } = useT();
-    const [adding, setAdding] = useState(false);
+    const [adding, setAdding] = useState<SourceTemplateInfo>();
     const [signingIn, setSigningIn] = useState<{ source: SourceInfo; login?: SourceLogin }>();
-    const [removing, setRemoving] = useState<SourceInfo | undefined>();
-    const [configuring, setConfiguring] = useState<SourceInfo | undefined>();
-    // Recheck persisted sources when the page opens.
+    const [removing, setRemoving] = useState<SourceInfo>();
+    const [configuring, setConfiguring] = useState<SourceInfo>();
+    const { ready, candidates } = groupSources(state);
     const ids = state.sources.map(source => source.id).join(',');
     useEffect(() => {
         for (const id of ids ? ids.split(',') : [])
@@ -108,94 +101,176 @@ export function FeedPage({ state, navigate }: PageProps) {
     }, [ids]);
     return (
         <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-6">
-            <div className="flex items-center justify-between gap-4">
-                <div>
-                    <h1 className="text-lg font-semibold">{t('feed.title')}</h1>
-                    <p className="text-muted-foreground text-sm">{t('feed.description')}</p>
-                </div>
-                <Button
-                    className="rounded-full"
-                    disabled={state.sourceTemplates.length === 0}
-                    onClick={() => setAdding(true)}
-                >
-                    <PlusIcon /> {t('feed.add')}
-                </Button>
+            <div>
+                <h1 className="text-lg font-semibold">{t('feed.title')}</h1>
+                <p className="text-muted-foreground text-sm">{t('feed.description')}</p>
             </div>
-            {state.sources.length === 0 ? (
+            {ready.length > 0 && (
+                <ul className="flex flex-col gap-3" aria-label={t('feed.readySources')}>
+                    {ready.map(source => {
+                        const template = state.sourceTemplates.find(
+                            item => item.id === source.template
+                        );
+                        return (
+                            <SourceRow
+                                key={source.id}
+                                source={source}
+                                icon={state.plugins.find(item => item.id === source.pluginId)?.icon}
+                                template={template}
+                                templateName={
+                                    template && templateText(state, locale, template, 'name')
+                                }
+                                setupHint={
+                                    template && templateText(state, locale, template, 'setup')
+                                }
+                                onSetup={() => setConfiguring(source)}
+                                onOpen={() => navigate('chat', { sessionId: source.sessionId })}
+                                onSignIn={() => setSigningIn({ source })}
+                                onRemove={() => setRemoving(source)}
+                            />
+                        );
+                    })}
+                </ul>
+            )}
+            {candidates.length > 0 && (
+                <>
+                    <Separator />
+                    <section className="flex flex-col gap-3" aria-labelledby="source-candidates">
+                        <h2
+                            id="source-candidates"
+                            className="text-muted-foreground text-sm font-medium"
+                        >
+                            {t('feed.candidates')}
+                        </h2>
+                        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                            {candidates.map(candidate => {
+                                const { template } = candidate;
+                                const source =
+                                    candidate.kind === 'existing' ? candidate.source : undefined;
+                                const name =
+                                    source?.name ??
+                                    (template && templateText(state, locale, template, 'name'));
+                                const health = source?.health;
+                                const needsLogin =
+                                    health?.state === 'needs-login' && template?.login;
+                                const needsSettings =
+                                    template?.credentialType || template?.mcpServer;
+                                return (
+                                    <li
+                                        key={
+                                            candidate.kind === 'existing'
+                                                ? candidate.source.id
+                                                : candidate.template.id
+                                        }
+                                    >
+                                        <Card className="h-full gap-3 rounded-2xl p-3">
+                                            <div className="flex min-w-0 items-center gap-3">
+                                                <EntityIcon
+                                                    src={
+                                                        state.plugins.find(
+                                                            plugin =>
+                                                                plugin.id ===
+                                                                (template?.pluginId ??
+                                                                    source?.pluginId)
+                                                        )?.icon
+                                                    }
+                                                    fallback={RssIcon}
+                                                    className="size-6"
+                                                />
+                                                <h3 className="min-w-0 flex-1 truncate text-sm font-medium">
+                                                    {name}
+                                                </h3>
+                                            </div>
+                                            <p className="text-muted-foreground line-clamp-2 text-xs">
+                                                {health
+                                                    ? !health.checkedAt
+                                                        ? t('feed.checking')
+                                                        : t(`feed.health.${health.state}`)
+                                                    : template &&
+                                                      templateText(
+                                                          state,
+                                                          locale,
+                                                          template,
+                                                          'description'
+                                                      )}
+                                            </p>
+                                            <div className="mt-auto flex items-center gap-1">
+                                                <ActionButton
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="flex-1 rounded-full"
+                                                    disabled={!template}
+                                                    icon={
+                                                        needsLogin ? (
+                                                            <QrCodeIcon />
+                                                        ) : source && !needsSettings ? (
+                                                            <RefreshCwIcon />
+                                                        ) : (
+                                                            <SettingsIcon />
+                                                        )
+                                                    }
+                                                    action={async () => {
+                                                        if (!template) return;
+                                                        if (!source) setAdding(template);
+                                                        else if (needsLogin)
+                                                            setSigningIn({ source });
+                                                        else if (needsSettings)
+                                                            setConfiguring(source);
+                                                        else
+                                                            await call('source.check', {
+                                                                id: source.id,
+                                                            });
+                                                    }}
+                                                >
+                                                    {t(
+                                                        needsLogin
+                                                            ? 'feed.signIn'
+                                                            : source && !needsSettings
+                                                              ? 'feed.check'
+                                                              : 'feed.openSettings'
+                                                    )}
+                                                </ActionButton>
+                                                {source && (
+                                                    <Button
+                                                        size="icon-sm"
+                                                        variant="ghost"
+                                                        aria-label={t('feed.removeTitle', {
+                                                            name: source.name,
+                                                        })}
+                                                        onClick={() => setRemoving(source)}
+                                                    >
+                                                        <Trash2Icon />
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </Card>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    </section>
+                </>
+            )}
+            {ready.length === 0 && candidates.length === 0 && (
                 <Empty>
                     <EmptyHeader>
                         <EmptyTitle>{t('feed.empty.title')}</EmptyTitle>
-                        <EmptyDescription>
-                            {state.sourceTemplates.length === 0
-                                ? t('feed.empty.noTemplates')
-                                : t('feed.empty.description')}
-                        </EmptyDescription>
+                        <EmptyDescription>{t('feed.empty.noTemplates')}</EmptyDescription>
                     </EmptyHeader>
-                    {state.sourceTemplates.length > 0 && (
-                        <EmptyContent>
-                            <Button className="rounded-full" onClick={() => setAdding(true)}>
-                                <PlusIcon /> {t('feed.add')}
-                            </Button>
-                        </EmptyContent>
-                    )}
                 </Empty>
-            ) : (
-                groupSources(state).map((group, index) => (
-                    <Fragment key={group.id}>
-                        {index > 0 && <Separator />}
-                        <section
-                            className="flex flex-col gap-3"
-                            aria-labelledby={`sources-${group.id}`}
-                        >
-                            <h2
-                                id={`sources-${group.id}`}
-                                className="text-muted-foreground text-sm font-medium"
-                            >
-                                {t(`feed.group.${group.id}`)}
-                            </h2>
-                            <ul className="flex flex-col gap-3">
-                                {group.sources.map(source => {
-                                    const template = state.sourceTemplates.find(
-                                        item => item.id === source.template
-                                    );
-                                    return (
-                                        <SourceRow
-                                            key={source.id}
-                                            source={source}
-                                            icon={
-                                                state.plugins.find(
-                                                    item => item.id === source.pluginId
-                                                )?.icon
-                                            }
-                                            template={template}
-                                            templateName={
-                                                template &&
-                                                templateText(state, locale, template, 'name')
-                                            }
-                                            setupHint={
-                                                template
-                                                    ? templateText(state, locale, template, 'setup')
-                                                    : undefined
-                                            }
-                                            onSetup={() => setConfiguring(source)}
-                                            onOpen={() =>
-                                                navigate('chat', { sessionId: source.sessionId })
-                                            }
-                                            onSignIn={() => setSigningIn({ source })}
-                                            onRemove={() => setRemoving(source)}
-                                        />
-                                    );
-                                })}
-                            </ul>
-                        </section>
-                    </Fragment>
-                ))
             )}
             {adding && (
-                <AddSourceDialog
+                <SourceSetupDialog
                     state={state}
-                    onCreated={sessionId => navigate('chat', { sessionId })}
-                    onClose={() => setAdding(false)}
+                    template={adding}
+                    onCreated={source => {
+                        setAdding(undefined);
+                        if (source.health.state === 'ready') return;
+                        if (source.health.state === 'needs-login' && adding.login)
+                            setSigningIn({ source });
+                        else if (adding.credentialType || adding.mcpServer) setConfiguring(source);
+                    }}
+                    onClose={() => setAdding(undefined)}
                 />
             )}
             {signingIn && (
@@ -325,27 +400,36 @@ function SourceRow({
 }
 
 /**
- * Create a source from a template with a model.
+ * Start configuration for one candidate and continue directly to authentication.
  * @param props Dialog props.
  * @param props.state Application state.
- * @param props.onCreated Receives the new source's session.
+ * @param props.template The candidate selected on the page.
+ * @param props.onCreated Continues setup with the persisted source.
  * @param props.onClose Close the dialog.
  * @returns The dialog.
  */
-function AddSourceDialog({
+function SourceSetupDialog({
     state,
+    template,
     onCreated,
     onClose,
 }: {
     state: AppState;
-    onCreated: (sessionId: string) => void;
+    template: SourceTemplateInfo;
+    onCreated: (source: SourceInfo) => void;
     onClose: () => void;
 }) {
     const { t, locale } = useT();
     const choices = modelChoices(state);
     const first = choices[0];
-    const [templateId, setTemplateId] = useState(state.sourceTemplates[0]?.id);
-    const template = state.sourceTemplates.find(item => item.id === templateId);
+    const [created, setCreated] = useState<{ id: string; sessionId: string }>();
+    const mounted = useRef(true);
+    useEffect(() => {
+        mounted.current = true;
+        return () => {
+            mounted.current = false;
+        };
+    }, []);
     const [name, setName] = useState('');
     const [slot, setSlot] = useState<ChatSlot | undefined>(
         state.chatSlot ??
@@ -355,40 +439,21 @@ function AddSourceDialog({
         <Dialog open onOpenChange={open => !open && onClose()}>
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
-                    <DialogTitle>{t('feed.add')}</DialogTitle>
+                    <DialogTitle>
+                        {t('feed.configure', {
+                            name: templateText(state, locale, template, 'name'),
+                        })}
+                    </DialogTitle>
                     <DialogDescription>
                         {template && templateText(state, locale, template, 'description')}
                     </DialogDescription>
                 </DialogHeader>
                 <FieldGroup>
                     <Field>
-                        <FieldLabel>{t('feed.template')}</FieldLabel>
-                        <ChoiceMenu
-                            value={templateId}
-                            choices={state.sourceTemplates.map(item => ({
-                                value: item.id,
-                                label: templateText(state, locale, item, 'name'),
-                                icon: (
-                                    <EntityIcon
-                                        src={
-                                            state.plugins.find(
-                                                plugin => plugin.id === item.pluginId
-                                            )?.icon
-                                        }
-                                        fallback={RssIcon}
-                                    />
-                                ),
-                            }))}
-                            icon={<RssIcon />}
-                            placeholder={t('feed.template')}
-                            variant="outline"
-                            onChange={value => setTemplateId(value)}
-                        />
-                    </Field>
-                    <Field>
                         <FieldLabel htmlFor="feed-name">{t('feed.name')}</FieldLabel>
                         <Input
                             id="feed-name"
+                            disabled={created !== undefined}
                             value={name}
                             maxLength={60}
                             placeholder={template && templateText(state, locale, template, 'name')}
@@ -402,37 +467,51 @@ function AddSourceDialog({
                                 state={state}
                                 choices={choices}
                                 slot={slot}
-                                locked={false}
+                                locked={created !== undefined}
                                 onChange={async next => setSlot(next)}
                             />
                         </div>
                     </Field>
                 </FieldGroup>
+                {choices.length === 0 && (
+                    <p className="text-muted-foreground text-sm">{t('feed.modelRequired')}</p>
+                )}
                 <DialogFooter>
                     <Button variant="ghost" onClick={onClose}>
                         <XIcon /> {t('common.cancel')}
                     </Button>
                     <ActionButton
                         icon={<CheckIcon />}
-                        disabled={!template || !slot}
+                        disabled={!slot || choices.length === 0}
                         action={async () => {
-                            if (!template || !slot) return;
+                            if (!slot) return;
                             try {
-                                const { sessionId } = await call('source.create', {
-                                    template: template.id,
-                                    name:
-                                        name.trim() ||
-                                        templateText(state, locale, template, 'name'),
-                                    slot,
-                                });
-                                onCreated(sessionId);
-                                onClose();
+                                const receipt =
+                                    created ??
+                                    (await call('source.create', {
+                                        template: template.id,
+                                        name:
+                                            name.trim() ||
+                                            templateText(state, locale, template, 'name'),
+                                        slot,
+                                    }));
+                                if (!mounted.current) return;
+                                setCreated(receipt);
+                                const next = await call('app.state', {});
+                                if (!mounted.current) return;
+                                const source = next.sources.find(item => item.id === receipt.id);
+                                if (!source) throw new Error(t('feed.createFailed'));
+                                onCreated(source);
                             } catch (error) {
                                 notify(error, t('feed.createFailed'));
                             }
                         }}
                     >
-                        {t('feed.create')}
+                        {t(
+                            template.credentialType || template.mcpServer
+                                ? 'feed.continueSetup'
+                                : 'feed.connect'
+                        )}
                     </ActionButton>
                 </DialogFooter>
             </DialogContent>
