@@ -842,7 +842,7 @@ class Backend {
             catalog: this.catalog.entries(),
             credentials: await this.credentials.list(),
             agent: { ...profile, isDefault: !savedProfile },
-            // Sources are listed on the Feed page, not among the chats.
+            // Source conversations use their own sidebar group, populated from `sources`.
             sessions: (await this.store.sessions())
                 .filter(session => !this.sources.bySession(session.sessionId))
                 .map(session => ({
