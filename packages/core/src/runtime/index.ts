@@ -56,7 +56,7 @@ export type { McpHostOptions } from './mcp.js';
 export { evaluate, isInside, rulesFor } from './permissions.js';
 export type { PermissionEnv } from './permissions.js';
 export { storeMedia } from './media.js';
-export { ChatReviewer, DecisionReviewer, decisionConfidence, reviewRequest } from './review.js';
+export { ChatReviewer, DecisionReviewer, reviewRequest } from './review.js';
 export type { Review, ReviewRequest, Reviewer } from './review.js';
 export {
     TerminalError,

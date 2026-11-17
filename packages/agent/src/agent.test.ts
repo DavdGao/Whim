@@ -7,7 +7,7 @@ import { after, before, describe, it } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { CompiledSchema, PluginHost, Store, ToolRuntime } from '@whimkit/core';
-import { ApplicationError, knownFiles } from '@whimkit/core/contracts';
+import { ApplicationError, foldSession, knownFiles } from '@whimkit/core/contracts';
 
 import { Agent } from './agent.js';
 
@@ -829,7 +829,7 @@ describe('Agent', () => {
             toolModels: ToolModels = {
                 open: () => Promise.reject(new Error('No provider tools here.')),
             },
-            reviewer?: Reviewer
+            reviewer?: Reviewer | (() => Promise<Reviewer>)
         ) {
             const host = new PluginHost(store, []);
             for (const tool of tools)
@@ -851,7 +851,7 @@ describe('Agent', () => {
                 join(dir, 'sessions'),
                 undefined,
                 id => ended.push(id),
-                async () => reviewer
+                async () => (typeof reviewer === 'function' ? reviewer() : reviewer)
             );
             return { runtime, declarations: runtime.declarations(undefined, []), ended };
         }
@@ -1277,13 +1277,9 @@ describe('Agent', () => {
             /**
              * Run one turn that calls Write and collect the permission records.
              * @param reviewer The reviewer.
-             * @param onAsk Answers a call left to the user.
              * @returns The session, its transcript tail, and the permission record bodies.
              */
-            async function turn(
-                reviewer: Reviewer,
-                onAsk?: (runtime: ToolRuntime, sessionId: string, callId: string) => void
-            ) {
+            async function turn(reviewer: Reviewer | (() => Promise<Reviewer>)) {
                 const { runtime, declarations } = runtimeWith([writer], undefined, reviewer);
                 const { models } = callingModel('Write', '{"text":"x"}');
                 const sessionId = await sessionWith('write it', declarations);
@@ -1291,8 +1287,6 @@ describe('Agent', () => {
                 const stop = store.onCommit(records => {
                     for (const { body } of records) {
                         if (body.type.startsWith('permission.')) bodies.push(body);
-                        if (body.type === 'permission.reviewed' && body.outcome === 'ask')
-                            onAsk?.(runtime, sessionId, body.callId);
                     }
                 });
                 await drain(
@@ -1304,7 +1298,7 @@ describe('Agent', () => {
                 );
                 stop();
                 const view = await store.view(sessionId);
-                return { view, tail: (await transcript(sessionId)).slice(2), bodies };
+                return { sessionId, view, tail: (await transcript(sessionId)).slice(2), bodies };
             }
 
             it('runs an allowed call without asking and counts the review usage', async () => {
@@ -1359,13 +1353,13 @@ describe('Agent', () => {
                     [
                         'tool',
                         'denied',
-                        'The automatic reviewer denied this tool call: Nobody asked for this file. Do not retry the same call; choose another way or ask the user.',
+                        'The automatic reviewer denied this tool call: Nobody asked for this file. Do not retry the same call; choose another way.',
                     ],
                     ['assistant', 'saw denied', 'completed'],
                 ]);
             });
 
-            it('leaves the call to the user when the review fails', async () => {
+            it('denies failed reviews without manual handoff or execution', async () => {
                 const { reviewer } = fixedReviewer(
                     new ApplicationError({
                         category: 'rate-limited',
@@ -1374,25 +1368,121 @@ describe('Agent', () => {
                         detail: { provider: 'test', message: 'Slow down.' },
                     })
                 );
-                const { tail, bodies } = await turn(reviewer, (runtime, sessionId, callId) => {
-                    void runtime.decide(sessionId, callId, 'allow', 'once');
+                const { sessionId, view, tail, bodies } = await turn(reviewer);
+                assert.deepEqual(bodies, [
+                    {
+                        type: 'permission.requested',
+                        runId: view.lastRun?.runId,
+                        callId: 'call-1',
+                        name: 'Write',
+                        access: [{ kind: 'write', path: '/tmp/x' }],
+                        reviewer: { cardId: 'test/reviewer' },
+                    },
+                    {
+                        type: 'permission.reviewed',
+                        runId: view.lastRun?.runId,
+                        callId: 'call-1',
+                        outcome: 'deny',
+                        reason: 'Slow down.',
+                        usage: {},
+                        failure: {
+                            category: 'rate-limited',
+                            retry: { kind: 'backoff' },
+                            outcome: 'rejected',
+                            detail: { provider: 'test', message: 'Slow down.' },
+                        },
+                    },
+                ]);
+                assert.deepEqual(tail, [
+                    [
+                        'tool',
+                        'denied',
+                        'The automatic reviewer denied this tool call: Slow down. Do not retry the same call; choose another way.',
+                    ],
+                    ['assistant', 'saw denied', 'completed'],
+                ]);
+                const records = await store.read(sessionId);
+                assert.equal(
+                    records.some(record => record.body.type === 'tool.started'),
+                    false
+                );
+                const reviewedAt = records.findIndex(
+                    record => record.body.type === 'permission.reviewed'
+                );
+                assert.deepEqual(foldSession(records.slice(0, reviewedAt + 1)).calls, [
+                    {
+                        callId: 'call-1',
+                        name: 'Write',
+                        arguments: '{"text":"x"}',
+                        state: 'pending',
+                    },
+                ]);
+            });
+
+            it('fails without requesting manual permission when the reviewer cannot be resolved', async () => {
+                const { sessionId, tail, bodies } = await turn(async () => {
+                    throw new Error('Reviewer settings unavailable.');
                 });
-                assert.deepEqual(bodies.at(1), {
-                    type: 'permission.reviewed',
-                    runId: (bodies[0] as { runId: string }).runId,
-                    callId: 'call-1',
-                    outcome: 'ask',
-                    reason: 'Slow down.',
-                    usage: {},
-                    failure: {
-                        category: 'rate-limited',
-                        retry: { kind: 'backoff' },
-                        outcome: 'rejected',
-                        detail: { provider: 'test', message: 'Slow down.' },
+                assert.deepEqual(bodies, []);
+                assert.deepEqual(tail, [
+                    [
+                        'tool',
+                        'error',
+                        'Automatic review is unavailable: Reviewer settings unavailable.',
+                    ],
+                    ['assistant', 'saw error', 'completed'],
+                ]);
+                assert.equal(
+                    (await store.read(sessionId)).some(
+                        record => record.body.type === 'tool.started'
+                    ),
+                    false
+                );
+            });
+
+            it('rejects manual overrides while the model is deciding', async () => {
+                const { runtime, declarations } = runtimeWith([writer], undefined, {
+                    cardId: 'test/reviewer',
+                    review: async () => {
+                        await assert.rejects(runtime.decide(sessionId, 'call-1', 'allow', 'once'), {
+                            code: 'conflict',
+                        });
+                        return { outcome: 'deny', reason: 'Unsafe operation.', usage: {} };
                     },
                 });
-                assert.equal((bodies.at(2) as { type: string }).type, 'permission.decided');
-                assert.deepEqual(tail[0], ['tool', 'success', 'echo: x']);
+                const sessionId = await sessionWith('write it', declarations);
+                const { models } = callingModel('Write', '{"text":"x"}');
+                await drain(
+                    new Agent(store, models, runtime, { sleep: noSleep }).run(
+                        sessionId,
+                        'user',
+                        new AbortController().signal
+                    )
+                );
+                const records = await store.read(sessionId);
+                assert.deepEqual(
+                    records
+                        .filter(record => record.body.type === 'permission.reviewed')
+                        .map(record => record.body),
+                    [
+                        {
+                            type: 'permission.reviewed',
+                            runId: (await store.view(sessionId)).lastRun?.runId,
+                            callId: 'call-1',
+                            outcome: 'deny',
+                            reason: 'Unsafe operation.',
+                            usage: {},
+                        },
+                    ]
+                );
+                assert.deepEqual(
+                    records.filter(
+                        record =>
+                            record.body.type === 'permission.decided' ||
+                            record.body.type === 'tool.started'
+                    ),
+                    []
+                );
             });
         });
 

@@ -411,7 +411,7 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
             if (call.review?.state !== 'running')
                 throw new InvalidJournalError('A review needs a running review.', record.seq);
             const usage = addUsage(view.usage, body.usage);
-            if (body.outcome !== 'ask' && !body.failure) {
+            if (body.outcome !== 'ask') {
                 const { access: _access, review: _review, ...rest } = call;
                 return { ...base, usage, calls: replaceCall(view, { ...rest, state: 'pending' }) };
             }
