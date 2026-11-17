@@ -17,6 +17,7 @@ import {
 } from '@whimkit/ui/components/empty';
 import { Field, FieldGroup, FieldLabel } from '@whimkit/ui/components/field';
 import { Input } from '@whimkit/ui/components/input';
+import { Separator } from '@whimkit/ui/components/separator';
 import {
     CheckIcon,
     MessageSquareIcon,
@@ -28,7 +29,7 @@ import {
     Trash2Icon,
     XIcon,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import { ActionButton } from '../../components/action-button';
@@ -40,6 +41,7 @@ import { pluginText } from '../../lib/messages';
 import { modelChoices } from '../chat/model-choices';
 import { ModelPicker } from '../chat/model-picker';
 
+import { groupSources } from './source-groups';
 import { SourceSettingsDialog } from './source-settings-dialog';
 
 import type {
@@ -138,33 +140,56 @@ export function FeedPage({ state, navigate }: PageProps) {
                     )}
                 </Empty>
             ) : (
-                <ul className="flex flex-col gap-3">
-                    {state.sources.map(source => {
-                        const template = state.sourceTemplates.find(
-                            item => item.id === source.template
-                        );
-                        return (
-                            <SourceRow
-                                key={source.id}
-                                source={source}
-                                icon={state.plugins.find(item => item.id === source.pluginId)?.icon}
-                                template={template}
-                                templateName={
-                                    template && templateText(state, locale, template, 'name')
-                                }
-                                setupHint={
-                                    template
-                                        ? templateText(state, locale, template, 'setup')
-                                        : undefined
-                                }
-                                onSetup={() => setConfiguring(source)}
-                                onOpen={() => navigate('chat', { sessionId: source.sessionId })}
-                                onSignIn={() => setSigningIn({ source })}
-                                onRemove={() => setRemoving(source)}
-                            />
-                        );
-                    })}
-                </ul>
+                groupSources(state).map((group, index) => (
+                    <Fragment key={group.id}>
+                        {index > 0 && <Separator />}
+                        <section
+                            className="flex flex-col gap-3"
+                            aria-labelledby={`sources-${group.id}`}
+                        >
+                            <h2
+                                id={`sources-${group.id}`}
+                                className="text-muted-foreground text-sm font-medium"
+                            >
+                                {t(`feed.group.${group.id}`)}
+                            </h2>
+                            <ul className="flex flex-col gap-3">
+                                {group.sources.map(source => {
+                                    const template = state.sourceTemplates.find(
+                                        item => item.id === source.template
+                                    );
+                                    return (
+                                        <SourceRow
+                                            key={source.id}
+                                            source={source}
+                                            icon={
+                                                state.plugins.find(
+                                                    item => item.id === source.pluginId
+                                                )?.icon
+                                            }
+                                            template={template}
+                                            templateName={
+                                                template &&
+                                                templateText(state, locale, template, 'name')
+                                            }
+                                            setupHint={
+                                                template
+                                                    ? templateText(state, locale, template, 'setup')
+                                                    : undefined
+                                            }
+                                            onSetup={() => setConfiguring(source)}
+                                            onOpen={() =>
+                                                navigate('chat', { sessionId: source.sessionId })
+                                            }
+                                            onSignIn={() => setSigningIn({ source })}
+                                            onRemove={() => setRemoving(source)}
+                                        />
+                                    );
+                                })}
+                            </ul>
+                        </section>
+                    </Fragment>
+                ))
             )}
             {adding && (
                 <AddSourceDialog
