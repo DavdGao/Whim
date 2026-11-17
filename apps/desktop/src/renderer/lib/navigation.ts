@@ -29,8 +29,8 @@ export interface PageEntry {
     readonly id: string;
     readonly title: PageTitle;
     readonly icon: ComponentType<{ className?: string }>;
-    /** `main` pages are listed at the top of the rail; `footer` pages at its bottom. */
-    readonly placement: 'main' | 'footer';
+    /** Interaction first, management second, and settings at the bottom of the rail. */
+    readonly placement: 'main' | 'management' | 'footer';
     readonly component: ComponentType<PageProps>;
 }
 
