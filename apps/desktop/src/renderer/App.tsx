@@ -10,6 +10,7 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
     SidebarProvider,
+    SidebarSeparator,
     SidebarTrigger,
 } from '@whimkit/ui/components/sidebar';
 import { Skeleton } from '@whimkit/ui/components/skeleton';
@@ -22,7 +23,7 @@ import {
     SettingsIcon,
     SquareTerminalIcon,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { AgentAvatar } from './components/agent-avatar';
@@ -64,14 +65,14 @@ const pages: readonly PageEntry[] = [
         id: 'feed',
         title: 'nav.feed',
         icon: RssIcon,
-        placement: 'main',
+        placement: 'management',
         component: FeedPage,
     },
     {
         id: 'schedules',
         title: 'nav.schedules',
         icon: CalendarClockIcon,
-        placement: 'main',
+        placement: 'management',
         component: SchedulesPage,
     },
     {
@@ -113,7 +114,7 @@ function usePages(): readonly PageEntry[] {
     const { pages: pluginPages } = usePluginRegistrations();
     return useMemo(
         () => [
-            ...pages.filter(page => page.placement === 'main'),
+            ...pages.filter(page => page.placement !== 'footer'),
             ...pluginPages.map((page): PageEntry => {
                 const own = new Set(
                     pluginPages.filter(item => item.pluginId === page.pluginId).map(item => item.id)
@@ -209,7 +210,13 @@ function Shell() {
             : status === 'failed'
               ? t('backend.failed')
               : undefined;
-    const main = allPages.filter(item => item.placement === 'main');
+    const groups = [
+        { placement: 'main', label: t('nav.interaction') },
+        { placement: 'management', label: t('nav.management') },
+    ].map(group => ({
+        ...group,
+        pages: allPages.filter(item => item.placement === group.placement),
+    }));
     const footer = allPages.filter(item => item.placement === 'footer');
     return (
         <SidebarProvider
@@ -265,20 +272,25 @@ function Shell() {
                         </SidebarMenu>
                     </SidebarHeader>
                     <SidebarContent>
-                        <SidebarGroup>
-                            <SidebarGroupContent>
-                                <SidebarMenu className="gap-2">
-                                    {main.map(item => (
-                                        <NavItem
-                                            key={item.id}
-                                            item={item}
-                                            active={item === current}
-                                            onSelect={() => navigate(item.id)}
-                                        />
-                                    ))}
-                                </SidebarMenu>
-                            </SidebarGroupContent>
-                        </SidebarGroup>
+                        {groups.map((group, index) => (
+                            <Fragment key={group.placement}>
+                                {index > 0 && <SidebarSeparator />}
+                                <SidebarGroup role="group" aria-label={group.label}>
+                                    <SidebarGroupContent>
+                                        <SidebarMenu className="gap-2">
+                                            {group.pages.map(item => (
+                                                <NavItem
+                                                    key={item.id}
+                                                    item={item}
+                                                    active={item === current}
+                                                    onSelect={() => navigate(item.id)}
+                                                />
+                                            ))}
+                                        </SidebarMenu>
+                                    </SidebarGroupContent>
+                                </SidebarGroup>
+                            </Fragment>
+                        ))}
                     </SidebarContent>
                     {footer.length > 0 && (
                         <SidebarFooter>
