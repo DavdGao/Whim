@@ -9,7 +9,7 @@ import {
 } from '@whimkit/ui/components/field';
 import { Input } from '@whimkit/ui/components/input';
 import { Textarea } from '@whimkit/ui/components/textarea';
-import { ImageUpIcon, RotateCcwIcon, SaveIcon, Trash2Icon } from 'lucide-react';
+import { RotateCcwIcon, SaveIcon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -74,7 +74,15 @@ export function AgentSettings({ state }: { state: AppState }) {
                                 <FieldDescription>{t('agent.iconDescription')}</FieldDescription>
                             </FieldContent>
                             <div className="flex items-center gap-2">
-                                <AgentAvatar icon={icon} className="size-12 rounded-2xl" />
+                                <Button
+                                    variant="ghost"
+                                    className="size-12 rounded-2xl p-0"
+                                    aria-label={t('agent.iconChoose')}
+                                    title={t('agent.iconChoose')}
+                                    onClick={() => input.current?.click()}
+                                >
+                                    <AgentAvatar icon={icon} className="size-12 rounded-2xl" />
+                                </Button>
                                 <input
                                     ref={input}
                                     type="file"
@@ -93,23 +101,6 @@ export function AgentSettings({ state }: { state: AppState }) {
                                         );
                                     }}
                                 />
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => input.current?.click()}
-                                >
-                                    <ImageUpIcon /> {t('agent.iconChoose')}
-                                </Button>
-                                {icon && (
-                                    <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        aria-label={t('agent.iconRemove')}
-                                        onClick={() => setIcon(undefined)}
-                                    >
-                                        <Trash2Icon />
-                                    </Button>
-                                )}
                             </div>
                         </Field>
                         <Field>
