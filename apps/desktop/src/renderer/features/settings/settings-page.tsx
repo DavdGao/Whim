@@ -150,7 +150,7 @@ function GeneralSettings({ state }: { state: AppState }) {
                             choices={languages}
                             icon={<LanguagesIcon />}
                             placeholder={t('settings.language')}
-                            className="w-44"
+                            className="w-56 shrink-0"
                             align="end"
                             onChange={locale => call('settings.locale', { locale })}
                         />
@@ -178,7 +178,7 @@ function GeneralSettings({ state }: { state: AppState }) {
                             ]}
                             icon={<PaletteIcon />}
                             placeholder={t('settings.theme')}
-                            className="w-44"
+                            className="w-56 shrink-0"
                             align="end"
                             onChange={theme =>
                                 call('settings.theme', {
@@ -192,12 +192,12 @@ function GeneralSettings({ state }: { state: AppState }) {
                             <FieldLabel htmlFor="user-name">{t('settings.userName')}</FieldLabel>
                             <FieldDescription>{t('settings.userNameDescription')}</FieldDescription>
                         </FieldContent>
-                        <div className="flex items-center gap-2">
+                        <div className="flex w-56 shrink-0 items-center gap-2">
                             <Input
                                 id="user-name"
                                 value={userName}
                                 maxLength={60}
-                                className="w-44"
+                                className="min-w-0 flex-1"
                                 placeholder={t('settings.userNamePlaceholder')}
                                 onChange={event => setUserName(event.currentTarget.value)}
                             />
@@ -272,7 +272,7 @@ function PermissionSettings({ state }: { state: AppState }) {
                     ]}
                     icon={<ShieldCheckIcon />}
                     placeholder={t('settings.permissions')}
-                    className="w-56"
+                    className="w-56 shrink-0"
                     align="end"
                     onChange={mode =>
                         call('settings.permissions', {
@@ -314,7 +314,7 @@ function PermissionSettings({ state }: { state: AppState }) {
                         }))}
                         icon={<BoxIcon />}
                         placeholder={t('chat.model')}
-                        className="w-56"
+                        className="w-56 shrink-0"
                         align="end"
                         onChange={cardId => {
                             const choice = choices.find(item => item.card.id === cardId);

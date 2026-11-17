@@ -413,6 +413,9 @@ export interface SourceInfo {
 
 /** A template a source can be created from. */
 export interface SourceTemplateInfo {
+    readonly credentialType?: string;
+    readonly mcpServer?: string;
+    readonly mcpDefaultUrl?: string;
     readonly id: string;
     readonly pluginId: string;
     readonly name: string;

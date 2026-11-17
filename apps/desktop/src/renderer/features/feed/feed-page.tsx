@@ -33,17 +33,19 @@ import { toast } from 'sonner';
 
 import { ActionButton } from '../../components/action-button';
 import { ChoiceMenu } from '../../components/choice-menu';
+import { EntityIcon } from '../../components/entity-icon';
 import { call, ClientError } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 import { pluginText } from '../../lib/messages';
 import { modelChoices } from '../chat/model-choices';
 import { ModelPicker } from '../chat/model-picker';
 
+import { SourceSettingsDialog } from './source-settings-dialog';
+
 import type {
     AppState,
     ChatSlot,
     Locale,
-    SourceFix,
     SourceInfo,
     SourceTemplateInfo,
 } from '../../../shared/ipc';
@@ -95,7 +97,8 @@ export function FeedPage({ state, navigate }: PageProps) {
     const [adding, setAdding] = useState(false);
     const [signingIn, setSigningIn] = useState<SourceInfo | undefined>();
     const [removing, setRemoving] = useState<SourceInfo | undefined>();
-    // Coming back from Settings or a sign-in: check again instead of showing a stale result.
+    const [configuring, setConfiguring] = useState<SourceInfo | undefined>();
+    // Recheck persisted sources when the page opens.
     const ids = state.sources.map(source => source.id).join(',');
     useEffect(() => {
         for (const id of ids ? ids.split(',') : [])
@@ -144,6 +147,7 @@ export function FeedPage({ state, navigate }: PageProps) {
                             <SourceRow
                                 key={source.id}
                                 source={source}
+                                icon={state.plugins.find(item => item.id === source.pluginId)?.icon}
                                 template={template}
                                 templateName={
                                     template && templateText(state, locale, template, 'name')
@@ -153,11 +157,7 @@ export function FeedPage({ state, navigate }: PageProps) {
                                         ? templateText(state, locale, template, 'setup')
                                         : undefined
                                 }
-                                onSetup={fix =>
-                                    navigate('settings', {
-                                        section: fix.kind === 'mcp' ? 'mcp' : 'models',
-                                    })
-                                }
+                                onSetup={() => setConfiguring(source)}
                                 onOpen={() => navigate('chat', { sessionId: source.sessionId })}
                                 onSignIn={() => setSigningIn(source)}
                                 onRemove={() => setRemoving(source)}
@@ -176,6 +176,22 @@ export function FeedPage({ state, navigate }: PageProps) {
             {signingIn && (
                 <SignInDialog source={signingIn} onClose={() => setSigningIn(undefined)} />
             )}
+            {configuring && (
+                <SourceSettingsDialog
+                    state={state}
+                    source={configuring}
+                    onClose={() => {
+                        setConfiguring(undefined);
+                        void call('source.check', { id: configuring.id }).catch(error =>
+                            notify(error, t('feed.checkFailed'))
+                        );
+                    }}
+                    onSignIn={() => {
+                        setConfiguring(undefined);
+                        setSigningIn(configuring);
+                    }}
+                />
+            )}
             {removing && <RemoveDialog source={removing} onClose={() => setRemoving(undefined)} />}
         </div>
     );
@@ -185,10 +201,11 @@ export function FeedPage({ state, navigate }: PageProps) {
  * One source: name, state, and actions.
  * @param props The row.
  * @param props.source The source.
+ * @param props.icon The source plugin's logo.
  * @param props.template Its template, absent when the plugin is not active.
  * @param props.templateName Its name in the UI language.
  * @param props.setupHint How to set it up, from its plugin; empty when the plugin has none.
- * @param props.onSetup Open the settings that fix it.
+ * @param props.onSetup Open this source's settings.
  * @param props.onOpen Open its conversation.
  * @param props.onSignIn Start its sign-in.
  * @param props.onRemove Ask to delete it.
@@ -196,6 +213,7 @@ export function FeedPage({ state, navigate }: PageProps) {
  */
 function SourceRow({
     source,
+    icon,
     template,
     templateName,
     setupHint,
@@ -205,10 +223,11 @@ function SourceRow({
     onRemove,
 }: {
     source: SourceInfo;
+    icon: string | undefined;
     template: SourceTemplateInfo | undefined;
     templateName: string | undefined;
     setupHint: string | undefined;
-    onSetup: (fix: SourceFix) => void;
+    onSetup: () => void;
     onOpen: () => void;
     onSignIn: () => void;
     onRemove: () => void;
@@ -217,7 +236,11 @@ function SourceRow({
     const { health } = source;
     return (
         <li className="bg-card flex flex-wrap items-center gap-3 rounded-2xl border p-4">
-            <RssIcon className="text-muted-foreground size-5 shrink-0" />
+            <EntityIcon
+                src={icon}
+                fallback={RssIcon}
+                className="size-10 rounded-lg object-contain"
+            />
             <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                     <span className="truncate font-medium">{source.name}</span>
@@ -240,12 +263,8 @@ function SourceRow({
                 )}
             </div>
             <div className="flex flex-wrap items-center gap-1">
-                {health.state === 'needs-setup' && health.fix && (
-                    <Button
-                        size="sm"
-                        className="rounded-full"
-                        onClick={() => health.fix && onSetup(health.fix)}
-                    >
+                {(template?.credentialType || template?.mcpServer) && (
+                    <Button size="sm" className="rounded-full" onClick={onSetup}>
                         <SettingsIcon /> {t('feed.openSettings')}
                     </Button>
                 )}
@@ -324,6 +343,16 @@ function AddSourceDialog({
                             choices={state.sourceTemplates.map(item => ({
                                 value: item.id,
                                 label: templateText(state, locale, item, 'name'),
+                                icon: (
+                                    <EntityIcon
+                                        src={
+                                            state.plugins.find(
+                                                plugin => plugin.id === item.pluginId
+                                            )?.icon
+                                        }
+                                        fallback={RssIcon}
+                                    />
+                                ),
                             }))}
                             icon={<RssIcon />}
                             placeholder={t('feed.template')}

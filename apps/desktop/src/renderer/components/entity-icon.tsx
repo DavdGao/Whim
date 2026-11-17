@@ -20,7 +20,7 @@ export function EntityIcon({
     className?: string;
 }) {
     return src ? (
-        <img src={src} alt="" className={cn('size-4 shrink-0', className)} />
+        <img src={src} alt="" className={cn('size-4 shrink-0 object-contain', className)} />
     ) : (
         <Fallback className={cn('size-4 shrink-0', className)} />
     );

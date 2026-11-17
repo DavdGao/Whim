@@ -864,6 +864,9 @@ class Backend {
                 name: template.name,
                 description: template.description,
                 login: template.login !== undefined,
+                ...(template.credentialType ? { credentialType: template.credentialType } : {}),
+                ...(template.mcpServer ? { mcpServer: template.mcpServer } : {}),
+                ...(template.mcpDefaultUrl ? { mcpDefaultUrl: template.mcpDefaultUrl } : {}),
             })),
         };
     }

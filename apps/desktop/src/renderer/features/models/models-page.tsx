@@ -71,7 +71,7 @@ function typeName(state: AppState, typeId: string, locale: 'en' | 'zh-CN'): stri
  * @param props.onOpenChange Open-state setter.
  * @returns The dialog.
  */
-function CredentialDialog({
+export function CredentialDialog({
     state,
     editing,
     open,
@@ -208,7 +208,18 @@ function CredentialDialog({
  * @param props.state Application state.
  * @returns The section.
  */
-export function ModelSettings({ state }: { state: AppState }) {
+export function ModelSettings({ state: appState }: { state: AppState }) {
+    const feedTypes = new Set(appState.sourceTemplates.map(item => item.credentialType));
+    const modelTypes = new Set(appState.adapters.flatMap(item => item.credentialTypes));
+    const state = {
+        ...appState,
+        credentialTypes: appState.credentialTypes.filter(
+            item => !feedTypes.has(item.id) || modelTypes.has(item.id)
+        ),
+        credentials: appState.credentials.filter(
+            item => !feedTypes.has(item.typeId) || modelTypes.has(item.typeId)
+        ),
+    };
     const { t, locale } = useT();
     const [dialog, setDialog] = useState<{ editing?: CredentialInfo } | undefined>();
     const choices = modelChoices(state, state.chatSlot?.credentialId);
