@@ -20,7 +20,7 @@
         },
         "category": "tools",
         "locales": "./locales",
-        "icon": "./icons/reddit.png"
+        "icon": "./icons/reddit.svg"
     },
     "exports": {
         ".": {

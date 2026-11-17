@@ -12,7 +12,7 @@
         },
         "category": "tools",
         "locales": "./locales",
-        "icon": "./icons/claude-code.png"
+        "icon": "./icons/claude-code.svg"
     },
     "exports": {
         ".": {

@@ -558,6 +558,8 @@ In Agent settings, clicking the avatar itself opens the image picker. It is keyb
 
 Plugin activation switches show no adjacent Enabled text. Their accessible labels retain the plugin name and localized activation label.
 
+Source and plugin icons prefer transparent SVG brand marks, centered with their original aspect ratio. Raster marks with a brand background are clipped to a circle. Plugin rows do not add a second tinted tile behind an existing brand image; generic fallback glyphs may keep that tile.
+
 Chat list timestamps use a monospace font; dates use a two-digit day with a leading zero for days 1–9. Tool activity titles, including WebFetch URLs, shrink and truncate within the message width, with the full title available on hover. Acceptance covers single- and double-digit days in English and Simplified Chinese, and long URLs in running, completed, and failed tool calls at narrow widths, including expanded details.
 
 The Chat sidebar also has a Sources group after the ordinary chat groups. Each entry uses the source instance's name and plugin icon and opens its existing session, including when opened from Feed. Sources are not duplicated in Pinned, Today or Earlier and are managed through Feed rather than ordinary chat rename/pin/delete menus. Acceptance covers source-only lists, mixed lists, multiple instances of one platform, selected state, keyboard access, English/Chinese group labels, and removal when a source is deleted.

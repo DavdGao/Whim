@@ -236,11 +236,7 @@ function SourceRow({
     const { health } = source;
     return (
         <li className="bg-card flex flex-wrap items-center gap-3 rounded-2xl border p-4">
-            <EntityIcon
-                src={icon}
-                fallback={RssIcon}
-                className="size-10 rounded-lg object-contain"
-            />
+            <EntityIcon src={icon} fallback={RssIcon} className="size-10 object-contain" />
             <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                     <span className="truncate font-medium">{source.name}</span>

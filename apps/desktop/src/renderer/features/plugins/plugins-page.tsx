@@ -95,11 +95,17 @@ export function PluginSettings({ state }: { state: AppState }) {
                             return (
                                 <Card key={plugin.id}>
                                     <CardContent className="flex items-start gap-4">
-                                        <div className="bg-muted flex size-11 shrink-0 items-center justify-center rounded-2xl">
+                                        <div
+                                            className={
+                                                plugin.icon
+                                                    ? 'flex size-11 shrink-0 items-center justify-center'
+                                                    : 'bg-muted flex size-11 shrink-0 items-center justify-center rounded-full'
+                                            }
+                                        >
                                             <EntityIcon
                                                 src={plugin.icon}
                                                 fallback={PuzzleIcon}
-                                                className="size-6"
+                                                className={plugin.icon ? 'size-10' : 'size-6'}
                                             />
                                         </div>
                                         <div className="min-w-0 flex-1">
