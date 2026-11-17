@@ -10,7 +10,6 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
     SidebarProvider,
-    SidebarSeparator,
     SidebarTrigger,
 } from '@whimkit/ui/components/sidebar';
 import { Skeleton } from '@whimkit/ui/components/skeleton';
@@ -23,7 +22,7 @@ import {
     SettingsIcon,
     SquareTerminalIcon,
 } from 'lucide-react';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { AgentAvatar } from './components/agent-avatar';
@@ -272,24 +271,25 @@ function Shell() {
                         </SidebarMenu>
                     </SidebarHeader>
                     <SidebarContent>
-                        {groups.map((group, index) => (
-                            <Fragment key={group.placement}>
-                                {index > 0 && <SidebarSeparator />}
-                                <SidebarGroup role="group" aria-label={group.label}>
-                                    <SidebarGroupContent>
-                                        <SidebarMenu className="gap-2">
-                                            {group.pages.map(item => (
-                                                <NavItem
-                                                    key={item.id}
-                                                    item={item}
-                                                    active={item === current}
-                                                    onSelect={() => navigate(item.id)}
-                                                />
-                                            ))}
-                                        </SidebarMenu>
-                                    </SidebarGroupContent>
-                                </SidebarGroup>
-                            </Fragment>
+                        {groups.map(group => (
+                            <SidebarGroup
+                                key={group.placement}
+                                role="group"
+                                aria-label={group.label}
+                            >
+                                <SidebarGroupContent>
+                                    <SidebarMenu className="gap-2">
+                                        {group.pages.map(item => (
+                                            <NavItem
+                                                key={item.id}
+                                                item={item}
+                                                active={item === current}
+                                                onSelect={() => navigate(item.id)}
+                                            />
+                                        ))}
+                                    </SidebarMenu>
+                                </SidebarGroupContent>
+                            </SidebarGroup>
                         ))}
                     </SidebarContent>
                     {footer.length > 0 && (
