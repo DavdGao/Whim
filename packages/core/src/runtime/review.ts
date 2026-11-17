@@ -87,9 +87,10 @@ export function reviewRequest(
 const policy = [
     'Review the safety of one tool call before it runs.',
     "Use `requests` as evidence of the user's intent.",
+    'If `requests` is empty, assess the operation itself. Missing requests must not be a reason to ask the user.',
     '',
     "- allow: the operation is safe, or its risks and scope are clearly covered by the user's request. Deletion commands are not inherently unsafe; consider their actual targets and effects.",
-    "- ask: the operation has meaningful risk, and the user's request does not clearly authorize that risk or scope.",
+    '- ask: the operation has meaningful risk with uncertain consequences, or available requests do not clearly authorize that risk or scope.',
     "- deny: the operation is categorically dangerous, such as recursively deleting the filesystem root or wiping the running system's disk. Reject these even if the user requested them.",
     '',
     'Evaluate the full operation, including chained commands and scripts.',
@@ -99,7 +100,7 @@ const policy = [
 
 const options = {
     allow: "The operation is safe, or its risks and scope are clearly covered by the user's request.",
-    ask: "The operation has meaningful risk, and the user's request does not clearly authorize that risk or scope.",
+    ask: 'The operation has meaningful risk with uncertain consequences, or available requests do not clearly authorize that risk or scope.',
     deny: 'The operation is categorically dangerous and must be rejected even if the user requested it.',
 } as const;
 
