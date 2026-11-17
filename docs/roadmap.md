@@ -107,7 +107,8 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [x] Hold `prevent-app-suspension` while chats run
 - [ ] Launch at login without opening a window; optional Dock icon hiding
 - [x] Schedules (design.md §4.1.1): rows in SQLite, one timer, each fire committed with its delivery so restarts never fire twice, missed-fire policy, `schedule-fired` notice as `<system-notification>`; `ScheduleCreate`/`List`/`Update`/`Delete` for the calling conversation (cron via `croner`, at most every 5 minutes, 20 per conversation); tested against a real SQLite database with an injected clock
-- [ ] Settings page listing every schedule with pause and delete
+- Dedicated Schedules page: current schedules, timing, time zone, owning chat, paused state, missed-fire policy and trigger times; read-only with refresh and chat navigation. Verified in an isolated Electron fixture with both locales, failure recovery and polling cleanup.
+- [ ] User controls to pause and delete schedules
 - [ ] Plugin event sources as triggers
 
 ## PR 8 — Plugin API (design.md §5.7)

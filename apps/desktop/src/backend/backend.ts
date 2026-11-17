@@ -666,6 +666,10 @@ class Backend {
                 this.#emit({ type: 'state' });
                 return null;
             }
+            case 'schedule.list': {
+                methodSchemas[method].parse(raw);
+                return this.store.schedules();
+            }
             case 'source.create': {
                 const params = methodSchemas[method].parse(raw);
                 return this.createSource(params.template, params.name, params.slot);

@@ -1,4 +1,9 @@
-import { idSchema, mcpServerSchema, thinkingLevelSchema } from '@whimkit/core/contracts';
+import {
+    idSchema,
+    mcpServerSchema,
+    scheduleRowSchema,
+    thinkingLevelSchema,
+} from '@whimkit/core/contracts';
 import { z } from 'zod';
 
 import { localeSchema } from './main-protocol.js';
@@ -34,6 +39,9 @@ export const permissionSettingsSchema = z.strictObject({
     reviewer: z.strictObject({ credentialId: idSchema, cardId: idSchema }).optional(),
 });
 export type PermissionSettings = z.infer<typeof permissionSettingsSchema>;
+
+export const scheduleListSchema = z.array(scheduleRowSchema);
+export type ScheduleList = z.infer<typeof scheduleListSchema>;
 
 /** The agent's identity; applies to epochs started after a change. */
 export const agentProfileSchema = z.strictObject({
@@ -203,6 +211,7 @@ export const methodSchemas = {
         slot: chatSlotSchema,
     }),
     'source.remove': z.strictObject({ id: z.string().min(1).max(40) }),
+    'schedule.list': z.strictObject({}),
     /** Check a source's health now, bypassing the recent result. */
     'source.check': z.strictObject({ id: z.string().min(1).max(40) }),
     /** Start or continue a source's sign-in. */
@@ -483,6 +492,7 @@ export interface Results {
     'mcp.remove': null;
     'source.create': { id: string; sessionId: string };
     'source.remove': null;
+    'schedule.list': ScheduleList;
     'source.check': SourceState;
     'source.login': SourceLogin;
     'coding.sessions': CodingInventory;
