@@ -175,8 +175,8 @@ export function PluginSettings({ state }: { state: AppState }) {
                                         </div>
                                         <div className="flex flex-col items-end gap-1">
                                             <div className="flex items-center gap-2">
-                                                <Label htmlFor={switchId}>
-                                                    {t('plugins.enabled')}
+                                                <Label htmlFor={switchId} className="sr-only">
+                                                    {name}: {t('plugins.enabled')}
                                                 </Label>
                                                 <PluginSwitch
                                                     id={switchId}
