@@ -18,6 +18,8 @@ export const mcpServerSchema = z.strictObject({
             args: z.array(z.string()),
             cwd: z.string().min(1).optional(),
             env: z.record(z.string(), z.string()),
+            /** Bound initial installation/connection work for managed servers. */
+            startupTimeoutMs: z.number().int().min(1000).max(600000).optional(),
         }),
         z.strictObject({
             kind: z.literal('http'),

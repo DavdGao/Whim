@@ -55,6 +55,11 @@ export const en = {
     'feed.existingConnection': 'Your existing local connection will be reused.',
     'feed.connectionUrl': 'Service address',
     'feed.connect': 'Connect',
+    'feed.managedHint':
+        'Whim prepares and starts the connection automatically. First setup downloads the required components and may take several minutes.',
+    'feed.managedLogin':
+        'Scan the QR code with the Xiaohongshu app to sign in. Currently supports Apple silicon Macs.',
+    'feed.prepareLogin': 'Set up and sign in',
     'feed.connectionFailed': 'Could not connect. Make sure the service is running. {detail}',
     'feed.signIn': 'Sign in',
     'feed.check': 'Check',
@@ -514,6 +519,9 @@ export const zhCN: Record<MessageKey, string> = {
     'feed.existingConnection': '将复用你已有的本地连接。',
     'feed.connectionUrl': '服务地址',
     'feed.connect': '连接',
+    'feed.managedHint': 'Whim 会自动准备并启动连接。首次使用需要下载必要组件，可能需要几分钟。',
+    'feed.managedLogin': '使用小红书 App 扫码登录。目前支持 Apple 芯片的 Mac。',
+    'feed.prepareLogin': '准备并登录',
     'feed.connectionFailed': '连接失败，请确认服务已启动。{detail}',
     'feed.signIn': '登录',
     'feed.check': '检查',

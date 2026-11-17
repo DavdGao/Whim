@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+
 import { definePlugin } from '@whimkit/core/plugin';
 
 import { readLoginStatus, readQrCode } from './login.js';
@@ -45,7 +47,10 @@ export default definePlugin({
             instructions,
             tools: [],
             mcpServer: 'xiaohongshu',
-            mcpDefaultUrl: 'http://localhost:18060/mcp',
+            mcpLaunch: {
+                entry: fileURLToPath(new URL('./launcher.js', import.meta.url)),
+                startupTimeoutMs: 600000,
+            },
             mcpTools: readTools,
             async health(source) {
                 return readLoginStatus(await source.callMcp('check_login_status', {}));

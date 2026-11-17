@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 import { McpHost, mcpToolName, toolOutput } from './mcp.js';
@@ -60,6 +64,46 @@ function host() {
 const context = { signal: new AbortController().signal } as ToolContext;
 
 describe('McpHost', () => {
+    it('stops a process while its initial handshake is still pending', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'whim-mcp-start-'));
+        const pidFile = join(directory, 'pid');
+        const { host: instance } = host();
+        try {
+            await instance.configure([
+                config({
+                    transport: {
+                        kind: 'stdio',
+                        command: process.execPath,
+                        args: [
+                            '-e',
+                            "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)",
+                            pidFile,
+                        ],
+                        env: {},
+                        startupTimeoutMs: 600000,
+                    },
+                }),
+            ]);
+            let pid = 0;
+            for (let attempt = 0; attempt < 100; attempt++) {
+                try {
+                    pid = Number(await readFile(pidFile, 'utf8'));
+                    break;
+                } catch (error) {
+                    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT'))
+                        throw error;
+                    await delay(20);
+                }
+            }
+            assert.ok(pid > 0);
+            await instance.stop();
+            assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+        } finally {
+            await instance.stop();
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
     it('connects a stdio server and offers its tools under the server id', async () => {
         const { host: instance, until } = host();
         await instance.configure([config()]);

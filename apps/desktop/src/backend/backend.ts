@@ -13,6 +13,7 @@ import {
     CredentialValidationError,
     DecisionReviewer,
     describeError,
+    mcpServerSchema,
     ModelService,
     PluginCallError,
     PluginHost,
@@ -278,7 +279,7 @@ class Backend {
         readonly catalog: Catalog,
         readonly credentials: CredentialService,
         readonly models: ModelService,
-        userData: string,
+        private readonly userData: string,
         version: string,
         toMain: (message: Activity | Attention | PluginClients) => void,
         secrets: SecretCipher
@@ -691,6 +692,55 @@ class Backend {
                     this.sources.infos().find(info => info.id === id)?.health ?? { state: 'ready' }
                 );
             }
+            case 'source.setup': {
+                const { id } = methodSchemas[method].parse(raw);
+                const source = this.sources.list().find(row => row.id === id);
+                const template = source && this.sources.template(source)?.template;
+                if (!source || !template?.mcpLaunch || !template.mcpServer)
+                    throw new StoreError('invalid', 'This source has no managed connection.');
+                mcpServerSchema.shape.id.parse(template.mcpServer);
+                const directory = join(this.userData, 'source-connections', template.mcpServer);
+                await mkdir(directory, { recursive: true, mode: 0o700 });
+                const existing = (await this.mcp.views()).find(
+                    server => server.id === template.mcpServer
+                );
+                await this.mcp.dispatch('mcp.save', {
+                    server: {
+                        id: template.mcpServer,
+                        label: source.name,
+                        enabled: true,
+                        trusted: existing?.trusted ?? false,
+                        transport: {
+                            kind: 'stdio',
+                            command: process.execPath,
+                            args: [template.mcpLaunch.entry, directory],
+                            cwd: directory,
+                            env: { ELECTRON_RUN_AS_NODE: '1' },
+                            startupTimeoutMs: template.mcpLaunch.startupTimeoutMs,
+                        },
+                    },
+                    replace: existing !== undefined,
+                    secretValues: {},
+                    removeSecrets: [],
+                });
+                const deadline = Date.now() + template.mcpLaunch.startupTimeoutMs + 30000;
+                while (this.#accepting && Date.now() < deadline) {
+                    const status = this.mcp.host.state(template.mcpServer);
+                    if (status.state === 'ready') {
+                        const health = await this.sources.health(source, true);
+                        this.#emit({ type: 'state' });
+                        return health;
+                    }
+                    if (status.state === 'failed') throw new StoreError('invalid', status.detail);
+                    if (status.state === 'disabled')
+                        throw new StoreError('invalid', 'Connection was disabled.');
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+                throw new StoreError(
+                    'invalid',
+                    'Connection preparation timed out or the application is shutting down.'
+                );
+            }
             case 'source.login': {
                 const { id } = methodSchemas[method].parse(raw);
                 const login = await this.sources.login(id);
@@ -871,6 +921,7 @@ class Backend {
                 ...(template.credentialType ? { credentialType: template.credentialType } : {}),
                 ...(template.mcpServer ? { mcpServer: template.mcpServer } : {}),
                 ...(template.mcpDefaultUrl ? { mcpDefaultUrl: template.mcpDefaultUrl } : {}),
+                ...(template.mcpLaunch ? { managedMcp: true } : {}),
             })),
         };
     }
