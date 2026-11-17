@@ -229,8 +229,8 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
             return next;
         }
         case 'epoch.started':
-            // Only compaction replaces the prefix while a run is active.
-            if (run && body.reason !== 'compaction')
+            // Source tools may refresh between steps without replacing history.
+            if (run && body.reason !== 'compaction' && body.reason !== 'tools-changed')
                 throw new InvalidJournalError('Epoch change during a run.', record.seq);
             return { ...base, epoch: { seq: record.seq, ...epochOf(body) } };
         case 'compaction.started':

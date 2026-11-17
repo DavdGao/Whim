@@ -157,6 +157,7 @@ Frontend and prompts:
 
 - [x] Feed page: sources with their state, new source from a template with its model, open a source's conversation, reconnect, delete; source-specific configuration dialogs and a check on open
 - [x] Managed Xiaohongshu setup in Feed: pinned connector download, private login storage, automatic process startup and QR handoff, without manual MCP fields
+- [x] Refresh source MCP tools before the next reasoning step after setup or reconnect, preserving history and in-flight requests; regression coverage includes SQLite replay and local MCP fixtures
 - [ ] Complete live Xiaohongshu QR login and signed-in restart: the November 17 Electron trial verified installation and startup failure handling, but the local corporate network blocked the required browser CDN with HTTP 403 ([verification](providers/xiaohongshu.md))
 - [x] Source agent prompt (agent.md §14): research loop (expanding and following queries, verifying against primary and independent sources), quality checks against ads and generated filler, increments from its earlier reports, delivery by files
 

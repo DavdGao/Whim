@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 
 import { z } from 'zod';
 
@@ -78,6 +79,13 @@ export const commandSchema = z.discriminatedUnion('type', [
         thinking: thinkingLevelSchema.nullable().optional(),
     }),
     z.strictObject({ ...base, type: z.literal('switch-model'), epoch: z.strictObject(epochInput) }),
+    z.strictObject({
+        ...base,
+        type: z.literal('refresh-tools'),
+        runId: idSchema,
+        epochId: idSchema,
+        tools: z.array(toolDeclarationSchema),
+    }),
     z.strictObject({
         ...base,
         type: z.literal('start-compaction'),
@@ -331,6 +339,33 @@ export function decide(view: SessionView | null, command: Command): Body[] {
         case 'switch-model':
             if (run) throw new StoreError('conflict', 'The model cannot change during a run.');
             return [{ type: 'epoch.started', reason: 'model-switch', ...command.epoch }];
+        case 'refresh-tools': {
+            requireActive(view, command.runId);
+            if (
+                run?.interrupt ||
+                run?.attempt ||
+                !run?.stepId ||
+                view.calls.length ||
+                view.compactions.some(item => item.state === 'running')
+            )
+                throw new StoreError('conflict', 'Tools can only refresh before a model step.');
+            if (isDeepStrictEqual(view.epoch.tools, command.tools)) return [];
+            const { system, card, renderer, nativeTools, providerTools, context } = view.epoch;
+            return [
+                {
+                    type: 'epoch.started',
+                    reason: 'tools-changed',
+                    epochId: command.epochId,
+                    system,
+                    card,
+                    renderer,
+                    tools: command.tools,
+                    nativeTools: [...nativeTools],
+                    providerTools: [...providerTools],
+                    ...(context ? { context } : {}),
+                },
+            ];
+        }
         case 'start-run':
             if (run) return [];
             return [{ type: 'run.started', runId: command.runId, trigger: command.trigger }];

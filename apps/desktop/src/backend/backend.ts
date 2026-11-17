@@ -334,6 +334,7 @@ class Backend {
             this.mcp.host
         );
         this.agent = new Agent(store, models, this.tools, {
+            refreshTools: view => this.sources.refreshTools(view),
             compaction: {
                 transcriptPath: sessionId =>
                     join(this.tools.sessionDir(sessionId), 'conversation.md'),

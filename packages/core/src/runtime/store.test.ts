@@ -94,6 +94,158 @@ async function send(store: Store, sessionId: string, text: string): Promise<stri
 }
 
 describe('Store', () => {
+    it('persists refreshed tools without changing context and fences unsafe refreshes', async () => {
+        const path = join(dir, 'refresh-tools.sqlite');
+        let store = await Store.open(path);
+        try {
+            const sessionId = await createSession(store);
+            const context = {
+                summary: 'Earlier work',
+                from: 3,
+                transcript: 'file:///tmp/history.md',
+            };
+            await store.execute(
+                cmd(sessionId, {
+                    type: 'switch-model',
+                    epoch: {
+                        epochId: 'before-refresh',
+                        system: 'system',
+                        card,
+                        renderer: 1,
+                        tools: [],
+                        nativeTools: ['WebSearch'],
+                        providerTools: ['WebFetch'],
+                        context,
+                    },
+                })
+            );
+            await send(store, sessionId, 'Search notes');
+            const runId = 'source-run';
+            const stepId = 'source-step';
+            const tools = [
+                { name: 'SearchNotes', description: 'Search', inputSchema: { type: 'object' } },
+            ];
+            const refresh = cmd(sessionId, {
+                type: 'refresh-tools',
+                runId,
+                epochId: 'ready',
+                tools,
+            });
+            await assert.rejects(store.execute(refresh), { code: 'conflict' });
+            await store.execute(cmd(sessionId, { type: 'start-run', runId, trigger: 'user' }));
+            await assert.rejects(store.execute(refresh), { code: 'conflict' });
+            await store.execute(cmd(sessionId, { type: 'prepare-step', runId, stepId }));
+            const before = await store.view(sessionId);
+            const records = await store.execute(refresh);
+            assert.deepEqual(
+                records.map(record => record.body),
+                [
+                    {
+                        type: 'epoch.started',
+                        reason: 'tools-changed',
+                        epochId: 'ready',
+                        system: 'system',
+                        card,
+                        renderer: 1,
+                        tools,
+                        nativeTools: ['WebSearch'],
+                        providerTools: ['WebFetch'],
+                        context,
+                    },
+                ]
+            );
+            const after = await store.view(sessionId);
+            assert.deepEqual(after, {
+                ...before,
+                head: before.head + 1,
+                updatedAt: records[0].createdAt,
+                epoch: {
+                    ...before.epoch,
+                    seq: before.head + 1,
+                    epochId: 'ready',
+                    reason: 'tools-changed',
+                    tools,
+                },
+            });
+            assert.deepEqual(await store.execute(refresh), records);
+            assert.deepEqual(await store.execute({ ...refresh, operationId: randomUUID() }), []);
+            await store.execute(
+                cmd(sessionId, { type: 'start-compaction', runId, compactionId: 'summary' })
+            );
+            await assert.rejects(store.execute({ ...refresh, operationId: randomUUID() }), {
+                code: 'conflict',
+            });
+            await store.execute(
+                cmd(sessionId, {
+                    type: 'finish-compaction',
+                    compactionId: 'summary',
+                    result: {
+                        status: 'failed',
+                        failure: {
+                            category: 'cancelled',
+                            retry: { kind: 'never' },
+                            outcome: 'rejected',
+                            detail: { provider: 'test' },
+                        },
+                    },
+                })
+            );
+            await store.execute(
+                cmd(sessionId, {
+                    type: 'start-attempt',
+                    runId,
+                    stepId,
+                    attemptId: 'attempt',
+                    number: 1,
+                })
+            );
+            await assert.rejects(store.execute({ ...refresh, operationId: randomUUID() }), {
+                code: 'conflict',
+            });
+            await store.execute(
+                cmd(sessionId, {
+                    type: 'finish-attempt',
+                    attemptId: 'attempt',
+                    usage: {},
+                    result: {
+                        status: 'completed',
+                        output: {
+                            messageId: 'reply',
+                            blocks: [
+                                {
+                                    type: 'tool_call',
+                                    callId: 'call',
+                                    name: 'SearchNotes',
+                                    arguments: '{}',
+                                },
+                            ],
+                        },
+                    },
+                })
+            );
+            await assert.rejects(store.execute({ ...refresh, operationId: randomUUID() }), {
+                code: 'conflict',
+            });
+            await store.execute(
+                cmd(sessionId, {
+                    type: 'interrupt',
+                    runId,
+                    reason: 'user',
+                    observedAt: '2026-11-17T00:00:00.000Z',
+                })
+            );
+            await assert.rejects(store.execute({ ...refresh, operationId: randomUUID() }), {
+                code: 'conflict',
+            });
+            const persisted = await store.view(sessionId);
+            await store.close();
+            store = await Store.open(path);
+            assert.deepEqual(await store.view(sessionId), persisted);
+        } finally {
+            await store.close();
+        }
+    });
+
     it('runs a full turn and rebuilds the same view after reopening', async () => {
         const path = join(dir, 'turn.sqlite');
         const store = await Store.open(path);
