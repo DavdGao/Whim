@@ -335,7 +335,13 @@ export function SessionList({
                                 src={plugins.find(plugin => plugin.id === source.pluginId)?.icon}
                                 fallback={RssIcon}
                             />
-                            <span className="min-w-0 truncate">{source.name}</span>
+                            <span className="min-w-0 flex-1 truncate text-left">{source.name}</span>
+                            {source.running && (
+                                <Spinner
+                                    className="text-primary size-3.5 shrink-0 motion-reduce:animate-none"
+                                    aria-label={t('chat.running')}
+                                />
+                            )}
                         </Button>
                     ))}
                 </section>
