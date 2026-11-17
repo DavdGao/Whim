@@ -5,122 +5,141 @@ import { it } from 'node:test';
 
 import { groupSources } from './source-groups';
 
-import type { SourceState } from '../../../shared/ipc';
+import type { SourceInfo, SourceTemplateInfo } from '../../../shared/ipc';
 
-it('separates ready, broken, and missing configuration while keeping source order', () => {
-    const entries: { id: string; health: SourceState }[] = [
-        {
-            id: 'new-server',
-            health: {
-                state: 'needs-setup',
-                detail: 'Missing server',
-                fix: { kind: 'mcp', server: 'missing' },
-            },
-        },
-        { id: 'signed-out', health: { state: 'needs-login', detail: 'Sign in again' } },
-        { id: 'ready', health: { state: 'ready' } },
-        {
-            id: 'offline',
-            health: {
-                state: 'needs-setup',
-                detail: 'Server disabled',
-                fix: { kind: 'mcp', server: 'configured' },
-            },
-        },
-        {
-            id: 'new-account',
-            health: {
-                state: 'needs-setup',
-                detail: 'Missing credential',
-                fix: { kind: 'credential', typeId: 'missing' },
-            },
-        },
-        {
-            id: 'locked-account',
-            health: {
-                state: 'needs-setup',
-                detail: 'Credential unavailable',
-                fix: { kind: 'credential', typeId: 'configured' },
-            },
-        },
-        { id: 'unavailable', health: { state: 'unavailable', detail: 'Connection failed' } },
-        { id: 'plugin-disabled', health: { state: 'needs-setup', detail: 'Plugin disabled' } },
-        { id: 'ready-later', health: { state: 'ready' } },
-    ];
-    const sources = entries.map(entry => ({
-        ...entry,
-        name: entry.id,
-        sessionId: entry.id,
-        template: 'test#source',
-        running: false,
-    }));
-    const before = structuredClone(sources);
-    const groups = groupSources({
-        sources,
-        credentials: [
-            {
-                id: 'credential',
-                typeId: 'configured',
-                label: 'Account',
-                values: {},
-                secretsSet: [],
-                createdAt: '2026-11-17T00:00:00.000Z',
-                available: false,
-            },
-        ],
-        mcpServers: [
-            {
-                id: 'configured',
-                label: 'Source',
-                enabled: false,
-                trusted: false,
-                secrets: [],
-                transport: { kind: 'stdio', command: 'fixture', args: [], env: {} },
-                status: { state: 'disabled' },
-            },
+const arxiv: SourceTemplateInfo = {
+    id: 'arxiv',
+    pluginId: 'arxiv',
+    name: 'arXiv',
+    description: 'Papers',
+    login: false,
+};
+const reddit: SourceTemplateInfo = {
+    id: 'reddit',
+    pluginId: 'reddit',
+    name: 'Reddit',
+    description: 'Posts',
+    login: false,
+    credentialType: 'reddit#oauth',
+};
+const xhs: SourceTemplateInfo = {
+    id: 'xhs',
+    pluginId: 'xhs',
+    name: 'Xiaohongshu',
+    description: 'Notes',
+    login: true,
+    mcpServer: 'xiaohongshu',
+};
+
+it('shows available templates as candidates without creating any sources', () => {
+    assert.deepEqual(groupSources({ sources: [], sourceTemplates: [arxiv, reddit, xhs] }), {
+        ready: [],
+        candidates: [
+            { kind: 'new', template: arxiv },
+            { kind: 'new', template: reddit },
+            { kind: 'new', template: xhs },
         ],
     });
-    assert.deepEqual(
-        groups.map(group => ({ id: group.id, sources: group.sources.map(source => source.id) })),
-        [
-            { id: 'ready', sources: ['ready', 'ready-later'] },
-            {
-                id: 'invalid',
-                sources: [
-                    'signed-out',
-                    'offline',
-                    'locked-account',
-                    'unavailable',
-                    'plugin-disabled',
-                ],
-            },
-            { id: 'unconfigured', sources: ['new-server', 'new-account'] },
-        ]
-    );
+    assert.deepEqual(groupSources({ sources: [], sourceTemplates: [] }), {
+        ready: [],
+        candidates: [],
+    });
+});
+
+it('keeps checked ready sessions above candidates and preserves existing unfinished sessions', () => {
+    const ready: SourceInfo = {
+        id: 'papers',
+        sessionId: 'papers-session',
+        name: 'Papers',
+        template: 'arxiv',
+        running: true,
+        health: { state: 'ready', checkedAt: '2026-11-17T00:00:00.000Z' },
+    };
+    const unchecked: SourceInfo = {
+        id: 'more-papers',
+        sessionId: 'more-papers-session',
+        name: 'More papers',
+        template: 'arxiv',
+        running: false,
+        health: { state: 'ready' },
+    };
+    const login: SourceInfo = {
+        id: 'notes',
+        sessionId: 'notes-session',
+        name: 'Notes',
+        template: 'xhs',
+        running: false,
+        health: {
+            state: 'needs-login',
+            detail: 'Scan code',
+            checkedAt: '2026-11-17T00:00:00.000Z',
+        },
+    };
+    const removed: SourceInfo = {
+        id: 'old',
+        sessionId: 'old-session',
+        name: 'Old source',
+        template: 'removed',
+        running: false,
+        health: {
+            state: 'needs-setup',
+            detail: 'Plugin disabled',
+            checkedAt: '2026-11-17T00:00:00.000Z',
+        },
+    };
+    const sources = [login, ready, unchecked, removed];
+    const before = structuredClone(sources);
+    assert.deepEqual(groupSources({ sources, sourceTemplates: [arxiv, reddit, xhs] }), {
+        ready: [ready],
+        candidates: [
+            { kind: 'existing', source: login, template: xhs },
+            { kind: 'existing', source: unchecked, template: arxiv },
+            { kind: 'existing', source: removed },
+            { kind: 'new', template: reddit },
+        ],
+    });
     assert.deepEqual(sources, before);
 });
 
-it('moves a source when health changes and omits empty groups', () => {
-    const source = {
-        id: 'source',
-        sessionId: 'session',
-        template: 'test#source',
-        name: 'Source',
+it('promotes successful configuration, demotes failures, and restores deleted candidates', () => {
+    const pending: SourceInfo = {
+        id: 'reddit-source',
+        sessionId: 'reddit-session',
+        name: 'Reddit',
+        template: 'reddit',
         running: false,
+        health: {
+            state: 'needs-setup',
+            detail: 'Credentials required',
+            checkedAt: '2026-11-17T00:00:00.000Z',
+        },
     };
-    for (const [health, id] of [
-        [{ state: 'ready' }, 'ready'],
-        [{ state: 'needs-login', detail: 'Sign in again' }, 'invalid'],
-        [{ state: 'ready' }, 'ready'],
-    ] as const) {
-        assert.deepEqual(
-            groupSources({
-                sources: [{ ...source, health }],
-                credentials: [],
-                mcpServers: [],
-            }),
-            [{ id, sources: [{ ...source, health }] }]
-        );
-    }
-    assert.deepEqual(groupSources({ sources: [], credentials: [], mcpServers: [] }), []);
+    assert.deepEqual(groupSources({ sources: [pending], sourceTemplates: [reddit] }), {
+        ready: [],
+        candidates: [{ kind: 'existing', source: pending, template: reddit }],
+    });
+    const connected: SourceInfo = {
+        ...pending,
+        health: { state: 'ready', checkedAt: '2026-11-17T00:01:00.000Z' },
+    };
+    assert.deepEqual(groupSources({ sources: [connected], sourceTemplates: [reddit] }), {
+        ready: [connected],
+        candidates: [],
+    });
+    const failed: SourceInfo = {
+        ...connected,
+        health: {
+            state: 'unavailable',
+            detail: 'Token revoked',
+            checkedAt: '2026-11-17T00:02:00.000Z',
+        },
+    };
+    assert.deepEqual(groupSources({ sources: [failed], sourceTemplates: [reddit] }), {
+        ready: [],
+        candidates: [{ kind: 'existing', source: failed, template: reddit }],
+    });
+    assert.deepEqual(groupSources({ sources: [], sourceTemplates: [reddit] }), {
+        ready: [],
+        candidates: [{ kind: 'new', template: reddit }],
+    });
 });
