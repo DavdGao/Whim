@@ -26,6 +26,7 @@ import type {
     Failure,
     FrozenChatCard,
     SessionView,
+    ToolDeclaration,
     Usage,
 } from '@whimkit/core/contracts';
 import type { ChatEvent, ChatRequest, ChatRequestMessage, ChatSession } from '@whimkit/core/plugin';
@@ -66,6 +67,8 @@ export interface AgentOptions {
     readonly readMedia?: (uri: string) => Promise<Uint8Array>;
     /** Enables automatic compaction; without it, an oversized context fails the step. */
     readonly compaction?: AgentCompaction;
+    /** Source MCP declarations to persist before a step; undefined leaves the epoch unchanged. */
+    readonly refreshTools?: (view: SessionView) => readonly ToolDeclaration[] | undefined;
     /** The current time, told to the model when it summarizes. */
     readonly now?: () => Date;
 }
@@ -171,6 +174,7 @@ export class Agent {
     readonly #random: () => number;
     readonly #readMedia: (uri: string) => Promise<Uint8Array>;
     readonly #compaction: AgentCompaction | undefined;
+    readonly #refreshTools: AgentOptions['refreshTools'];
     readonly #now: () => Date;
 
     /**
@@ -192,6 +196,7 @@ export class Agent {
         this.#random = options.random ?? Math.random;
         this.#readMedia = options.readMedia ?? (uri => readFile(fileURLToPath(uri)));
         this.#compaction = options.compaction;
+        this.#refreshTools = options.refreshTools;
         this.#now = options.now ?? (() => new Date());
     }
 
@@ -239,9 +244,19 @@ export class Agent {
                     stepId,
                 });
                 if (prepared.length === 0) break;
-                const view = await this.store.view(sessionId);
+                let view = await this.store.view(sessionId);
                 if (first && !needsResponse(view)) break;
                 first = false;
+                const tools = this.#refreshTools?.(view);
+                if (tools) {
+                    await this.#exec(sessionId, {
+                        type: 'refresh-tools',
+                        runId,
+                        epochId: randomUUID(),
+                        tools: [...tools],
+                    });
+                    view = await this.store.view(sessionId);
+                }
                 let outcome = yield* this.#step(view, runId, stepId, signal, true);
                 for (let compactions = 1; outcome.kind === 'compact'; compactions++) {
                     const compacted = await this.#compact(

@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 
 import { storeMedia, StoreError } from '@whimkit/core';
 import { z } from 'zod';
@@ -15,7 +16,7 @@ import type {
     SourceRow,
     Store,
 } from '@whimkit/core';
-import type { MediaBlock } from '@whimkit/core/contracts';
+import type { MediaBlock, SessionView, ToolDeclaration } from '@whimkit/core/contracts';
 import type {
     SourceContext,
     SourceHealth,
@@ -367,6 +368,26 @@ export class Sources {
             name !== 'Reply' &&
             !reserved.has(name) &&
             !servers.some(server => name.startsWith(`mcp__${server}__`));
+    }
+
+    /**
+     * Refresh only a source's ready MCP tools, preserving its other frozen declarations.
+     * @param view The session at a reasoning boundary.
+     * @returns Updated declarations, or undefined when no refresh is needed.
+     */
+    refreshTools(view: SessionView): ToolDeclaration[] | undefined {
+        const source = this.bySession(view.sessionId);
+        const server = source && this.template(source)?.template.mcpServer;
+        if (!server || this.mcp.state(server).state !== 'ready') return undefined;
+        const prefix = `mcp__${server}__`;
+        const allowed = this.toolFilter(view.sessionId);
+        const current = this.mcp
+            .tools()
+            .filter(tool => tool.name.startsWith(prefix) && allowed(tool.name))
+            .map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
+        const previous = view.epoch.tools.filter(tool => tool.name.startsWith(prefix));
+        if (isDeepStrictEqual(previous, current)) return undefined;
+        return [...view.epoch.tools.filter(tool => !tool.name.startsWith(prefix)), ...current];
     }
 
     /**

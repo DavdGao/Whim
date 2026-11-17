@@ -151,6 +151,82 @@ async function transcript(sessionId: string) {
 const noSleep = async () => {};
 const noTools = { run: async () => {} };
 
+describe('source tool refresh', () => {
+    it('refreshes before the next step without changing an in-flight request or history', async () => {
+        const sessionId = await sessionWith('Find notes');
+        const tools = [
+            {
+                name: 'mcp__xiaohongshu__search_feeds',
+                description: 'Search notes',
+                inputSchema: { type: 'object' },
+            },
+        ];
+        let ready = false;
+        const { models, requests } = scripted(async function* (request, _signal, attempt) {
+            if (attempt === 1) {
+                ready = true;
+                await say(sessionId, 'Try the connected source');
+                assert.deepEqual(request.tools, []);
+            }
+            yield { type: 'text-delta', text: attempt === 1 ? 'Waiting' : 'Searching' };
+            yield { type: 'completed', usage: {} };
+        });
+        const agent = new Agent(store, models, noTools, {
+            refreshTools: () => (ready ? tools : undefined),
+        });
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        assert.deepEqual(
+            requests.map(request => request.tools),
+            [[], tools]
+        );
+        assert.deepEqual(await transcript(sessionId), [
+            ['user', 'Find notes', ''],
+            ['assistant', 'Waiting', 'completed'],
+            ['user', 'Try the connected source', ''],
+            ['assistant', 'Searching', 'completed'],
+        ]);
+        const epoch = (await store.view(sessionId)).epoch;
+        assert.equal(epoch.reason, 'tools-changed');
+        await say(sessionId, 'One more');
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        assert.deepEqual((await store.view(sessionId)).epoch, epoch);
+    });
+
+    it('refreshes late tools on the next run but keeps retries on the original epoch', async () => {
+        const sessionId = await sessionWith('Search');
+        const tools = [{ name: 'Search', description: 'Search', inputSchema: { type: 'object' } }];
+        let ready = false;
+        const { models, requests } = scripted(async function* (_request, _signal, attempt) {
+            if (attempt === 1) {
+                ready = true;
+                throw new ApplicationError({
+                    category: 'transport',
+                    retry: { kind: 'backoff' },
+                    outcome: 'rejected',
+                    detail: { provider: 'test', message: 'Try again' },
+                });
+            }
+            yield { type: 'text-delta', text: 'Done' };
+            yield { type: 'completed', usage: {} };
+        });
+        const agent = new Agent(store, models, noTools, {
+            refreshTools: () => (ready ? tools : undefined),
+            sleep: noSleep,
+        });
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        assert.deepEqual(
+            requests.map(request => request.tools),
+            [[], []]
+        );
+        await say(sessionId, 'Search again');
+        await drain(agent.run(sessionId, 'user', new AbortController().signal));
+        assert.deepEqual(
+            requests.map(request => request.tools),
+            [[], [], tools]
+        );
+    });
+});
+
 /**
  * A compaction port writing transcripts under the test folder and keeping the epoch's prefix.
  * @returns The port.

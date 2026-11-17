@@ -18,7 +18,7 @@ The agent is an async generator consumed by the Backend scheduler, never by a UI
 
 A session's state is the fold of its journal:
 
-- **Epoch** — the frozen prefix: system sections, tool declarations, the frozen card, source snapshots, and the notice renderer version. Replaced by compaction or a model switch.
+- **Epoch** — the frozen prefix: system sections, tool declarations, the frozen card, source snapshots, and the notice renderer version. Replaced by compaction, a model switch, or a source MCP tool refresh at a reasoning boundary (§9).
 - **History** — committed context items appended after the epoch: messages, tool calls and results, notices.
 - **Inbox** — accepted deliveries not yet consumed by a reasoning step.
 - **Runs** — one active run at most. A run is a sequence of steps; each step makes one or more model attempts.
@@ -38,7 +38,7 @@ Each record has `id`, `sessionId`, `seq`, `type`, `version`, `createdAt`, `opera
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `session.created`                                                   | Session creation                                                               | title, credential, thinking level                                                                                                      |
 | `session.updated`                                                   | Rename, credential change, thinking level change                               | changed fields; none of them alter the prompt prefix, so they apply to the next attempt                                                |
-| `epoch.started`                                                     | Creation, successful compaction, model switch                                  | `epochId`, `reason`, system sections, tool declarations, frozen card, source snapshots                                                 |
+| `epoch.started`                                                     | Creation, successful compaction, model switch, source tool refresh             | `epochId`, `reason`, system sections, tool declarations, frozen card, source snapshots                                                 |
 | `delivery.accepted`                                                 | Input admitted to the inbox                                                    | `deliveryId`, `placement`, item (message or notice)                                                                                    |
 | `delivery.withdrawn`                                                | User removes a pending item                                                    | `deliveryId`                                                                                                                           |
 | `run.started`                                                       | Scheduler begins a run                                                         | `runId`, trigger                                                                                                                       |
@@ -133,7 +133,7 @@ There is no run-wide timeout. Attempts have an idle timeout between stream event
 
 ## 7. Context sources and the prompt cache
 
-The request prefix — system sections, tool declarations, model route, and every historical item — is identical between compactions. Only appends happen. Only compaction may change the prefix.
+The request prefix — system sections, tool declarations, model route, and every historical item — is identical within an epoch. Only appends happen. Compaction refreshes the prefix; explicit model switches (§8.1) and source MCP tool refreshes (§9) create new epochs at safe boundaries.
 
 ### 7.1 Sources
 
@@ -156,7 +156,7 @@ interface ContextSource {
 
 ### 7.2 Tools as a source
 
-The tool set is a source with target `tools`, so the same mechanism can later carry tool-schema changes between compactions. Dynamic tools are not designed or implemented yet; this section only keeps the source mechanism general enough to host them.
+The tool set is a source with target `tools`, so the same mechanism can later carry general tool-schema change notices between compactions. Source MCP readiness already uses the narrower epoch refresh in §9; other dynamic tool updates remain deferred.
 
 Revocation is immediate regardless of the cache: a disabled tool fails its call with an error result even if it is still declared.
 
@@ -172,7 +172,7 @@ Compaction is automatic; there is no manual trigger. Before a step sends its req
 6. **Refusals.** When the provider refuses the request with `context-limit`, or the agent's own estimate is above `inputBudget`, the agent summarizes the older half of the covered entries instead (the newer half joins the kept tail; a later compaction takes it). When the covered part is a single entry, the agent shortens the longest text of the request in the middle, keeping its beginning and end with a note of how much was omitted, halving it until the request is accepted or the text is short. The beginning of the conversation is never dropped.
 7. Every summary request commits `compaction.attempted` with its usage (and failure, if any); its usage counts toward the session's usage, not its context.
 8. Offload: once the summary is accepted, everything before the cut is written to the session's one conversation file, `sessions/<id>/conversation.md`, before anything refers to it. It records only the flow of the conversation, never summaries: each message, tool result, and notice is one element tagged with its sequence number and time (`<user seq="3" time="…">`, `<assistant …>` with `<reasoning>` and `<tool_call id name>` inside, `<tool_result call_id name status>`, `<notice kind>`), so the model can Read or Grep it and cite a place. Media appear as `<data id uri media_type/>` references and text files with their content. The file only grows: each compaction renders it whole from the journal into a temporary file and renames it into place, so a crash between writing and committing leaves no partial or repeated part, and a session compacted before this format gets a complete file at its next compaction (its older epochs keep pointing at their per-compaction files, and renderer version 1 keeps their reminder text).
-9. Commit atomically: `epoch.started { reason: 'compaction', context: { summary, from, transcript, input? } }` with a fresh prefix (current profile, tools, and card revision) and `compaction.finished { succeeded }`. Compaction is the only epoch change allowed during a run.
+9. Commit atomically: `epoch.started { reason: 'compaction', context: { summary, from, transcript, input? } }` with a fresh prefix (current profile, tools, and card revision) and `compaction.finished { succeeded }`. During a run, only compaction and source MCP tool refresh at a reasoning boundary may replace the epoch.
 
 Requests of a compacted epoch start with a reminder carrying the summary and the conversation file's `file:` URI with its format (the model can `Read` or `Grep` it), then the kept user message when it is older than `from`, then history from `from` on. A model switch carries the context forward. On failure or cancellation, `compaction.finished { failed }` is committed and the old epoch stays; the step then proceeds or fails on the budget. Transient failures of a summary request are not retried. Original records are never deleted: the UI keeps older history readable and shows a line where the summarized part ends, which expands to the summary with a heading per section.
 
@@ -226,6 +226,8 @@ interface ToolOutput {
 ```
 
 The tool set is frozen into the epoch (`tools`: name, description, input schema, in registration order) together with `nativeTools`, the ids the provider executes inside its chat call, and `providerTools`, the ids whose declared local tool Core runs through the adapter as separate provider calls ([design.md §7.6](design.md#76-native-and-local-tools)). Sessions created before tools existed have empty sets. A tool whose plugin is disabled later stays declared until compaction but fails its calls immediately (§7.2).
+
+Source MCP readiness is an explicit exception to waiting for compaction: before a prepared step starts its first model attempt, the host compares the source server's ready, template-filtered declarations with the frozen subset. A change commits `epoch.started { reason: 'tools-changed' }`, replacing only that subset and preserving the system prompt, card, renderer, native/provider tools, compaction context, and history. Core rejects refresh during an attempt, compaction, unanswered tool calls, or interruption. Retry attempts keep their original epoch. Disconnection alone does not refresh; reconnecting with the same definitions does not create another epoch. Ordinary chats and sources without MCP retain the existing refresh policy. This costs a new prompt-cache prefix only when the source's available declarations actually change.
 
 ### 9.2 Calls and results
 

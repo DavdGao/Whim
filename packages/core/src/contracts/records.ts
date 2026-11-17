@@ -301,7 +301,7 @@ export const bodySchema = z.discriminatedUnion('type', [
     z.strictObject({
         type: z.literal('epoch.started'),
         epochId: idSchema,
-        reason: z.enum(['initial', 'model-switch', 'compaction']),
+        reason: z.enum(['initial', 'model-switch', 'compaction', 'tools-changed']),
         system: z.string(),
         card: frozenChatCardSchema,
         renderer: z.number().int().positive(),
