@@ -303,7 +303,7 @@ function ActivityLine({
             <TraceIcon>
                 <Icon />
             </TraceIcon>
-            <TraceTitle className="shrink-0">{title}</TraceTitle>
+            <TraceTitle title={title}>{title}</TraceTitle>
             {detail && (
                 <TraceDescription className="min-w-0 shrink truncate">{detail}</TraceDescription>
             )}
