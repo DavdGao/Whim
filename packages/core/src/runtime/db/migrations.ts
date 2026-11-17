@@ -77,4 +77,17 @@ export const migrations: readonly string[] = [
         created_at TEXT NOT NULL
     );
     `,
+    `
+    UPDATE sessions SET needs_recovery = 1 WHERE id IN (
+        SELECT started.session_id FROM journal AS started
+        WHERE started.type = 'compaction.started'
+        AND NOT EXISTS (
+            SELECT 1 FROM journal AS finished
+            WHERE finished.session_id = started.session_id
+            AND finished.type = 'compaction.finished'
+            AND json_extract(finished.body, '$.body.compactionId') =
+                json_extract(started.body, '$.body.compactionId')
+        )
+    );
+    `,
 ];

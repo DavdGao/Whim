@@ -456,6 +456,7 @@ export function decide(view: SessionView | null, command: Command): Body[] {
             if (run?.attempt) throw new StoreError('conflict', 'An attempt is still open.');
             return [
                 ...closeCalls(view),
+                ...closeCompactions(view),
                 { type: 'run.ended', runId: command.runId, result: command.result },
             ];
         case 'request-permission': {
@@ -581,8 +582,13 @@ export function decide(view: SessionView | null, command: Command): Body[] {
             ]);
             if (!run) {
                 const last = view.lastRun;
-                if (!last || !needsRestartNotice(view)) return lost;
-                return [...lost, restartedNotice(last.runId, command.observedAt)];
+                return [
+                    ...lost,
+                    ...closeCompactions(view),
+                    ...(last && needsRestartNotice(view)
+                        ? [restartedNotice(last.runId, command.observedAt)]
+                        : []),
+                ];
             }
             const facts: Body[] = [...lost];
             if (run.attempt)
@@ -598,6 +604,7 @@ export function decide(view: SessionView | null, command: Command): Body[] {
             const reason = run.interrupt ?? command.reason;
             facts.push(
                 ...closeCalls(view),
+                ...closeCompactions(view),
                 {
                     type: 'run.ended',
                     runId: run.runId,
@@ -670,6 +677,30 @@ function closeCalls(view: SessionView): Body[] {
         };
         return { type: 'tool.finished', result };
     });
+}
+
+/**
+ * Close summaries whose owning run ended, preserving the previous epoch and recorded usage.
+ * @param view The session view.
+ * @returns Terminal facts that also fence late summary results.
+ */
+function closeCompactions(view: SessionView): Body[] {
+    return view.compactions
+        .filter(item => item.state === 'running')
+        .map(item => ({
+            type: 'compaction.finished',
+            compactionId: item.compactionId,
+            outcome: 'failed',
+            failure: {
+                category: 'cancelled',
+                retry: { kind: 'never' },
+                outcome: 'unknown',
+                detail: {
+                    provider: 'whim',
+                    message: 'Compaction was interrupted before it completed.',
+                },
+            },
+        }));
 }
 
 /**

@@ -115,7 +115,9 @@ Trade-off: if Backend crashes mid-stream, the partial text of the running attemp
 
 **Shutdown.** Uses `reason: 'shutdown'`. No user-interrupt notice is written; on the next start a `restarted` notice tells the agent its previous response was cut off by an application restart. Whether an interrupted run resumes automatically after restart is a user setting (`agent.resumeAfterRestart`, default off). When off, the session resumes when the user sends input or presses Continue; when on, the scheduler starts a run that sees the `restarted` notice.
 
-**Crash.** On start, Core finds runs without `run.ended`, closes their open attempts as `interrupted` with no output and unknown usage, and proceeds as for shutdown.
+**Crash.** On start, Core finds runs without `run.ended`, closes their open attempts as `interrupted` with no output and unknown usage, and proceeds as for shutdown. Recovery also closes unfinished compactions as failed, preserving their recorded usage and the previous epoch. Run termination closes any remaining compaction in the same transaction. Late summary attempts or completion commands are rejected once the compaction is closed.
+
+Sessions with unfinished compactions require recovery even when their run has already ended. A projection migration marks these sessions from existing journal records, including sessions stranded by older recovery code; recovery appends terminal records without rewriting history. Acceptance covers killing a real process after `compaction.started`, recovering before another compaction, repeated recovery without duplicate terminal records, and upgrading a previously stranded session whose recovery flag was cleared.
 
 ## 6. Errors and retries
 
