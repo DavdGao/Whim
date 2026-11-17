@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { once } from 'node:events';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -94,6 +96,328 @@ async function send(store: Store, sessionId: string, text: string): Promise<stri
 }
 
 describe('Store', () => {
+    it('recovers compaction after killing its process and rejects late results', async t => {
+        const path = join(dir, 'compaction-crash.sqlite');
+        const fixture = join(dir, 'compaction-crash.mjs');
+        await writeFile(
+            fixture,
+            `
+            import { Store } from ${JSON.stringify(new URL('./store.js', import.meta.url).href)};
+            const store = await Store.open(${JSON.stringify(path)});
+            await store.execute({
+                type: 'create', sessionId: 'session', operationId: 'create',
+                title: 'Chat', credentialId: 'cred',
+                epoch: { epochId: 'epoch', system: 'system', card: ${JSON.stringify(card)},
+                    renderer: 1, tools: [], nativeTools: [] }
+            });
+            await store.execute({ type: 'start-run', sessionId: 'session', operationId: 'run',
+                runId: 'run', trigger: 'user' });
+            await store.execute({ type: 'start-compaction', sessionId: 'session', operationId: 'compact',
+                runId: 'run', compactionId: 'compact' });
+            await store.execute({ type: 'record-compaction-attempt', sessionId: 'session', operationId: 'attempt',
+                compactionId: 'compact', usage: { inputTokens: 10, outputTokens: 2 } });
+            process.send('ready');
+        `
+        );
+        const child = spawn(process.execPath, [fixture], {
+            stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+        });
+        t.after(() => {
+            child.kill('SIGKILL');
+        });
+        assert.deepEqual(await once(child, 'message', { signal: AbortSignal.timeout(10_000) }), [
+            'ready',
+            undefined,
+        ]);
+        const exited = once(child, 'exit');
+        child.kill('SIGKILL');
+        assert.deepEqual(await exited, [null, 'SIGKILL']);
+
+        const store = await Store.open(path);
+        t.after(() => store.close());
+        const before = await store.view('session');
+        assert.deepEqual(
+            (await store.recoverySessions()).map(item => item.sessionId),
+            ['session']
+        );
+        const records = await store.execute(
+            cmd('session', {
+                type: 'recover',
+                reason: 'crash',
+                observedAt: '2026-11-17T09:12:22.000Z',
+            })
+        );
+        assert.deepEqual(
+            records
+                .filter(record => record.body.type === 'compaction.finished')
+                .map(record => record.body),
+            [
+                {
+                    type: 'compaction.finished',
+                    compactionId: 'compact',
+                    outcome: 'failed',
+                    failure: {
+                        category: 'cancelled',
+                        retry: { kind: 'never' },
+                        outcome: 'unknown',
+                        detail: {
+                            provider: 'whim',
+                            message: 'Compaction was interrupted before it completed.',
+                        },
+                    },
+                },
+            ]
+        );
+        const view = await store.view('session');
+        assert.deepEqual(view.compactions, [{ seq: 4, compactionId: 'compact', state: 'failed' }]);
+        assert.deepEqual(view.epoch, before.epoch);
+        assert.deepEqual(view.usage, { inputTokens: 10, outputTokens: 2 });
+        assert.deepEqual(view.lastRun?.result, { outcome: 'interrupted', reason: 'crash' });
+        assert.deepEqual(await store.recoverySessions(), []);
+        assert.deepEqual(
+            await store.execute(
+                cmd('session', {
+                    type: 'recover',
+                    reason: 'crash',
+                    observedAt: '2026-11-17T09:12:23.000Z',
+                })
+            ),
+            []
+        );
+        await assert.rejects(
+            store.execute(
+                cmd('session', {
+                    type: 'record-compaction-attempt',
+                    compactionId: 'compact',
+                    usage: { inputTokens: 999 },
+                })
+            ),
+            { code: 'conflict' }
+        );
+        await assert.rejects(
+            store.execute(
+                cmd('session', {
+                    type: 'finish-compaction',
+                    compactionId: 'compact',
+                    result: {
+                        status: 'succeeded',
+                        epoch: {
+                            epochId: 'late',
+                            system: 'late summary',
+                            context: {
+                                summary: 'late',
+                                from: 3,
+                                transcript: 'file:///tmp/history.md',
+                            },
+                            card,
+                            renderer: 1,
+                            tools: [],
+                            nativeTools: [],
+                        },
+                    },
+                })
+            ),
+            { code: 'conflict' }
+        );
+        await store.execute(
+            cmd('session', { type: 'start-run', runId: 'next', trigger: 'continue' })
+        );
+        await store.execute(
+            cmd('session', { type: 'start-compaction', runId: 'next', compactionId: 'next' })
+        );
+        assert.deepEqual((await store.view('session')).compactions, [
+            { seq: 4, compactionId: 'compact', state: 'failed' },
+            { seq: 10, compactionId: 'next', state: 'running' },
+        ]);
+    });
+
+    it('closes unfinished compaction atomically when its run ends', async t => {
+        const store = await Store.open(join(dir, 'compaction-end.sqlite'));
+        t.after(() => store.close());
+        const sessionId = await createSession(store);
+        const runId = 'run';
+        await store.execute(cmd(sessionId, { type: 'start-run', runId, trigger: 'user' }));
+        await store.execute(
+            cmd(sessionId, { type: 'start-compaction', runId, compactionId: 'compact' })
+        );
+        const ended = await store.execute(
+            cmd(sessionId, {
+                type: 'end-run',
+                runId,
+                result: { outcome: 'interrupted', reason: 'user' },
+            })
+        );
+        assert.deepEqual(
+            ended.map(record => record.body),
+            [
+                {
+                    type: 'compaction.finished',
+                    compactionId: 'compact',
+                    outcome: 'failed',
+                    failure: {
+                        category: 'cancelled',
+                        retry: { kind: 'never' },
+                        outcome: 'unknown',
+                        detail: {
+                            provider: 'whim',
+                            message: 'Compaction was interrupted before it completed.',
+                        },
+                    },
+                },
+                { type: 'run.ended', runId, result: { outcome: 'interrupted', reason: 'user' } },
+            ]
+        );
+        assert.equal(ended[0].operationId, ended[1].operationId);
+        assert.deepEqual(await store.recoverySessions(), []);
+    });
+
+    it('upgrades and recovers legacy stranded compaction without rewriting history', async t => {
+        const path = join(dir, 'compaction-legacy.sqlite');
+        const store = await Store.open(path);
+        t.after(() => store.close());
+        const sessionId = await createSession(store);
+        await createSession(store);
+        await store.execute(cmd(sessionId, { type: 'start-run', runId: 'run', trigger: 'user' }));
+        await store.execute(
+            cmd(sessionId, { type: 'start-compaction', runId: 'run', compactionId: 'finished' })
+        );
+        await store.execute(
+            cmd(sessionId, {
+                type: 'finish-compaction',
+                compactionId: 'finished',
+                result: {
+                    status: 'succeeded',
+                    epoch: {
+                        epochId: 'summary',
+                        system: 'summarized',
+                        context: {
+                            summary: 'saved summary',
+                            from: 3,
+                            transcript: 'file:///tmp/history.md',
+                        },
+                        card,
+                        renderer: 1,
+                        tools: [],
+                        nativeTools: [],
+                    },
+                },
+            })
+        );
+        await store.execute(
+            cmd(sessionId, { type: 'start-compaction', runId: 'run', compactionId: 'stranded' })
+        );
+        const before = await store.view(sessionId);
+        await store.close();
+
+        // Older recovery ended the run but forgot the compaction, then cleared this projection.
+        const raw = new DatabaseSync(path);
+        const ended = {
+            id: 'legacy-ended',
+            sessionId,
+            seq: before.head + 1,
+            version: 1,
+            createdAt: '2026-11-17T09:12:22.000Z',
+            operationId: 'legacy-recovery',
+            body: {
+                type: 'run.ended',
+                runId: 'run',
+                result: {
+                    outcome: 'failed',
+                    failure: {
+                        category: 'internal',
+                        retry: { kind: 'never' },
+                        outcome: 'unknown',
+                        detail: { provider: 'whim', message: 'A compaction is already running.' },
+                    },
+                },
+            },
+        };
+        raw.prepare('INSERT INTO journal VALUES (?, ?, ?, ?, ?, ?)').run(
+            sessionId,
+            ended.seq,
+            ended.id,
+            ended.body.type,
+            1,
+            JSON.stringify(ended)
+        );
+        raw.prepare(
+            'UPDATE sessions SET head = ?, running = 0, needs_recovery = 0 WHERE id = ?'
+        ).run(ended.seq, sessionId);
+        raw.exec('PRAGMA user_version = 3');
+        const original = raw
+            .prepare('SELECT body FROM journal WHERE session_id = ? ORDER BY seq')
+            .all(sessionId);
+        raw.close();
+
+        const reopened = await Store.open(path);
+        t.after(() => reopened.close());
+        assert.deepEqual(
+            (await reopened.recoverySessions()).map(item => item.sessionId),
+            [sessionId]
+        );
+        const backups = (await readdir(dir)).filter(
+            name => name.startsWith('compaction-legacy.sqlite.v3-') && name.endsWith('.bak')
+        );
+        assert.equal(backups.length, 1);
+        const backup = new DatabaseSync(join(dir, backups[0]), { readOnly: true });
+        assert.deepEqual(
+            backup
+                .prepare('SELECT body FROM journal WHERE session_id = ? ORDER BY seq')
+                .all(sessionId),
+            original
+        );
+        backup.close();
+        const recovered = await reopened.execute(
+            cmd(sessionId, {
+                type: 'recover',
+                reason: 'crash',
+                observedAt: '2026-11-17T10:00:00.000Z',
+            })
+        );
+        assert.deepEqual(
+            recovered.map(record => record.body),
+            [
+                {
+                    type: 'compaction.finished',
+                    compactionId: 'stranded',
+                    outcome: 'failed',
+                    failure: {
+                        category: 'cancelled',
+                        retry: { kind: 'never' },
+                        outcome: 'unknown',
+                        detail: {
+                            provider: 'whim',
+                            message: 'Compaction was interrupted before it completed.',
+                        },
+                    },
+                },
+            ]
+        );
+        const view = await reopened.view(sessionId);
+        assert.deepEqual(view.compactions, [
+            {
+                seq: 4,
+                compactionId: 'finished',
+                state: 'succeeded',
+                summary: 'saved summary',
+                from: 3,
+            },
+            { seq: 7, compactionId: 'stranded', state: 'failed' },
+        ]);
+        assert.deepEqual(view.epoch, before.epoch);
+        assert.deepEqual(await reopened.recoverySessions(), []);
+        assert.deepEqual(
+            (await reopened.read(sessionId)).slice(0, ended.seq).map(record => ({ ...record })),
+            original.map(row => JSON.parse(String(row.body)))
+        );
+        await reopened.execute(
+            cmd(sessionId, { type: 'start-run', runId: 'next', trigger: 'continue' })
+        );
+        await reopened.execute(
+            cmd(sessionId, { type: 'start-compaction', runId: 'next', compactionId: 'next' })
+        );
+    });
+
     it('persists refreshed tools without changing context and fences unsafe refreshes', async () => {
         const path = join(dir, 'refresh-tools.sqlite');
         let store = await Store.open(path);

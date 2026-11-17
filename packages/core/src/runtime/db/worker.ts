@@ -274,7 +274,12 @@ function executeInTransaction(command: Command): AgentRecord[] {
             after.updatedAt,
             after.head,
             after.run ? 1 : 0,
-            after.run || after.jobs.length > 0 || needsRestartNotice(after) ? 1 : 0
+            after.run ||
+                after.jobs.length > 0 ||
+                after.compactions.some(item => item.state === 'running') ||
+                needsRestartNotice(after)
+                ? 1
+                : 0
         );
         views.set(after.sessionId, after);
     }
