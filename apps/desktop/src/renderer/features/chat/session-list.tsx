@@ -23,17 +23,19 @@ import {
     PencilIcon,
     PinIcon,
     PinOffIcon,
+    RssIcon,
     Trash2Icon,
     XIcon,
 } from 'lucide-react';
 import { useState } from 'react';
 
 import { ActionButton } from '../../components/action-button';
+import { EntityIcon } from '../../components/entity-icon';
 import { call } from '../../lib/client';
 import { useT } from '../../lib/i18n';
 import { useAction } from '../../lib/use-action';
 
-import type { SessionInfo } from '../../../shared/ipc';
+import type { PluginInfo, SessionInfo, SourceInfo } from '../../../shared/ipc';
 import type { MessageKey } from '../../lib/messages';
 
 type Group = { label: MessageKey; sessions: SessionInfo[] };
@@ -260,9 +262,11 @@ function SessionRow({
 }
 
 /**
- * The chat list, grouped into Pinned, Today, and Earlier.
+ * Ordinary chats grouped by recency, followed by source agent conversations.
  * @param props List props.
  * @param props.sessions All chats.
+ * @param props.sources Source instances with their own conversations.
+ * @param props.plugins Plugin icons for sources.
  * @param props.selected The open chat.
  * @param props.onSelect Open a chat.
  * @param props.onDeleted Called after a chat is deleted.
@@ -270,11 +274,15 @@ function SessionRow({
  */
 export function SessionList({
     sessions,
+    sources,
+    plugins,
     selected,
     onSelect,
     onDeleted,
 }: {
     sessions: readonly SessionInfo[];
+    sources: readonly SourceInfo[];
+    plugins: readonly PluginInfo[];
     selected: string | undefined;
     onSelect: (sessionId: string) => void;
     onDeleted: (sessionId: string) => void;
@@ -282,7 +290,7 @@ export function SessionList({
     const { t } = useT();
     const [renaming, setRenaming] = useState<SessionInfo | undefined>();
     const [deleting, setDeleting] = useState<SessionInfo | undefined>();
-    if (sessions.length === 0)
+    if (sessions.length === 0 && sources.length === 0)
         return <p className="text-muted-foreground px-3 py-1 text-xs">{t('chat.noSessions')}</p>;
     return (
         <>
@@ -303,6 +311,35 @@ export function SessionList({
                     ))}
                 </section>
             ))}
+            {sources.length > 0 && (
+                <section className="flex flex-col gap-0.5" aria-labelledby="source-conversations">
+                    <h3
+                        id="source-conversations"
+                        className="text-muted-foreground px-3 pt-3 pb-1 text-xs"
+                    >
+                        {t('chat.group.sources')}
+                    </h3>
+                    {sources.map(source => (
+                        <Button
+                            key={source.id}
+                            variant="ghost"
+                            className={cn(
+                                'h-auto min-h-9 w-full justify-start gap-2 rounded-xl px-3 py-2 font-normal',
+                                selected === source.sessionId && 'bg-accent'
+                            )}
+                            aria-current={selected === source.sessionId ? 'page' : undefined}
+                            title={source.name}
+                            onClick={() => onSelect(source.sessionId)}
+                        >
+                            <EntityIcon
+                                src={plugins.find(plugin => plugin.id === source.pluginId)?.icon}
+                                fallback={RssIcon}
+                            />
+                            <span className="min-w-0 truncate">{source.name}</span>
+                        </Button>
+                    ))}
+                </section>
+            )}
             {renaming && <RenameDialog session={renaming} onClose={() => setRenaming(undefined)} />}
             {deleting && (
                 <DeleteDialog

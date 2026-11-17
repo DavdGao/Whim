@@ -131,6 +131,8 @@ export function ChatPage({ state, params, navigate }: PageProps) {
                     <nav className="flex flex-col px-2 pb-3" aria-label={t('chat.sessions')}>
                         <SessionList
                             sessions={state.sessions}
+                            sources={state.sources}
+                            plugins={state.plugins}
                             selected={selected}
                             onSelect={setSelected}
                             onDeleted={sessionId =>

@@ -554,6 +554,8 @@ General settings use one 14rem control width for all dropdowns and the combined 
 
 Chat list timestamps use a monospace font; dates use a two-digit day with a leading zero for days 1–9. Tool activity titles, including WebFetch URLs, shrink and truncate within the message width, with the full title available on hover. Acceptance covers single- and double-digit days in English and Simplified Chinese, and long URLs in running, completed, and failed tool calls at narrow widths, including expanded details.
 
+The Chat sidebar also has a Sources group after the ordinary chat groups. Each entry uses the source instance's name and plugin icon and opens its existing session, including when opened from Feed. Sources are not duplicated in Pinned, Today or Earlier and are managed through Feed rather than ordinary chat rename/pin/delete menus. Acceptance covers source-only lists, mixed lists, multiple instances of one platform, selected state, keyboard access, English/Chinese group labels, and removal when a source is deleted.
+
 ### 11.2 Data flow
 
 Chat retains the AI Elements Conversation's bottom-following behavior. Its scroll viewport uses shadcn's `scroll-fade-y` utility: both edges fade when more content exists in that direction, and short transcripts have no fade. Running sessions display the existing Spinner with a localized accessible label instead of a pulsing dot, respecting reduced motion. Acceptance covers the running/idle indicator, English and Simplified Chinese labels, and fade behavior at the top, middle, bottom, and without overflow. Sending a message does not introduce top anchoring.
