@@ -471,12 +471,7 @@ class Backend {
         for (const { body } of records) {
             if (body.type === 'run.ended' && body.result.outcome !== 'interrupted')
                 kinds.push(body.result.outcome);
-            else if (
-                (body.type === 'permission.requested' && !body.reviewer) ||
-                (body.type === 'permission.reviewed' &&
-                    (body.outcome === 'ask' || body.failure !== undefined))
-            )
-                kinds.push('waiting');
+            else if (body.type === 'permission.requested' && !body.reviewer) kinds.push('waiting');
         }
         const kind = kinds.at(-1);
         // A source's runs answer agents, not the user; only its sign-in needs them.
@@ -1016,13 +1011,19 @@ class Backend {
     }
 
     /**
-     * The reviewer that answers asks first, read at every ask so a settings change applies to the
-     * next one. A reviewer whose model is gone fails its reviews, which leaves asks to the user.
+     * Read settings for each review. An unavailable reviewer blocks the tool call.
      * @returns The reviewer in auto mode, otherwise undefined.
      */
     async #reviewer(): Promise<Reviewer | undefined> {
         const settings = await this.#permissions();
-        if (settings.mode !== 'auto' || !settings.reviewer) return undefined;
+        if (settings.mode !== 'auto') return undefined;
+        if (!settings.reviewer)
+            throw new ApplicationError({
+                category: 'model-unavailable',
+                retry: { kind: 'after-change', change: 'configuration' },
+                outcome: 'rejected',
+                detail: { provider: 'whim', message: 'Choose a model for automatic tool review.' },
+            });
         const { cardId, credentialId } = settings.reviewer;
         const card = this.catalog.card(cardId);
         switch (card?.kind) {

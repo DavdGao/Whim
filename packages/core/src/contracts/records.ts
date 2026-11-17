@@ -233,6 +233,7 @@ export const accessSchema = z.discriminatedUnion('kind', [
 export type Access = z.infer<typeof accessSchema>;
 
 /** What an automatic review concluded. */
+/** Historical `ask` outcomes remain readable; new review commands only accept allow or deny. */
 export const reviewOutcomeSchema = z.enum(['allow', 'deny', 'ask']);
 export type ReviewOutcome = z.infer<typeof reviewOutcomeSchema>;
 
@@ -387,12 +388,12 @@ export const bodySchema = z.discriminatedUnion('type', [
         callId: idSchema,
         name: z.string(),
         access: z.array(accessSchema),
-        /** Present when the reviewer answers before the user (auto mode). */
+        /** Present when the reviewer decides (auto mode). */
         reviewer: z.strictObject({ cardId: idSchema }).optional(),
     }),
     /**
-     * The reviewer's answer. `allow` and `deny` settle the call for this call only; `ask`, and a
-     * failed review, leave it waiting for the user.
+     * The reviewer's answer. New reviews settle the call with allow or deny; failures deny.
+     * Historical ask records retain their original manual-wait state during replay.
      */
     z.strictObject({
         type: z.literal('permission.reviewed'),

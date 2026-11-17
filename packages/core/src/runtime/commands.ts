@@ -175,7 +175,7 @@ export const commandSchema = z.discriminatedUnion('type', [
         ...base,
         type: z.literal('review-permission'),
         callId: idSchema,
-        outcome: reviewOutcomeSchema,
+        outcome: reviewOutcomeSchema.exclude(['ask']),
         reason: z.string().max(2000),
         usage: usageSchema,
         failure: failureSchema.optional(),
@@ -493,7 +493,12 @@ export function decide(view: SessionView | null, command: Command): Body[] {
         }
         case 'decide-permission': {
             const call = view.calls.find(item => item.callId === command.callId);
-            if (!run || call?.state !== 'asking' || !call.access)
+            if (
+                !run ||
+                call?.state !== 'asking' ||
+                !call.access ||
+                (call.review && !(call.review.state === 'done' && call.review.outcome === 'ask'))
+            )
                 throw new StoreError('conflict', 'The tool call is no longer waiting for you.');
             return [
                 {

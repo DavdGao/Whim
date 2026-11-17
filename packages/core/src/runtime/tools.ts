@@ -424,16 +424,20 @@ export class ToolRuntime {
         // TODO(rules): persistent allow/deny/ask rules join `evaluate` as the step before asking,
         // with a Bash parser that matches each simple command of a compound one (agent.md §10).
         if (verdict === 'ask') {
-            const answer = new Promise<Decision>(resolve =>
-                this.#waiters.set(call.callId, resolve)
-            );
             let reviewer: Reviewer | undefined;
-            let unavailable: Failure | undefined;
             try {
                 reviewer = await this.reviewer();
             } catch (error) {
-                unavailable = failureOf(error);
+                if (!signal.aborted)
+                    await finish(
+                        'error',
+                        `Automatic review is unavailable: ${describeError(error)}`
+                    );
+                return;
             }
+            const answer = new Promise<Decision>(resolve =>
+                this.#waiters.set(call.callId, resolve)
+            );
             await this.#exec(sessionId, {
                 type: 'request-permission',
                 runId,
@@ -441,7 +445,6 @@ export class ToolRuntime {
                 access: [...access],
                 ...(reviewer ? { reviewer: { cardId: reviewer.cardId } } : {}),
             });
-            if (unavailable) console.error('Automatic review is unavailable:', unavailable);
             if (reviewer) {
                 const review = await this.#review(
                     sessionId,
@@ -458,7 +461,7 @@ export class ToolRuntime {
                     this.#waiters.delete(call.callId);
                     await finish(
                         'denied',
-                        `The automatic reviewer denied this tool call: ${review.reason} Do not retry the same call; choose another way or ask the user.`
+                        `The automatic reviewer denied this tool call: ${review.reason} Do not retry the same call; choose another way.`
                     );
                     return;
                 }
@@ -527,8 +530,7 @@ export class ToolRuntime {
     }
 
     /**
-     * Run the reviewer and commit its answer. A failure is committed as `ask` with the failure,
-     * leaving the call to the user.
+     * Run the reviewer and commit its answer. A failure denies the call without manual fallback.
      * @param sessionId The session.
      * @param callId The call.
      * @param reviewer The reviewer.
@@ -563,7 +565,7 @@ export class ToolRuntime {
                   }
                 : failureOf(error);
             review = {
-                outcome: 'ask',
+                outcome: 'deny',
                 reason: boundText(failure.detail?.message ?? failure.category) ?? '',
                 usage: {},
             };

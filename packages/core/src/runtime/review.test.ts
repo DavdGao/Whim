@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { ApplicationError } from '../contracts/failure.js';
+import { bodySchema } from '../contracts/records.js';
 
+import { commandSchema } from './commands.js';
 import { ChatReviewer, DecisionReviewer } from './review.js';
 
 import type { ReviewRequest } from './review.js';
@@ -60,10 +62,29 @@ describe('ChatReviewer', () => {
             usage: { inputTokens: 300, outputTokens: 20 },
         });
         assert.equal(requests[0]?.thinking, 'off');
-        assert.deepEqual(
-            requests[0]?.tools.map(tool => tool.name),
-            ['decide']
-        );
+        assert.deepEqual(requests[0]?.tools, [
+            {
+                name: 'decide',
+                description: 'Record your decision about the tool call.',
+                inputSchema: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['decision', 'reason'],
+                    properties: {
+                        decision: {
+                            type: 'string',
+                            enum: ['allow', 'deny'],
+                            description:
+                                'Whether to permit or reject the operation under the safety policy.',
+                        },
+                        reason: {
+                            type: 'string',
+                            description: 'One sentence for the user explaining the decision.',
+                        },
+                    },
+                },
+            },
+        ]);
         assert.deepEqual(requests[0]?.messages, [
             {
                 role: 'user',
@@ -100,13 +121,13 @@ describe('ChatReviewer', () => {
         );
     });
 
-    it('rejects arguments outside the schema', async () => {
+    it('rejects ask instead of handing the call to the user', async () => {
         const { session } = chat([
             {
                 type: 'tool-call',
                 callId: 'c',
                 name: 'decide',
-                arguments: '{"decision":"maybe","reason":"?"}',
+                arguments: '{"decision":"ask","reason":"Please decide."}',
             },
             { type: 'completed', usage: {} },
         ]);
@@ -137,14 +158,14 @@ function decision(result: DecisionResult) {
 }
 
 describe('DecisionReviewer', () => {
-    it('takes a confident choice and asks one question with the three options', async () => {
+    it('takes a choice and offers only allow or deny', async () => {
         const { open, requests } = decision({
             answers: {
                 verdict: {
                     type: 'choice',
                     choice: 'deny',
                     confidence: 0.92,
-                    probabilities: { allow: 0.03, ask: 0.05, deny: 0.92 },
+                    probabilities: { allow: 0.08, deny: 0.92 },
                 },
             },
             usage: { inputTokens: 250 },
@@ -159,17 +180,17 @@ describe('DecisionReviewer', () => {
             usage: { inputTokens: 250 },
         });
         const question = requests[0]?.questions.verdict;
-        assert.deepEqual(Object.keys(question?.options ?? {}), ['allow', 'ask', 'deny']);
+        assert.deepEqual(Object.keys(question?.options ?? {}), ['allow', 'deny']);
     });
 
-    it('leaves an unconfident choice to the user', async () => {
+    it('honors a low-confidence allow without asking the user', async () => {
         const { open } = decision({
             answers: {
                 verdict: {
                     type: 'choice',
                     choice: 'allow',
                     confidence: 0.6,
-                    probabilities: { allow: 0.6, ask: 0.3, deny: 0.1 },
+                    probabilities: { allow: 0.6, deny: 0.4 },
                 },
             },
             usage: {},
@@ -179,9 +200,54 @@ describe('DecisionReviewer', () => {
             new AbortController().signal
         );
         assert.deepEqual(review, {
-            outcome: 'ask',
-            reason: 'The decision model leaned toward allow with only 60% confidence.',
+            outcome: 'allow',
+            reason: 'The decision model chose allow with 60% confidence.',
             usage: {},
         });
     });
+
+    it('rejects ask even if the provider returns it with high confidence', async () => {
+        const { open } = decision({
+            answers: {
+                verdict: {
+                    type: 'choice',
+                    choice: 'ask',
+                    confidence: 1,
+                    probabilities: { ask: 1 },
+                },
+            },
+            usage: {},
+        });
+        await assert.rejects(
+            new DecisionReviewer('decision/card', open).review(
+                request,
+                new AbortController().signal
+            ),
+            /did not choose one of the options/
+        );
+    });
+});
+
+it('keeps historical ask records readable but rejects new ask commands', () => {
+    const body = {
+        type: 'permission.reviewed',
+        runId: 'run',
+        callId: 'call',
+        outcome: 'ask',
+        reason: 'Legacy review',
+        usage: {},
+    };
+    assert.deepEqual(bodySchema.parse(body), body);
+    assert.equal(
+        commandSchema.safeParse({
+            type: 'review-permission',
+            sessionId: 'session',
+            operationId: 'operation',
+            callId: 'call',
+            outcome: 'ask',
+            reason: 'New review',
+            usage: {},
+        }).success,
+        false
+    );
 });

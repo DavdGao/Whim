@@ -95,7 +95,7 @@ Each PR updates [design.md](design.md) / [agent.md](agent.md) before or together
 - [ ] Build and run the arm64 and x64 apps on a Mac
 - [ ] Signing and notarization in the release pipeline
 - [ ] Live DashScope check of function calling with thinking models (reasoning item replay)
-- [x] Auto mode: a reviewer (Chat with a `decide` tool, or a Decision model) answers asks first, falling back to the user; recorded with usage
+- [x] Auto mode: a reviewer (Chat with a `decide` tool, or a Decision model) decides allow or deny without manual fallback; failures block execution, decisions are recorded with usage
 - [x] Decision provider plugin (TypeSafe System One): `typesafe/jev`, verified against the OpenAPI contract with fixtures and a mock server
 - [ ] Live TypeSafe check once an account is available
 - [ ] Persistent permission rules in Settings, with a Bash parser that matches each simple command of a compound one

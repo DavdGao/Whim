@@ -32,7 +32,7 @@ export const chatSlotSchema = z.strictObject({
 });
 export type ChatSlot = z.infer<typeof chatSlotSchema>;
 
-/** How permission asks are answered: by the user, or by a reviewer model first. */
+/** How permission asks are answered: by the user, or entirely by a reviewer model. */
 export const permissionSettingsSchema = z.strictObject({
     mode: z.enum(['manual', 'auto']),
     /** The `reviewer` slot: a Chat or Decision card and a credential it accepts. */
