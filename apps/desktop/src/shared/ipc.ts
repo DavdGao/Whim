@@ -416,6 +416,8 @@ export interface SourceInfo {
     readonly sessionId: string;
     readonly name: string;
     readonly template: string;
+    /** Whether its session has an active run, just like an ordinary chat. */
+    readonly running: boolean;
     /** The template's plugin, for its names and icon; absent when the plugin is gone. */
     readonly pluginId?: string;
     readonly health: SourceState;

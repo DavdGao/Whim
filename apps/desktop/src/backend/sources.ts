@@ -150,7 +150,7 @@ export class Sources {
      * The sources for the Feed page.
      * @returns Them with their last known health.
      */
-    infos(): SourceInfo[] {
+    infos(): Omit<SourceInfo, 'running'>[] {
         return this.#rows.map(row => {
             const registered = this.template(row);
             const health = this.#health.get(row.id);

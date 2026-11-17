@@ -839,6 +839,10 @@ class Backend {
         const profile = await this.#profile();
         const userName = await this.#userName();
         const pinned = await this.#pinned();
+        const sessions = await this.store.sessions();
+        const running = new Set(
+            sessions.filter(session => session.running).map(session => session.sessionId)
+        );
         return {
             locale: locale.success ? locale.data : 'en',
             notices: this.store.movedAside
@@ -893,7 +897,7 @@ class Backend {
             credentials: await this.credentials.list(),
             agent: { ...profile, isDefault: !savedProfile },
             // Source conversations use their own sidebar group, populated from `sources`.
-            sessions: (await this.store.sessions())
+            sessions: sessions
                 .filter(session => !this.sources.bySession(session.sessionId))
                 .map(session => ({
                     sessionId: session.sessionId,
@@ -911,7 +915,10 @@ class Backend {
             })),
             codingHosts: await this.coding.hosts(),
             mcpServers: await this.mcp.views(),
-            sources: this.sources.infos(),
+            sources: this.sources.infos().map(source => ({
+                ...source,
+                running: running.has(source.sessionId),
+            })),
             sourceTemplates: [...this.host.sources.values()].map(({ pluginId, template }) => ({
                 id: template.id,
                 pluginId,
