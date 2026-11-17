@@ -194,7 +194,7 @@ function SessionRow({
     const today = updated.toDateString() === new Date().toDateString();
     const time = new Intl.DateTimeFormat(
         locale,
-        today ? { hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric' }
+        today ? { hour: '2-digit', minute: '2-digit' } : { month: 'short', day: '2-digit' }
     ).format(updated);
     return (
         <div
@@ -220,7 +220,7 @@ function SessionRow({
                 )}
                 <span
                     className={cn(
-                        'text-muted-foreground shrink-0 text-xs tabular-nums group-hover/session:invisible group-focus-within/session:invisible',
+                        'text-muted-foreground shrink-0 font-mono text-xs tabular-nums group-hover/session:invisible group-focus-within/session:invisible',
                         menuOpen && 'invisible'
                     )}
                 >
