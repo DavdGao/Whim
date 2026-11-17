@@ -202,7 +202,7 @@ function GeneralSettings({ state }: { state: AppState }) {
                                 onChange={event => setUserName(event.currentTarget.value)}
                             />
                             <ActionButton
-                                size="sm"
+                                className="rounded-full"
                                 icon={<SaveIcon />}
                                 disabled={userName.trim() === (state.userName ?? '')}
                                 action={async () => {
