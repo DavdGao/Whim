@@ -57,6 +57,7 @@ export const commandSchema = z.discriminatedUnion('type', [
     z.strictObject({
         ...base,
         type: z.literal('create'),
+        autoTitle: z.literal(true).optional(),
         title: z.string().max(200),
         credentialId: idSchema,
         thinking: thinkingLevelSchema.optional(),
@@ -77,6 +78,32 @@ export const commandSchema = z.discriminatedUnion('type', [
         title: z.string().max(200).optional(),
         credentialId: idSchema.optional(),
         thinking: thinkingLevelSchema.nullable().optional(),
+    }),
+    z.strictObject({
+        ...base,
+        type: z.literal('set-title-placeholder'),
+        title: z.string().max(60),
+    }),
+    z.strictObject({
+        ...base,
+        type: z.literal('start-title'),
+        generationId: idSchema,
+        userSeq: z.number().int().positive(),
+        replySeq: z.number().int().positive(),
+        system: z.string(),
+    }),
+    z.strictObject({
+        ...base,
+        type: z.literal('finish-title'),
+        generationId: idSchema,
+        usage: usageSchema,
+        result: z.discriminatedUnion('status', [
+            z.strictObject({
+                status: z.literal('succeeded'),
+                title: z.string().trim().min(1).max(60),
+            }),
+            z.strictObject({ status: z.literal('failed'), failure: failureSchema }),
+        ]),
     }),
     z.strictObject({ ...base, type: z.literal('switch-model'), epoch: z.strictObject(epochInput) }),
     z.strictObject({
@@ -232,6 +259,7 @@ export function decide(view: SessionView | null, command: Command): Body[] {
         return [
             {
                 type: 'session.created',
+                ...(command.autoTitle ? { autoTitle: true as const } : {}),
                 title: command.title,
                 credentialId: command.credentialId,
                 ...(command.thinking ? { thinking: command.thinking } : {}),
@@ -264,6 +292,74 @@ export function decide(view: SessionView | null, command: Command): Body[] {
             if (command.credentialId !== undefined) body.credentialId = command.credentialId;
             if (command.thinking !== undefined) body.thinking = command.thinking;
             return [body];
+        }
+        case 'set-title-placeholder':
+            return !view.title && view.titleSource !== 'manual' && view.titleSource !== 'generated'
+                ? [
+                      {
+                          type: 'session.updated',
+                          title: command.title,
+                          ...(view.titleSource === 'placeholder'
+                              ? { titleSource: 'placeholder' as const }
+                              : {}),
+                      },
+                  ]
+                : [];
+        case 'start-title': {
+            if (view.titleSource !== 'placeholder' || view.titleGeneration)
+                throw new StoreError('conflict', 'Automatic naming is no longer available.');
+            const user = view.history.find(entry => entry.seq === command.userSeq);
+            const reply = view.history.find(entry => entry.seq === command.replySeq);
+            if (
+                user?.item.type !== 'message' ||
+                user.item.role !== 'user' ||
+                reply?.item.type !== 'message' ||
+                reply.item.role !== 'assistant' ||
+                reply.status !== 'completed' ||
+                reply.seq <= user.seq ||
+                !reply.item.blocks.some(block => block.type === 'text' && block.text.trim()) ||
+                reply.item.blocks.some(block => block.type === 'tool_call')
+            )
+                throw new StoreError(
+                    'invalid',
+                    'Naming requires a user message and a completed reply.'
+                );
+            return [
+                {
+                    type: 'title.started',
+                    generationId: command.generationId,
+                    userSeq: command.userSeq,
+                    replySeq: command.replySeq,
+                    system: command.system,
+                    card: view.epoch.card,
+                    credentialId: view.credentialId,
+                },
+            ];
+        }
+        case 'finish-title': {
+            if (
+                view.titleGeneration?.generationId !== command.generationId ||
+                view.titleGeneration.state !== 'running'
+            )
+                throw new StoreError(
+                    'conflict',
+                    'No running title generation matches this result.'
+                );
+            const bodies: Body[] = [
+                {
+                    type: 'title.finished',
+                    generationId: command.generationId,
+                    usage: command.usage,
+                    result: command.result,
+                },
+            ];
+            if (command.result.status === 'succeeded' && view.titleSource === 'placeholder')
+                bodies.push({
+                    type: 'session.updated',
+                    title: command.result.title,
+                    titleSource: 'generated',
+                });
+            return bodies;
         }
         case 'set-workspace': {
             if (run) throw new StoreError('conflict', 'The folder cannot change during a run.');

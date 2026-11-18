@@ -54,7 +54,7 @@ Each record has `id`, `sessionId`, `seq`, `type`, `version`, `createdAt`, `opera
 | `tool.started`, `tool.finished`                                     | A call starts / gets its result ([§9.2](#92-calls-and-results))                | `callId`, `jobId` / result item                                                                                                        |
 | `job.ended`                                                         | A background job ends or is lost ([§9.4](#94-jobs-and-background-execution))   | `jobId`, status                                                                                                                        |
 
-Usage is recorded on every `attempt.finished`, including failures, with missing fields left unknown. Compaction calls and reviews record their usage too.
+Usage is recorded on every `attempt.finished`, including failures, with missing fields left unknown. Compaction calls, reviews, and automatic title generation record their usage too. `title.started` freezes a single naming attempt (model binding, system instruction, and user/reply sequence references); `title.finished` records its result and usage. These records do not enter history, change the epoch, or affect run state. Only newly enrolled ordinary chats are eligible. A manual `session.updated` title revokes automatic ownership atomically; a late naming result still records usage but cannot replace the title.
 
 ## 4. Messages and notices
 

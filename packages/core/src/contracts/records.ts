@@ -287,6 +287,7 @@ export const runResultSchema = z.discriminatedUnion('outcome', [
 export const bodySchema = z.discriminatedUnion('type', [
     z.strictObject({
         type: z.literal('session.created'),
+        autoTitle: z.literal(true).optional(),
         title: z.string().max(200),
         credentialId: idSchema,
         thinking: thinkingLevelSchema.optional(),
@@ -294,10 +295,32 @@ export const bodySchema = z.discriminatedUnion('type', [
     }),
     z.strictObject({
         type: z.literal('session.updated'),
+        titleSource: z.enum(['placeholder', 'generated']).optional(),
         title: z.string().max(200).optional(),
         credentialId: idSchema.optional(),
         thinking: thinkingLevelSchema.nullable().optional(),
         workspace: z.string().min(1).optional(),
+    }),
+    z.strictObject({
+        type: z.literal('title.started'),
+        generationId: idSchema,
+        userSeq: z.number().int().positive(),
+        replySeq: z.number().int().positive(),
+        system: z.string(),
+        card: frozenChatCardSchema,
+        credentialId: idSchema,
+    }),
+    z.strictObject({
+        type: z.literal('title.finished'),
+        generationId: idSchema,
+        usage: usageSchema,
+        result: z.discriminatedUnion('status', [
+            z.strictObject({
+                status: z.literal('succeeded'),
+                title: z.string().trim().min(1).max(60),
+            }),
+            z.strictObject({ status: z.literal('failed'), failure: failureSchema }),
+        ]),
     }),
     z.strictObject({
         type: z.literal('epoch.started'),

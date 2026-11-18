@@ -161,6 +161,10 @@ Frontend and prompts:
 - [ ] Complete live Xiaohongshu QR login and signed-in restart: the November 17 Electron trial verified installation and startup failure handling, but the local corporate network blocked the required browser CDN with HTTP 403 ([verification](providers/xiaohongshu.md))
 - [x] Source agent prompt (agent.md §14): research loop (expanding and following queries, verifying against primary and independent sources), quality checks against ads and generated filler, increments from its earlier reports, delivery by files
 
+## Automatic chat titles
+
+- [x] Automatically name new ordinary chats after their first complete reply; preserve manual names, account for naming usage, and recover without duplicate dispatch.
+
 ## Later
 
 - [ ] Remote card catalog refresh
