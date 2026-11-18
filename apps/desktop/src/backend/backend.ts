@@ -43,6 +43,7 @@ import { Coding } from './coding.js';
 import { gitStatus } from './git.js';
 import { McpServers } from './mcp.js';
 import { sourcePrompt, Sources } from './sources.js';
+import { Titles } from './titles.js';
 
 import type {
     AgentProfile,
@@ -242,6 +243,7 @@ type RunTrigger = 'user' | 'continue' | 'restart' | 'job' | 'schedule' | 'messag
 /** Owns Core services, the agent, run scheduling, and the Renderer connection. */
 class Backend {
     #renderer: MessagePortMain | undefined;
+    readonly #titles: Titles;
     readonly #runs = new Map<string, { controller: AbortController; done: Promise<void> }>();
     readonly #queue: { sessionId: string; trigger: RunTrigger }[] = [];
     #accepting = true;
@@ -285,6 +287,9 @@ class Backend {
         secrets: SecretCipher
     ) {
         this.#toMain = toMain;
+        this.#titles = new Titles(store, models, error =>
+            console.error('Title generation failed:', describeError(error))
+        );
         this.mcp = new McpServers(store, secrets, version, () => this.#emit({ type: 'state' }));
         this.sources = new Sources(store, host, this.mcp.host, credentials, {
             sessionDir: sessionId => this.tools.sessionDir(sessionId),
@@ -364,6 +369,7 @@ class Backend {
                     [
                         'session.created',
                         'session.updated',
+                        'title.finished',
                         'run.started',
                         'run.ended',
                         'permission.requested',
@@ -375,7 +381,17 @@ class Backend {
                 this.#emit({ type: 'state' });
                 this.reportActivity();
             }
-            if (sessionId) this.#attend(sessionId, records);
+            if (sessionId) {
+                this.#attend(sessionId, records);
+                if (
+                    records.some(
+                        record =>
+                            record.body.type === 'run.ended' &&
+                            record.body.result.outcome === 'completed'
+                    )
+                )
+                    void this.#titles.schedule(sessionId);
+            }
         });
         catalog.onChange(() => this.#emit({ type: 'state' }));
         host.onTopic(topic => this.#emit({ type: 'plugin.topic', ...topic }));
@@ -1172,6 +1188,7 @@ class Backend {
             sessionId,
             operationId: randomUUID(),
             title: '',
+            ...(presetId ? {} : { autoTitle: true as const }),
             credentialId: slot.credentialId,
             ...(slot.thinking ? { thinking: slot.thinking } : {}),
             workspace,
@@ -1301,7 +1318,7 @@ class Backend {
         });
         if (!view.title)
             await this.store.execute({
-                type: 'update',
+                type: 'set-title-placeholder',
                 sessionId,
                 operationId: randomUUID(),
                 title: (text || media.map(block => block.name ?? block.id).join(', '))
@@ -1500,6 +1517,7 @@ class Backend {
 
     /** Recover sessions left running by a crash or cut off by shutdown. */
     async recover(): Promise<void> {
+        await this.#titles.recover();
         const resume = (await this.store.getSetting('agent.resumeAfterRestart')) === true;
         for (const session of await this.store.recoverySessions()) {
             try {
@@ -1522,6 +1540,7 @@ class Backend {
     async shutdown(): Promise<void> {
         this.#accepting = false;
         this.#queue.length = 0;
+        await this.#titles.stop();
         await this.scheduler.stop();
         // Detach every view; tmux sessions keep running past Quit (design.md §11.4).
         this.coding.terminals.closeAll();

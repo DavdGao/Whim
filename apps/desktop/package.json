@@ -8,7 +8,7 @@
     "scripts": {
         "build": "node scripts/build.mjs && vite build",
         "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
-        "test": "esbuild src/backend/sources.test.ts src/renderer/features/feed/source-groups.test.ts --bundle --platform=node --format=esm --packages=external --outdir=dist/tests && node --test \"dist/tests/**/*.test.js\"",
+        "test": "esbuild src/backend/titles.test.ts src/backend/sources.test.ts src/renderer/features/feed/source-groups.test.ts --bundle --platform=node --format=esm --packages=external --outdir=dist/tests && node --test \"dist/tests/**/*.test.js\"",
         "start": "electron .",
         "package": "electron-builder --mac --publish never"
     },

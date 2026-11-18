@@ -106,6 +106,12 @@ export interface SessionView {
     readonly sessionId: string;
     readonly head: number;
     readonly title: string;
+    /** Absent on legacy chats and sessions that did not opt into automatic naming. */
+    readonly titleSource?: 'placeholder' | 'manual' | 'generated';
+    readonly titleGeneration?: {
+        readonly generationId: string;
+        readonly state: 'running' | 'succeeded' | 'failed';
+    };
     readonly credentialId: string;
     readonly thinking?: ThinkingLevel;
     readonly workspace?: string;
@@ -167,6 +173,7 @@ export function foldSession(records: readonly AgentRecord[]): SessionView {
         sessionId: first.sessionId,
         head: 2,
         title: first.body.title,
+        ...(first.body.autoTitle ? { titleSource: 'placeholder' as const } : {}),
         credentialId: first.body.credentialId,
         ...(first.body.thinking ? { thinking: first.body.thinking } : {}),
         ...(first.body.workspace ? { workspace: first.body.workspace } : {}),
@@ -221,13 +228,32 @@ export function applyRecord(view: SessionView, record: AgentRecord): SessionView
             throw new InvalidJournalError('Duplicate session.created.', record.seq);
         case 'session.updated': {
             const next: { -readonly [K in keyof SessionView]: SessionView[K] } = { ...base };
-            if (body.title !== undefined) next.title = body.title;
+            if (body.title !== undefined) {
+                next.title = body.title;
+                next.titleSource = body.titleSource ?? 'manual';
+            }
             if (body.credentialId !== undefined) next.credentialId = body.credentialId;
             if (body.thinking === null) delete next.thinking;
             else if (body.thinking !== undefined) next.thinking = body.thinking;
             if (body.workspace !== undefined) next.workspace = body.workspace;
             return next;
         }
+        case 'title.started':
+            return {
+                ...base,
+                titleGeneration: { generationId: body.generationId, state: 'running' },
+            };
+        case 'title.finished':
+            if (
+                view.titleGeneration?.generationId !== body.generationId ||
+                view.titleGeneration.state !== 'running'
+            )
+                throw new InvalidJournalError('No matching title generation.', record.seq);
+            return {
+                ...base,
+                titleGeneration: { generationId: body.generationId, state: body.result.status },
+                usage: addUsage(view.usage, body.usage),
+            };
         case 'epoch.started':
             // Source tools may refresh between steps without replacing history.
             if (run && body.reason !== 'compaction' && body.reason !== 'tools-changed')
